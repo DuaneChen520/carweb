@@ -3,7 +3,14 @@ import type { AdbScrcpyClient, AdbScrcpyOptionsLatest } from '@yume-chan/adb-scr
 import { AdbScrcpyExitedError } from '@yume-chan/adb-scrcpy';
 import type { WebCodecsVideoDecoder } from '@yume-chan/scrcpy-decoder-webcodecs';
 import type { ScrcpyControlMessageWriter } from '@yume-chan/scrcpy';
+import { ScrcpyNewDisplay, AndroidKeyCode, AndroidKeyEventAction } from '@yume-chan/scrcpy';
 import type { Adb } from '@yume-chan/adb';
+
+export interface DisplayConfig {
+  width: number;
+  height: number;
+  dpi?: number;
+}
 
 export interface ScrcpyState {
   isStarting: boolean;
@@ -11,6 +18,7 @@ export interface ScrcpyState {
   error: string | null;
   videoWidth: number;
   videoHeight: number;
+  isVirtualDisplay: boolean;
 }
 
 export function useScrcpy() {
@@ -20,16 +28,18 @@ export function useScrcpy() {
     error: null,
     videoWidth: 0,
     videoHeight: 0,
+    isVirtualDisplay: false,
   });
 
   const clientRef = useRef<AdbScrcpyClient<AdbScrcpyOptionsLatest<true>> | null>(null);
   const decoderRef = useRef<WebCodecsVideoDecoder | null>(null);
   const controllerRef = useRef<ScrcpyControlMessageWriter | null>(null);
-  const cleanupRef = useRef<(() => void) | null>(null);
+  const cleanupRef = useRef<(() => Promise<void>) | null>(null);
+  const adbRef = useRef<Adb | null>(null);
 
-  const startScrcpy = useCallback(async (adb: Adb, canvas: HTMLCanvasElement) => {
+  const startScrcpy = useCallback(async (adb: Adb, canvas: HTMLCanvasElement, displayConfig?: DisplayConfig, isRetry?: boolean) => {
     try {
-      setState(prev => ({ ...prev, isStarting: true, error: null }));
+      setState(prev => ({ ...prev, isStarting: true, error: null, videoWidth: 0, videoHeight: 0 }));
 
       // 动态导入 Scrcpy 相关库
       const { AdbScrcpyClient, AdbScrcpyOptionsLatest } = await import('@yume-chan/adb-scrcpy');
@@ -41,7 +51,6 @@ export function useScrcpy() {
       // 先检查并推送 scrcpy-server.jar 到设备
       const serverPath = '/data/local/tmp/scrcpy-server.jar';
       try {
-        // 尝试从 public 目录获取服务器文件
         console.log('正在获取 scrcpy-server.jar...');
         const response = await fetch('/scrcpy-server.jar');
         console.log('fetch 结果:', response.ok, 'size:', response.headers.get('content-length'));
@@ -72,6 +81,7 @@ export function useScrcpy() {
       }
 
       // 配置 Scrcpy 选项
+      const useVirtualDisplay = !!displayConfig;
       const options = new AdbScrcpyOptionsLatest({
         video: true,
         videoCodec: 'h264',
@@ -81,7 +91,10 @@ export function useScrcpy() {
         control: true,
         stayAwake: true,
         showTouches: true,
-        displayId: 0,
+        ...(useVirtualDisplay
+          ? { newDisplay: new ScrcpyNewDisplay(displayConfig.width, displayConfig.height, displayConfig.dpi ?? 320) }
+          : { displayId: 0 }
+        ),
       });
 
       // 启动 Scrcpy 客户端
@@ -92,6 +105,7 @@ export function useScrcpy() {
       );
 
       clientRef.current = client;
+      adbRef.current = adb;
 
       // 获取控制器
       const controller = client.controller;
@@ -155,15 +169,23 @@ export function useScrcpy() {
         isRunning: true,
         videoWidth: videoStream.width,
         videoHeight: videoStream.height,
+        isVirtualDisplay: useVirtualDisplay,
       }));
 
       // 清理函数
-      cleanupRef.current = () => {
+      cleanupRef.current = async () => {
         sizeUnsubscribe();
-        reader.releaseLock();
+        await reader.cancel();
       };
 
     } catch (error) {
+      // 虚拟屏创建失败时自动回退到镜像模式
+      if (!isRetry && displayConfig && error instanceof AdbScrcpyExitedError) {
+        console.warn('虚拟屏创建失败，自动切换到镜像模式:', error);
+        setState(prev => ({ ...prev, isStarting: true, error: '虚拟屏创建失败，自动切换到镜像模式...' }));
+        return startScrcpy(adb, canvas, undefined, true);
+      }
+
       let message = '启动屏幕镜像失败';
       if (error instanceof AdbScrcpyExitedError) {
         message = 'scrcpy server exited prematurely';
@@ -203,10 +225,89 @@ export function useScrcpy() {
     }
   }, []);
 
+  const startApp = useCallback(async (appName: string) => {
+    const controller = controllerRef.current;
+    if (!controller) return;
+
+    try {
+      await controller.startApp(appName);
+    } catch (error) {
+      console.error('启动应用错误:', error);
+    }
+  }, []);
+
+  const pressKey = useCallback(async (keyCode: AndroidKeyCode) => {
+    const controller = controllerRef.current;
+    if (!controller) return;
+
+    try {
+      await controller.injectKeyCode({
+        action: AndroidKeyEventAction.Down,
+        keyCode,
+        repeat: 0,
+        metaState: 0,
+      });
+      await controller.injectKeyCode({
+        action: AndroidKeyEventAction.Up,
+        keyCode,
+        repeat: 0,
+        metaState: 0,
+      });
+    } catch (error) {
+      console.error('按键注入错误:', error);
+    }
+  }, []);
+
+  const goHome = useCallback(async () => {
+    await pressKey(AndroidKeyCode.AndroidHome);
+  }, [pressKey]);
+
+  const goBack = useCallback(async () => {
+    const controller = controllerRef.current;
+    if (!controller) return;
+    try {
+      await controller.backOrScreenOn(0);
+    } catch (error) {
+      console.error('返回错误:', error);
+    }
+  }, []);
+
+  const showRecentApps = useCallback(async () => {
+    await pressKey(AndroidKeyCode.AndroidAppSwitch);
+  }, [pressKey]);
+
+  const getAppList = useCallback(async (): Promise<string[]> => {
+    const adb = adbRef.current;
+    if (!adb) return [];
+
+    try {
+      const process = await adb.subprocess.spawn('pm', ['list', 'packages']);
+      const reader = process.stdout.getReader();
+      const decoder = new TextDecoder();
+      const packages: string[] = [];
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const text = decoder.decode(value, { stream: true });
+        for (const line of text.split('\n')) {
+          if (line.startsWith('package:')) {
+            packages.push(line.slice(8).trim());
+          }
+        }
+      }
+
+      return packages.sort((a, b) => a.localeCompare(b));
+    } catch (error) {
+      console.error('获取应用列表错误:', error);
+      return [];
+    }
+  }, []);
+
   const stopScrcpy = useCallback(async () => {
     try {
       if (cleanupRef.current) {
-        cleanupRef.current();
+        await cleanupRef.current();
         cleanupRef.current = null;
       }
 
@@ -231,6 +332,7 @@ export function useScrcpy() {
         error: null,
         videoWidth: 0,
         videoHeight: 0,
+        isVirtualDisplay: false,
       });
     } catch (error) {
       console.error('停止 Scrcpy 错误:', error);
@@ -242,5 +344,11 @@ export function useScrcpy() {
     startScrcpy,
     stopScrcpy,
     injectTouch,
+    startApp,
+    pressKey,
+    goHome,
+    goBack,
+    showRecentApps,
+    getAppList,
   };
 }

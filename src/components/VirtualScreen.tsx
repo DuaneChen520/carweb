@@ -1,8 +1,9 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { Maximize2, Minimize2, RotateCcw, Power, Smartphone } from 'lucide-react';
+import { Maximize2, Minimize2, RotateCcw, Power, Smartphone, Monitor, ArrowLeftRight } from 'lucide-react';
 import { AndroidMotionEventAction } from '@yume-chan/scrcpy';
 import { useScrcpy } from '../hooks/useScrcpy';
 import { useAdbStore } from '../hooks/useAdbStore';
+import { ControlSidebar } from './ControlSidebar';
 
 interface VirtualScreenProps {
   onStop: () => void;
@@ -13,8 +14,11 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+  const [restartCount, setRestartCount] = useState(0);
+  const [useMirrorMode, setUseMirrorMode] = useState(false);
+  const hasStartedRef = useRef(false);
 
-  const { startScrcpy, stopScrcpy, injectTouch, isStarting, isRunning, error, videoWidth, videoHeight } = useScrcpy();
+  const { startScrcpy, stopScrcpy, injectTouch, startApp, goHome, goBack, showRecentApps, getAppList, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay } = useScrcpy();
   const store = useAdbStore();
 
   // 监听容器尺寸变化
@@ -34,21 +38,32 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     return () => resizeObserver.disconnect();
   }, []);
 
-  // 启动屏幕镜像
+  // 启动 scrcpy
   useEffect(() => {
     const canvas = canvasRef.current;
     const adb = store.adb;
+    if (!canvas || !adb || isRunning || isStarting) return;
 
-    if (canvas && adb && !isRunning && !isStarting) {
+    hasStartedRef.current = true;
+
+    if (useMirrorMode || containerSize.width === 0 || containerSize.height === 0) {
       startScrcpy(adb, canvas);
+    } else {
+      startScrcpy(adb, canvas, {
+        width: Math.round(containerSize.width),
+        height: Math.round(containerSize.height),
+      });
     }
+  }, [store.adb, isRunning, isStarting, containerSize.width, containerSize.height, restartCount, useMirrorMode, startScrcpy]);
 
+  // 组件卸载时清理
+  useEffect(() => {
     return () => {
-      if (isRunning) {
+      if (hasStartedRef.current) {
         stopScrcpy();
       }
     };
-  }, [store.adb]);
+  }, [stopScrcpy]);
 
   // 计算自适应尺寸
   const calculateAdaptiveSize = useCallback(() => {
@@ -63,11 +78,9 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     let renderHeight: number;
 
     if (containerAspect > videoAspect) {
-      // 容器更宽，以高度为基准
       renderHeight = containerSize.height;
       renderWidth = renderHeight * videoAspect;
     } else {
-      // 容器更高，以宽度为基准
       renderWidth = containerSize.width;
       renderHeight = renderWidth / videoAspect;
     }
@@ -105,6 +118,23 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
+  // 重新应用当前窗口尺寸
+  const handleApplyNewSize = useCallback(async () => {
+    if (isStarting || !store.adb) return;
+    await stopScrcpy();
+    hasStartedRef.current = false;
+    setRestartCount(c => c + 1);
+  }, [isStarting, store.adb, stopScrcpy]);
+
+  // 切换镜像/虚拟屏模式
+  const toggleDisplayMode = useCallback(async () => {
+    if (isStarting || !store.adb) return;
+    await stopScrcpy();
+    hasStartedRef.current = false;
+    setUseMirrorMode(m => !m);
+    setRestartCount(c => c + 1);
+  }, [isStarting, store.adb, stopScrcpy]);
+
   // 将屏幕坐标转换为视频坐标
   const screenToVideoCoords = useCallback((clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
@@ -112,17 +142,14 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
 
     const rect = canvas.getBoundingClientRect();
 
-    // 计算 canvas 在容器中的实际渲染尺寸和位置
     const renderWidth = rect.width;
     const renderHeight = rect.height;
     const renderLeft = rect.left;
     const renderTop = rect.top;
 
-    // 将屏幕坐标转换为相对于 canvas 的坐标 (0-1)
     const relativeX = (clientX - renderLeft) / renderWidth;
     const relativeY = (clientY - renderTop) / renderHeight;
 
-    // 转换为视频坐标
     const pointerX = Math.max(0, Math.min(1, relativeX)) * videoWidth;
     const pointerY = Math.max(0, Math.min(1, relativeY)) * videoHeight;
 
@@ -154,16 +181,9 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
         return;
     }
 
-    // 获取指针 ID（使用 pointerId，对于鼠标固定为 -1n）
     const pointerId = e.pointerType === 'mouse' ? -1n : BigInt(e.pointerId);
-
-    // 计算压力值
     const pressure = e.pressure !== undefined && e.pressure > 0 ? e.pressure : (e.buttons > 0 ? 1 : 0);
-
-    // 按钮状态
     const buttons = e.buttons;
-
-    // actionButton 表示触发当前动作的按钮
     const actionButton = e.button === 0 ? 1 : e.button === 2 ? 2 : 0;
 
     injectTouch({
@@ -184,6 +204,9 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     onStop();
   }, [stopScrcpy, onStop]);
 
+  const displayLabel = isVirtualDisplay ? '虚拟屏' : '镜像';
+  const dpiLabel = isVirtualDisplay ? ' @ 320dpi' : '';
+
   return (
     <div
       ref={containerRef}
@@ -198,13 +221,43 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
               <div className="text-white text-sm font-medium">
                 {store.deviceName || '未知设备'}
               </div>
-              <div className="text-white/60 text-xs">
-                {videoWidth && videoHeight ? `${videoWidth}x${videoHeight}` : '连接中...'}
+              <div className="text-white/60 text-xs space-x-2">
+                {videoWidth && videoHeight ? (
+                  <>
+                    <span>{displayLabel} {videoWidth}x{videoHeight}{dpiLabel}</span>
+                    {!useMirrorMode && (
+                      <>
+                        <span>|</span>
+                        <span>窗口 {Math.round(containerSize.width)}x{Math.round(containerSize.height)}</span>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  '连接中...'
+                )}
               </div>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
+            {isRunning && (
+              <button
+                onClick={toggleDisplayMode}
+                className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
+                title={useMirrorMode ? '切换到虚拟屏模式' : '切换到镜像模式'}
+              >
+                <ArrowLeftRight className="w-4 h-4 text-white" />
+              </button>
+            )}
+            {isRunning && !useMirrorMode && (
+              <button
+                onClick={handleApplyNewSize}
+                className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
+                title="重新应用窗口尺寸"
+              >
+                <Monitor className="w-4 h-4 text-white" />
+              </button>
+            )}
             <button
               onClick={toggleFullscreen}
               className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
@@ -233,20 +286,55 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
           <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-20">
             <div className="text-center">
               <RotateCcw className="w-8 h-8 text-white animate-spin mx-auto mb-4" />
-              <div className="text-white text-lg">正在启动虚拟屏...</div>
-              <div className="text-white/60 text-sm mt-2">请稍候</div>
+              <div className="text-white text-lg">
+                {useMirrorMode ? '正在启动屏幕镜像...' : '正在创建虚拟显示屏...'}
+              </div>
+              <div className="text-white/60 text-sm mt-2">
+                {!useMirrorMode && containerSize.width > 0 && containerSize.height > 0
+                  ? `目标分辨率 ${Math.round(containerSize.width)}x${Math.round(containerSize.height)} @ 320dpi`
+                  : '请稍候'}
+              </div>
             </div>
           </div>
         )}
 
         {error && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-20">
-            <div className="text-center">
+            <div className="text-center max-w-md px-6">
               <div className="text-red-400 text-lg mb-2">启动失败</div>
-              <div className="text-white/60 text-sm">{error}</div>
+              <div className="text-white/60 text-sm mb-4">{error}</div>
+              {!useMirrorMode && (
+                <button
+                  onClick={toggleDisplayMode}
+                  className="px-4 py-2 bg-blue-500/80 hover:bg-blue-500 rounded-lg text-white text-sm transition-colors"
+                >
+                  尝试切换到镜像模式
+                </button>
+              )}
             </div>
           </div>
         )}
+
+        {isRunning && !error && videoWidth > 0 && videoHeight > 0 && isVirtualDisplay && (
+          <div className="absolute top-16 left-4 z-20">
+            <div className="px-3 py-1.5 bg-yellow-500/20 border border-yellow-500/40 rounded-lg">
+              <p className="text-yellow-300 text-xs">
+                虚拟屏默认无桌面内容，需通过触摸操作启动应用
+              </p>
+              <p className="text-yellow-400/60 text-xs mt-0.5">
+                如显示黑屏属于正常现象，请在虚拟屏上滑动打开应用列表
+              </p>
+            </div>
+          </div>
+        )}
+
+        <ControlSidebar
+          goBack={goBack}
+          goHome={goHome}
+          showRecentApps={showRecentApps}
+          startApp={startApp}
+          getAppList={getAppList}
+        />
 
         <canvas
           ref={canvasRef}
@@ -267,10 +355,13 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
       <div className="absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/80 to-transparent p-4">
         <div className="flex items-center justify-between text-white/60 text-xs">
           <div>
-            连接方式: {store.connectionType === 'usb' ? 'USB 有线' : 'WiFi 无线'}
+            {store.connectionType === 'usb' ? 'USB 有线' : 'WiFi 无线'}
+            <span className="ml-2 text-white/40">scrcpy v3.3.3</span>
           </div>
           <div>
-            窗口: {Math.round(containerSize.width)}x{Math.round(containerSize.height)}
+            {isRunning && videoWidth > 0 && (
+              <span>{displayLabel} {videoWidth}x{videoHeight}{dpiLabel}</span>
+            )}
           </div>
         </div>
       </div>
