@@ -18,7 +18,7 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   const [useMirrorMode, setUseMirrorMode] = useState(false);
   const hasStartedRef = useRef(false);
 
-  const { startScrcpy, stopScrcpy, injectTouch, startApp, goHome, goBack, showRecentApps, getAppList, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay } = useScrcpy();
+  const { startScrcpy, stopScrcpy, injectTouch, startApp, goHome, goBack, showRecentApps, getAppList, getAppIcon, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay } = useScrcpy();
   const store = useAdbStore();
 
   // 监听容器尺寸变化
@@ -334,6 +334,7 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
           showRecentApps={showRecentApps}
           startApp={startApp}
           getAppList={getAppList}
+          getAppIcon={getAppIcon}
         />
 
         <canvas

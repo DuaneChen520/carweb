@@ -12,6 +12,11 @@ export interface DisplayConfig {
   dpi?: number;
 }
 
+export interface AppInfo {
+  package: string;
+  name: string;
+}
+
 export interface ScrcpyState {
   isStarting: boolean;
   isRunning: boolean;
@@ -92,7 +97,9 @@ export function useScrcpy() {
         stayAwake: true,
         showTouches: true,
         ...(useVirtualDisplay
-          ? { newDisplay: new ScrcpyNewDisplay(displayConfig.width, displayConfig.height, displayConfig.dpi ?? 320) }
+          ? {
+              newDisplay: new ScrcpyNewDisplay(displayConfig.width, displayConfig.height, displayConfig.dpi ?? 320),
+            }
           : { displayId: 0 }
         ),
       });
@@ -276,31 +283,75 @@ export function useScrcpy() {
     await pressKey(AndroidKeyCode.AndroidAppSwitch);
   }, [pressKey]);
 
-  const getAppList = useCallback(async (): Promise<string[]> => {
+  const getAppList = useCallback(async (showSystem = false): Promise<string[]> => {
     const adb = adbRef.current;
     if (!adb) return [];
 
     try {
-      const process = await adb.subprocess.spawn('pm', ['list', 'packages']);
-      const reader = process.stdout.getReader();
-      const decoder = new TextDecoder();
-      const packages: string[] = [];
+      const cmd = showSystem ? 'pm list packages' : 'pm list packages -3';
+      let output: string;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const text = decoder.decode(value, { stream: true });
-        for (const line of text.split('\n')) {
-          if (line.startsWith('package:')) {
-            packages.push(line.slice(8).trim());
-          }
+      if (adb.subprocess.shellProtocol) {
+        const result = await adb.subprocess.shellProtocol.spawnWaitText(cmd);
+        console.log('[getAppList] cmd:', cmd, 'exitCode:', result.exitCode, 'stderr:', result.stderr);
+        output = result.stdout;
+      } else {
+        output = await adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', `${cmd} 2>&1`]);
+      }
+
+      console.log('[getAppList] raw output length:', output.length);
+
+      const packages: string[] = [];
+      for (const line of output.split('\n')) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('package:')) {
+          packages.push(trimmed.slice(8));
         }
       }
 
+      console.log('[getAppList] found packages:', packages.length);
       return packages.sort((a, b) => a.localeCompare(b));
     } catch (error) {
       console.error('获取应用列表错误:', error);
       return [];
+    }
+  }, []);
+
+  const iconCacheRef = useRef<Map<string, string | null>>(new Map());
+
+  const getAppIcon = useCallback(async (pkg: string): Promise<string | null> => {
+    const cached = iconCacheRef.current.get(pkg);
+    if (cached !== undefined) return cached;
+
+    const adb = adbRef.current;
+    if (!adb) return null;
+
+    try {
+      const cmd = [
+        'sh', '-c',
+        `APK=$(pm path ${pkg} 2>/dev/null | sed 's/^package://' | head -1); ` +
+        `if [ -n "$APK" ]; then ` +
+          `ICON=$(unzip -l "$APK" 2>/dev/null | grep -oE '[^ ]+ic_launcher[^ ]*\\.png' | sort -t/ -k2 -r | head -1); ` +
+          `if [ -n "$ICON" ]; then ` +
+            `unzip -p "$APK" "$ICON" 2>/dev/null | base64; ` +
+          `fi; ` +
+        `fi`
+      ];
+
+      const output = await adb.subprocess.noneProtocol.spawnWaitText(cmd);
+      const trimmed = output.trim();
+      if (!trimmed) {
+        iconCacheRef.current.set(pkg, null);
+        return null;
+      }
+
+      const dataUrl = `data:image/png;base64,${trimmed.replace(/\n/g, '')}`;
+      iconCacheRef.current.set(pkg, dataUrl);
+      return dataUrl;
+    } catch (error) {
+      console.error('获取应用图标错误:', error);
+      iconCacheRef.current.set(pkg, null);
+      return null;
     }
   }, []);
 
@@ -350,5 +401,6 @@ export function useScrcpy() {
     goBack,
     showRecentApps,
     getAppList,
+    getAppIcon,
   };
 }
