@@ -26,6 +26,15 @@ export interface ScrcpyState {
   isVirtualDisplay: boolean;
 }
 
+function formatAppName(pkg: string): string {
+  const segments = pkg.split('.');
+  const last = segments[segments.length - 1];
+  return last
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/^./, (s) => s.toUpperCase())
+    .trim();
+}
+
 export function useScrcpy() {
   const [state, setState] = useState<ScrcpyState>({
     isStarting: false,
@@ -318,6 +327,42 @@ export function useScrcpy() {
   }, []);
 
   const iconCacheRef = useRef<Map<string, string | null>>(new Map());
+  const labelCacheRef = useRef<Map<string, string | null>>(new Map());
+
+  const getAppLabel = useCallback(async (pkg: string): Promise<string> => {
+    const cached = labelCacheRef.current.get(pkg);
+    if (cached !== undefined) return cached ?? formatAppName(pkg);
+
+    const adb = adbRef.current;
+    if (!adb) return formatAppName(pkg);
+
+    try {
+      const cmd = [
+        'sh', '-c',
+        `APK=$(pm path ${pkg} 2>/dev/null | sed 's/^package://' | head -1); ` +
+        `LABEL=""; ` +
+        `if [ -n "$APK" ] && command -v aapt >/dev/null 2>&1; then ` +
+          `LABEL=$(aapt dump badging "$APK" 2>/dev/null | grep "application-label:" | head -1 | sed "s/application-label:'\\(.*\\)'/\\1/"); ` +
+        `fi; ` +
+        `if [ -z "$LABEL" ]; then ` +
+          `LABEL=$(cmd package resolve-activity --brief ${pkg} 2>/dev/null | grep -oP 'label=\\K[^ ]+' | head -1 || true); ` +
+        `fi; ` +
+        `echo "$LABEL"`
+      ];
+
+      const output = await adb.subprocess.noneProtocol.spawnWaitText(cmd);
+      const label = output.trim();
+      if (label) {
+        labelCacheRef.current.set(pkg, label);
+        return label;
+      }
+      labelCacheRef.current.set(pkg, null);
+      return formatAppName(pkg);
+    } catch {
+      labelCacheRef.current.set(pkg, null);
+      return formatAppName(pkg);
+    }
+  }, []);
 
   const getAppIcon = useCallback(async (pkg: string): Promise<string | null> => {
     const cached = iconCacheRef.current.get(pkg);
@@ -330,11 +375,13 @@ export function useScrcpy() {
       const cmd = [
         'sh', '-c',
         `APK=$(pm path ${pkg} 2>/dev/null | sed 's/^package://' | head -1); ` +
-        `if [ -n "$APK" ]; then ` +
-          `ICON=$(unzip -l "$APK" 2>/dev/null | grep -oE '[^ ]+ic_launcher[^ ]*\\.png' | sort -t/ -k2 -r | head -1); ` +
-          `if [ -n "$ICON" ]; then ` +
-            `unzip -p "$APK" "$ICON" 2>/dev/null | base64; ` +
-          `fi; ` +
+        `if [ -z "$APK" ]; then exit 1; fi; ` +
+        `ICON=$(unzip -l "$APK" 2>/dev/null | grep -oP '[^ ]+(ic_launcher_round|ic_launcher_foreground|ic_launcher)[^ ]*\\.png' | sort -t/ -k2 -r | head -1); ` +
+        `if [ -n "$ICON" ]; then ` +
+          `unzip -p "$APK" "$ICON" 2>/dev/null | base64 -w0; ` +
+        `elif command -v aapt >/dev/null 2>&1; then ` +
+          `ICON=$(aapt dump badging "$APK" 2>/dev/null | grep "application-icon" | head -1 | sed "s/.*:'\\(.*\\)'/\\1/"); ` +
+          `if [ -n "$ICON" ]; then unzip -p "$APK" "$ICON" 2>/dev/null | base64 -w0; fi; ` +
         `fi`
       ];
 
@@ -402,5 +449,6 @@ export function useScrcpy() {
     showRecentApps,
     getAppList,
     getAppIcon,
+    getAppLabel,
   };
 }
