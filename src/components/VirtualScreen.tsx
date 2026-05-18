@@ -21,7 +21,7 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   const [isKeyboardInputFocused, setIsKeyboardInputFocused] = useState(false);
   const hasStartedRef = useRef(false);
 
-  const { startScrcpy, stopScrcpy, injectTouch, injectText, showKeyboard, hideKeyboard, startApp, goHome, goBack, showRecentApps, getAppList, getAppIcon, getAppLabel, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay } = useScrcpy();
+  const { startScrcpy, stopScrcpy, injectTouch, injectText, showKeyboard, hideKeyboard, startApp, goHome, goBack, showRecentApps, getAppList, getAppIcon, getAppLabel, togglePhysicalScreen, turnOffPhysicalScreen, turnOnPhysicalScreen, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay } = useScrcpy();
   const store = useAdbStore();
 
   // 监听容器尺寸变化
@@ -246,6 +246,9 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
         getAppLabel={getAppLabel}
         injectText={injectText}
         isVirtualDisplay={isVirtualDisplay}
+        togglePhysicalScreen={togglePhysicalScreen}
+        turnOffPhysicalScreen={turnOffPhysicalScreen}
+        turnOnPhysicalScreen={turnOnPhysicalScreen}
       />
 
       <div

@@ -504,6 +504,64 @@ export function useScrcpy() {
     }
   }, []);
 
+  const togglePhysicalScreen = useCallback(async () => {
+    const adb = adbRef.current;
+    if (!adb) return;
+
+    try {
+      // 发送电源键事件（KEYCODE_POWER = 26）
+      await adb.subprocess.noneProtocol.spawnWaitText(['input', 'keyevent', '26']);
+    } catch (error) {
+      console.error('切换物理屏幕状态错误:', error);
+    }
+  }, []);
+
+  const turnOffPhysicalScreen = useCallback(async () => {
+    const adb = adbRef.current;
+    if (!adb) return;
+
+    try {
+      // 检查屏幕是否已开启
+      let isScreenOn = false;
+      try {
+        const output = await adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', 'dumpsys power | grep mWakefulness']);
+        isScreenOn = output.includes('Awake');
+      } catch {
+        isScreenOn = true;
+      }
+
+      if (isScreenOn) {
+        // 发送电源键关闭屏幕
+        await adb.subprocess.noneProtocol.spawnWaitText(['input', 'keyevent', '26']);
+      }
+    } catch (error) {
+      console.error('关闭物理屏幕错误:', error);
+    }
+  }, []);
+
+  const turnOnPhysicalScreen = useCallback(async () => {
+    const adb = adbRef.current;
+    if (!adb) return;
+
+    try {
+      // 检查屏幕是否已关闭
+      let isScreenOff = false;
+      try {
+        const output = await adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', 'dumpsys power | grep mWakefulness']);
+        isScreenOff = output.includes('Asleep');
+      } catch {
+        isScreenOff = true;
+      }
+
+      if (isScreenOff) {
+        // 发送电源键唤醒屏幕
+        await adb.subprocess.noneProtocol.spawnWaitText(['input', 'keyevent', '26']);
+      }
+    } catch (error) {
+      console.error('唤醒物理屏幕错误:', error);
+    }
+  }, []);
+
   return {
     ...state,
     startScrcpy,
@@ -520,5 +578,8 @@ export function useScrcpy() {
     getAppList,
     getAppIcon,
     getAppLabel,
+    togglePhysicalScreen,
+    turnOffPhysicalScreen,
+    turnOnPhysicalScreen,
   };
 }

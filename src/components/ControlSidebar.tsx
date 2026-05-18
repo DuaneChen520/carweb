@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Search, Grid, ArrowLeft, Home, Loader2, X } from 'lucide-react';
+import { Search, Grid, ArrowLeft, Home, Loader2, X, MonitorOff } from 'lucide-react';
 
 const PRIORITY_PACKAGES = [
   'com.android.contacts',
@@ -67,9 +67,12 @@ interface ControlSidebarProps {
   getAppLabel: (pkg: string) => Promise<string>;
   injectText?: (text: string) => Promise<void>;
   isVirtualDisplay?: boolean;
+  togglePhysicalScreen?: () => Promise<void>;
+  turnOffPhysicalScreen?: () => Promise<void>;
+  turnOnPhysicalScreen?: () => Promise<void>;
 }
 
-export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAppList, getAppIcon, getAppLabel, injectText, isVirtualDisplay }: ControlSidebarProps) {
+export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAppList, getAppIcon, getAppLabel, injectText, isVirtualDisplay, togglePhysicalScreen, turnOffPhysicalScreen }: ControlSidebarProps) {
   const [panelMode, setPanelMode] = useState<'closed' | 'search' | 'apps'>('closed');
   const [searchText, setSearchText] = useState('');
   const [apps, setApps] = useState<string[] | null>(null);
@@ -265,6 +268,17 @@ export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAp
         >
           <Grid className="w-5 h-5" />
         </button>
+
+        {/* 关闭物理屏幕按钮（仅在虚拟屏模式下显示） */}
+        {isVirtualDisplay && turnOffPhysicalScreen && (
+          <button
+            onClick={turnOffPhysicalScreen}
+            className="p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+            title="关闭物理屏幕"
+          >
+            <MonitorOff className="w-5 h-5" />
+          </button>
+        )}
       </div>
 
       {/* 悬浮弹窗 */}
