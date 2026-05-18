@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Search, Grid, ArrowLeft, Home, Loader2, X } from 'lucide-react';
 
-const PINNED_APPS: { name: string; package: string }[] = [
-  { name: '电话', package: 'com.android.contacts' },
-  { name: '短信', package: 'com.android.mms' },
-  { name: '微信', package: 'com.tencent.mm' },
-  { name: '地图', package: 'com.google.android.apps.maps' },
-  { name: '设置', package: 'com.android.settings' },
-  { name: 'Chrome', package: 'com.android.chrome' },
-  { name: '文件管理', package: 'com.android.documentsui' },
+const PRIORITY_PACKAGES = [
+  'com.android.contacts',
+  'com.android.dialer',
+  'com.android.phone',
+  'com.android.mms',
+  'com.android.messaging',
+  'com.tencent.mm',
+  'com.google.android.apps.maps',
+  'com.baidu.BaiduMap',
+  'com.autonavi.minimap',
+  'com.android.settings',
+  'com.android.chrome',
+  'com.android.documentsui',
 ];
 
 interface AppIconProps {
@@ -73,6 +78,7 @@ export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAp
   const [showSystem, setShowSystem] = useState(false);
   const [floatingPanelPosition, setFloatingPanelPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
+  const [pinnedApps, setPinnedApps] = useState<string[]>([]);
   const searchRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef({ x: 0, y: 0 });
@@ -85,8 +91,33 @@ export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAp
     }
   }, [panelMode]);
 
-  const filteredPinned = PINNED_APPS.filter(
-    (a) => !query || a.name.includes(query) || a.package.includes(query),
+  useEffect(() => {
+    const loadPinnedApps = async () => {
+      const list = await getAppList(true);
+      const priorityApps = PRIORITY_PACKAGES.filter(pkg => list.includes(pkg));
+      setPinnedApps(priorityApps);
+      const labels = new Map<string, string>();
+      await Promise.all(
+        priorityApps.map(async (pkg) => {
+          try {
+            const label = await getAppLabel(pkg);
+            labels.set(pkg, label);
+          } catch {
+            labels.set(pkg, pkg.split('.').pop() || pkg);
+          }
+        }),
+      );
+      setAppLabels(prev => {
+        const newMap = new Map(prev);
+        labels.forEach((value, key) => newMap.set(key, value));
+        return newMap;
+      });
+    };
+    loadPinnedApps();
+  }, [getAppList, getAppLabel]);
+
+  const filteredPinned = pinnedApps.filter(
+    (pkg) => !query || pkg.toLowerCase().includes(query) || (appLabels.get(pkg) || '').toLowerCase().includes(query),
   );
 
   const filteredAll = apps
@@ -199,11 +230,11 @@ export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAp
         <div className="w-8 h-px bg-white/10 my-1" />
 
         {/* 常用应用（仅图标） */}
-        {PINNED_APPS.map((app) => (
+        {pinnedApps.map((pkg) => (
           <AppIcon
-            key={app.package}
-            pkg={app.package}
-            name={app.name}
+            key={pkg}
+            pkg={pkg}
+            name={appLabels.get(pkg) || pkg.split('.').pop() || pkg}
             getAppIcon={getAppIcon}
             onLaunch={handleLaunchApp}
             compact
@@ -302,11 +333,11 @@ export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAp
                     常用
                   </div>
                   <div className="grid grid-cols-3 gap-0.5">
-                    {filteredPinned.map((app) => (
+                    {filteredPinned.map((pkg) => (
                       <AppIcon
-                        key={app.package}
-                        pkg={app.package}
-                        name={app.name}
+                        key={pkg}
+                        pkg={pkg}
+                        name={appLabels.get(pkg) || pkg.split('.').pop() || pkg}
                         getAppIcon={getAppIcon}
                         onLaunch={handleLaunchApp}
                       />
