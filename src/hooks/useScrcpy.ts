@@ -241,6 +241,68 @@ export function useScrcpy() {
     }
   }, []);
 
+  const injectText = useCallback(async (text: string) => {
+    const controller = controllerRef.current;
+    if (!controller) return;
+
+    try {
+      await controller.injectText(text);
+    } catch (error) {
+      console.error('文本输入错误:', error);
+    }
+  }, []);
+
+  const showKeyboard = useCallback(async () => {
+    const adb = adbRef.current;
+    const controller = controllerRef.current;
+    if (!adb) return;
+
+    try {
+      const cmd = 'ime list -s | head -1';
+      let ime: string;
+
+      if (adb.subprocess.shellProtocol) {
+        const result = await adb.subprocess.shellProtocol.spawnWaitText(cmd);
+        ime = result.stdout.trim().split('\n')[0];
+      } else {
+        ime = await adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', `${cmd} 2>&1`]);
+        ime = ime.trim().split('\n')[0];
+      }
+
+      if (ime) {
+        await adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', `settings put secure default_input_method "${ime}" &&ime enable ${ime} && ime set ${ime} 2>&1`]);
+      }
+
+      if (controller) {
+        await controller.injectKeyCode({
+          action: AndroidKeyEventAction.Down,
+          keyCode: AndroidKeyCode.AndroidHome,
+          repeat: 0,
+          metaState: 0,
+        });
+        await controller.injectKeyCode({
+          action: AndroidKeyEventAction.Up,
+          keyCode: AndroidKeyCode.AndroidHome,
+          repeat: 0,
+          metaState: 0,
+        });
+      }
+    } catch (error) {
+      console.error('显示键盘错误:', error);
+    }
+  }, []);
+
+  const hideKeyboard = useCallback(async () => {
+    const adb = adbRef.current;
+    if (!adb) return;
+
+    try {
+      await adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', 'ime hide com.android.inputmethod.latin/.LatinIME 2>&1 || input keyevent 111 2>&1']);
+    } catch (error) {
+      console.error('隐藏键盘错误:', error);
+    }
+  }, []);
+
   const startApp = useCallback(async (appName: string) => {
     const controller = controllerRef.current;
     if (!controller) return;
@@ -339,20 +401,25 @@ export function useScrcpy() {
     try {
       const cmd = [
         'sh', '-c',
-        `APK=$(pm path ${pkg} 2>/dev/null | sed 's/^package://' | head -1); ` +
         `LABEL=""; ` +
-        `if [ -n "$APK" ] && command -v aapt >/dev/null 2>&1; then ` +
-          `LABEL=$(aapt dump badging "$APK" 2>/dev/null | grep "application-label:" | head -1 | sed "s/application-label:'\\(.*\\)'/\\1/"); ` +
+        `if command -v dumpsys >/dev/null 2>&1; then ` +
+          `LABEL=$(dumpsys package ${pkg} 2>/dev/null | grep -oP 'android:label=\\K[^\\s]+' | head -1 | sed "s/'//g"); ` +
         `fi; ` +
         `if [ -z "$LABEL" ]; then ` +
           `LABEL=$(cmd package resolve-activity --brief ${pkg} 2>/dev/null | grep -oP 'label=\\K[^ ]+' | head -1 || true); ` +
+        `fi; ` +
+        `if [ -z "$LABEL" ]; then ` +
+          `APK=$(pm path ${pkg} 2>/dev/null | sed 's/^package://' | head -1); ` +
+          `if [ -n "$APK" ] && command -v aapt >/dev/null 2>&1; then ` +
+            `LABEL=$(aapt dump badging "$APK" 2>/dev/null | grep "application-label:" | head -1 | sed "s/application-label:'\\(.*\\)'/\\1/"); ` +
+          `fi; ` +
         `fi; ` +
         `echo "$LABEL"`
       ];
 
       const output = await adb.subprocess.noneProtocol.spawnWaitText(cmd);
       const label = output.trim();
-      if (label) {
+      if (label && label !== 'null' && label !== '') {
         labelCacheRef.current.set(pkg, label);
         return label;
       }
@@ -374,20 +441,22 @@ export function useScrcpy() {
     try {
       const cmd = [
         'sh', '-c',
+        `ICON_PATH=""; ` +
         `APK=$(pm path ${pkg} 2>/dev/null | sed 's/^package://' | head -1); ` +
         `if [ -z "$APK" ]; then exit 1; fi; ` +
-        `ICON=$(unzip -l "$APK" 2>/dev/null | grep -oP '[^ ]+(ic_launcher_round|ic_launcher_foreground|ic_launcher)[^ ]*\\.png' | sort -t/ -k2 -r | head -1); ` +
+        `ICON=$(unzip -l "$APK" 2>/dev/null | grep -oP '[^ ]+(mipmap|drawable)[^/]*/(ic_launcher|ic_launcher_round|ic_launcher_foreground)[^ ]*\\.png' | sort -u | head -1); ` +
         `if [ -n "$ICON" ]; then ` +
-          `unzip -p "$APK" "$ICON" 2>/dev/null | base64 -w0; ` +
+          `ICON_PATH="$ICON"; ` +
         `elif command -v aapt >/dev/null 2>&1; then ` +
           `ICON=$(aapt dump badging "$APK" 2>/dev/null | grep "application-icon" | head -1 | sed "s/.*:'\\(.*\\)'/\\1/"); ` +
-          `if [ -n "$ICON" ]; then unzip -p "$APK" "$ICON" 2>/dev/null | base64 -w0; fi; ` +
-        `fi`
+          `if [ -n "$ICON" ]; then ICON_PATH="$ICON"; fi; ` +
+        `fi; ` +
+        `if [ -n "$ICON_PATH" ]; then unzip -p "$APK" "$ICON_PATH" 2>/dev/null | base64 -w0; fi`
       ];
 
       const output = await adb.subprocess.noneProtocol.spawnWaitText(cmd);
       const trimmed = output.trim();
-      if (!trimmed) {
+      if (!trimmed || trimmed.includes('error') || trimmed.includes('Archive') || trimmed.length < 100) {
         iconCacheRef.current.set(pkg, null);
         return null;
       }
@@ -442,6 +511,9 @@ export function useScrcpy() {
     startScrcpy,
     stopScrcpy,
     injectTouch,
+    injectText,
+    showKeyboard,
+    hideKeyboard,
     startApp,
     pressKey,
     goHome,

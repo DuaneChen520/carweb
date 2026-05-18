@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { Maximize2, Minimize2, RotateCcw, Power, Smartphone, Monitor, ArrowLeftRight } from 'lucide-react';
+import { Maximize2, Minimize2, RotateCcw, Power, Smartphone, Monitor, ArrowLeftRight, Keyboard } from 'lucide-react';
 import { AndroidMotionEventAction } from '@yume-chan/scrcpy';
 import { useScrcpy } from '../hooks/useScrcpy';
 import { useAdbStore } from '../hooks/useAdbStore';
@@ -16,9 +16,12 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [restartCount, setRestartCount] = useState(0);
   const [useMirrorMode, setUseMirrorMode] = useState(false);
+  const [showVirtualKeyboard, setShowVirtualKeyboard] = useState(false);
+  const [keyboardInput, setKeyboardInput] = useState('');
+  const [isKeyboardInputFocused, setIsKeyboardInputFocused] = useState(false);
   const hasStartedRef = useRef(false);
 
-  const { startScrcpy, stopScrcpy, injectTouch, startApp, goHome, goBack, showRecentApps, getAppList, getAppIcon, getAppLabel, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay } = useScrcpy();
+  const { startScrcpy, stopScrcpy, injectTouch, injectText, showKeyboard, hideKeyboard, startApp, goHome, goBack, showRecentApps, getAppList, getAppIcon, getAppLabel, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay } = useScrcpy();
   const store = useAdbStore();
 
   // 监听容器尺寸变化
@@ -204,6 +207,30 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     onStop();
   }, [stopScrcpy, onStop]);
 
+  const handleSendText = useCallback(async () => {
+    if (keyboardInput.trim()) {
+      await injectText(keyboardInput);
+      setKeyboardInput('');
+    }
+  }, [keyboardInput, injectText]);
+
+  const handleKeyPress = useCallback(async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      await handleSendText();
+    }
+  }, [handleSendText]);
+
+  const toggleVirtualKeyboard = useCallback(async () => {
+    if (showVirtualKeyboard) {
+      await hideKeyboard();
+      setShowVirtualKeyboard(false);
+      setIsKeyboardInputFocused(false);
+    } else {
+      await showKeyboard();
+      setShowVirtualKeyboard(true);
+    }
+  }, [showVirtualKeyboard, showKeyboard, hideKeyboard]);
+
   const displayLabel = isVirtualDisplay ? '虚拟屏' : '镜像';
   const dpiLabel = isVirtualDisplay ? ' @ 320dpi' : '';
 
@@ -217,6 +244,8 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
         getAppList={getAppList}
         getAppIcon={getAppIcon}
         getAppLabel={getAppLabel}
+        injectText={injectText}
+        isVirtualDisplay={isVirtualDisplay}
       />
 
       <div
@@ -361,13 +390,49 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
               {store.connectionType === 'usb' ? 'USB 有线' : 'WiFi 无线'}
               <span className="ml-2 text-white/40">scrcpy v3.3.3</span>
             </div>
-            <div>
+            <div className="flex items-center gap-2">
+              {isRunning && (
+                <button
+                  onClick={toggleVirtualKeyboard}
+                  className={`p-1.5 rounded-lg transition-colors ${showVirtualKeyboard ? 'bg-blue-500/30 text-blue-400' : 'text-white/50 hover:text-white hover:bg-white/10'}`}
+                  title="虚拟键盘"
+                >
+                  <Keyboard className="w-4 h-4" />
+                </button>
+              )}
               {isRunning && videoWidth > 0 && (
                 <span>{displayLabel} {videoWidth}x{videoHeight}{dpiLabel}</span>
               )}
             </div>
           </div>
         </div>
+
+        {/* 虚拟键盘 */}
+        {showVirtualKeyboard && (
+          <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-20 w-96">
+            <div className="bg-black/90 backdrop-blur-md border border-white/10 rounded-xl p-4 shadow-2xl">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={keyboardInput}
+                  onChange={(e) => setKeyboardInput(e.target.value)}
+                  onKeyDown={handleKeyPress}
+                  onFocus={() => setIsKeyboardInputFocused(true)}
+                  onBlur={() => setIsKeyboardInputFocused(false)}
+                  placeholder="输入文字..."
+                  className="flex-1 px-3 py-2 bg-white/10 rounded-lg text-white text-sm placeholder-white/30 outline-none focus:ring-2 focus:ring-blue-500/50"
+                  autoFocus
+                />
+                <button
+                  onClick={handleSendText}
+                  className="px-4 py-2 bg-blue-500 hover:bg-blue-600 rounded-lg text-white text-sm transition-colors"
+                >
+                  发送
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
