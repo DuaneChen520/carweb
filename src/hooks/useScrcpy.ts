@@ -241,6 +241,68 @@ export function useScrcpy() {
     }
   }, []);
 
+  const injectText = useCallback(async (text: string) => {
+    const controller = controllerRef.current;
+    if (!controller) return;
+
+    try {
+      await controller.injectText(text);
+    } catch (error) {
+      console.error('文本输入错误:', error);
+    }
+  }, []);
+
+  const showKeyboard = useCallback(async () => {
+    const adb = adbRef.current;
+    const controller = controllerRef.current;
+    if (!adb) return;
+
+    try {
+      const cmd = 'ime list -s | head -1';
+      let ime: string;
+
+      if (adb.subprocess.shellProtocol) {
+        const result = await adb.subprocess.shellProtocol.spawnWaitText(cmd);
+        ime = result.stdout.trim().split('\n')[0];
+      } else {
+        ime = await adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', `${cmd} 2>&1`]);
+        ime = ime.trim().split('\n')[0];
+      }
+
+      if (ime) {
+        await adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', `settings put secure default_input_method "${ime}" &&ime enable ${ime} && ime set ${ime} 2>&1`]);
+      }
+
+      if (controller) {
+        await controller.injectKeyCode({
+          action: AndroidKeyEventAction.Down,
+          keyCode: AndroidKeyCode.AndroidHome,
+          repeat: 0,
+          metaState: 0,
+        });
+        await controller.injectKeyCode({
+          action: AndroidKeyEventAction.Up,
+          keyCode: AndroidKeyCode.AndroidHome,
+          repeat: 0,
+          metaState: 0,
+        });
+      }
+    } catch (error) {
+      console.error('显示键盘错误:', error);
+    }
+  }, []);
+
+  const hideKeyboard = useCallback(async () => {
+    const adb = adbRef.current;
+    if (!adb) return;
+
+    try {
+      await adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', 'ime hide com.android.inputmethod.latin/.LatinIME 2>&1 || input keyevent 111 2>&1']);
+    } catch (error) {
+      console.error('隐藏键盘错误:', error);
+    }
+  }, []);
+
   const startApp = useCallback(async (appName: string) => {
     const controller = controllerRef.current;
     if (!controller) return;
@@ -339,20 +401,22 @@ export function useScrcpy() {
     try {
       const cmd = [
         'sh', '-c',
-        `APK=$(pm path ${pkg} 2>/dev/null | sed 's/^package://' | head -1); ` +
-        `LABEL=""; ` +
-        `if [ -n "$APK" ] && command -v aapt >/dev/null 2>&1; then ` +
-          `LABEL=$(aapt dump badging "$APK" 2>/dev/null | grep "application-label:" | head -1 | sed "s/application-label:'\\(.*\\)'/\\1/"); ` +
+        `LABEL=$(dumpsys package ${pkg} 2>/dev/null | grep -m1 "android:label=" | sed "s/.*android:label=//" | tr -d "'" | xargs); ` +
+        `if [ -z "$LABEL" ]; then ` +
+          `LABEL=$(cmd package resolve-activity --brief ${pkg} 2>/dev/null | grep "label=" | head -1 | sed "s/.*label=//" | xargs); ` +
         `fi; ` +
         `if [ -z "$LABEL" ]; then ` +
-          `LABEL=$(cmd package resolve-activity --brief ${pkg} 2>/dev/null | grep -oP 'label=\\K[^ ]+' | head -1 || true); ` +
+          `APK=$(pm path ${pkg} 2>/dev/null | head -1 | sed 's/^package://'); ` +
+          `if [ -n "$APK" ] && [ -f "$APK" ] && command -v aapt >/dev/null 2>&1; then ` +
+            `LABEL=$(aapt dump badging "$APK" 2>/dev/null | grep "application-label:" | head -1 | sed "s/application-label:'\\(.*\\)'/\\1/"); ` +
+          `fi; ` +
         `fi; ` +
         `echo "$LABEL"`
       ];
 
       const output = await adb.subprocess.noneProtocol.spawnWaitText(cmd);
       const label = output.trim();
-      if (label) {
+      if (label && label !== 'null' && label !== '' && !label.includes('not found')) {
         labelCacheRef.current.set(pkg, label);
         return label;
       }
@@ -374,20 +438,23 @@ export function useScrcpy() {
     try {
       const cmd = [
         'sh', '-c',
-        `APK=$(pm path ${pkg} 2>/dev/null | sed 's/^package://' | head -1); ` +
-        `if [ -z "$APK" ]; then exit 1; fi; ` +
-        `ICON=$(unzip -l "$APK" 2>/dev/null | grep -oP '[^ ]+(ic_launcher_round|ic_launcher_foreground|ic_launcher)[^ ]*\\.png' | sort -t/ -k2 -r | head -1); ` +
-        `if [ -n "$ICON" ]; then ` +
-          `unzip -p "$APK" "$ICON" 2>/dev/null | base64 -w0; ` +
-        `elif command -v aapt >/dev/null 2>&1; then ` +
-          `ICON=$(aapt dump badging "$APK" 2>/dev/null | grep "application-icon" | head -1 | sed "s/.*:'\\(.*\\)'/\\1/"); ` +
-          `if [ -n "$ICON" ]; then unzip -p "$APK" "$ICON" 2>/dev/null | base64 -w0; fi; ` +
+        `APK=$(pm path ${pkg} 2>/dev/null | head -1 | sed 's/^package://'); ` +
+        `if [ -z "$APK" ] || [ ! -f "$APK" ]; then exit 1; fi; ` +
+        `ICON_PATH=$(dumpsys package ${pkg} 2>/dev/null | grep -m1 "android:icon=" | sed 's/.*android:icon=//' | tr -d "'" | xargs); ` +
+        `if [ -z "$ICON_PATH" ]; then ` +
+          `ICON_PATH=$(unzip -l "$APK" 2>/dev/null | grep -oE 'mipmap[^ ]*/(ic_launcher|ic_launcher_round|ic_launcher_foreground)[^ ]*\\.png' | head -1); ` +
+        `fi; ` +
+        `if [ -z "$ICON_PATH" ] && command -v aapt >/dev/null 2>&1; then ` +
+          `ICON_PATH=$(aapt dump badging "$APK" 2>/dev/null | grep "application-icon:" | head -1 | sed "s/.*:'\\(.*\\)'/\\1/"); ` +
+        `fi; ` +
+        `if [ -n "$ICON_PATH" ]; then ` +
+          `unzip -p "$APK" "$ICON_PATH" 2>/dev/null | base64 -w0; ` +
         `fi`
       ];
 
       const output = await adb.subprocess.noneProtocol.spawnWaitText(cmd);
       const trimmed = output.trim();
-      if (!trimmed) {
+      if (!trimmed || trimmed.includes('error') || trimmed.includes('Archive') || trimmed.includes('Bad zip') || trimmed.length < 100) {
         iconCacheRef.current.set(pkg, null);
         return null;
       }
@@ -437,11 +504,72 @@ export function useScrcpy() {
     }
   }, []);
 
+  const togglePhysicalScreen = useCallback(async () => {
+    const adb = adbRef.current;
+    if (!adb) return;
+
+    try {
+      // 发送电源键事件（KEYCODE_POWER = 26）
+      await adb.subprocess.noneProtocol.spawnWaitText(['input', 'keyevent', '26']);
+    } catch (error) {
+      console.error('切换物理屏幕状态错误:', error);
+    }
+  }, []);
+
+  const turnOffPhysicalScreen = useCallback(async () => {
+    const adb = adbRef.current;
+    if (!adb) return;
+
+    try {
+      // 检查屏幕是否已开启
+      let isScreenOn = false;
+      try {
+        const output = await adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', 'dumpsys power | grep mWakefulness']);
+        isScreenOn = output.includes('Awake');
+      } catch {
+        isScreenOn = true;
+      }
+
+      if (isScreenOn) {
+        // 发送电源键关闭屏幕
+        await adb.subprocess.noneProtocol.spawnWaitText(['input', 'keyevent', '26']);
+      }
+    } catch (error) {
+      console.error('关闭物理屏幕错误:', error);
+    }
+  }, []);
+
+  const turnOnPhysicalScreen = useCallback(async () => {
+    const adb = adbRef.current;
+    if (!adb) return;
+
+    try {
+      // 检查屏幕是否已关闭
+      let isScreenOff = false;
+      try {
+        const output = await adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', 'dumpsys power | grep mWakefulness']);
+        isScreenOff = output.includes('Asleep');
+      } catch {
+        isScreenOff = true;
+      }
+
+      if (isScreenOff) {
+        // 发送电源键唤醒屏幕
+        await adb.subprocess.noneProtocol.spawnWaitText(['input', 'keyevent', '26']);
+      }
+    } catch (error) {
+      console.error('唤醒物理屏幕错误:', error);
+    }
+  }, []);
+
   return {
     ...state,
     startScrcpy,
     stopScrcpy,
     injectTouch,
+    injectText,
+    showKeyboard,
+    hideKeyboard,
     startApp,
     pressKey,
     goHome,
@@ -450,5 +578,8 @@ export function useScrcpy() {
     getAppList,
     getAppIcon,
     getAppLabel,
+    togglePhysicalScreen,
+    turnOffPhysicalScreen,
+    turnOnPhysicalScreen,
   };
 }

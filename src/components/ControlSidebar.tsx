@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Search, Grid, ArrowLeft, Home, Loader2, X } from 'lucide-react';
+import { Search, Grid, ArrowLeft, Home, Loader2, X, MonitorOff } from 'lucide-react';
 
-const PINNED_APPS: { name: string; package: string }[] = [
-  { name: '设置', package: 'com.android.settings' },
-  { name: 'Chrome', package: 'com.android.chrome' },
-  { name: '文件管理', package: 'com.android.documentsui' },
-  { name: '计算器', package: 'com.android.calculator2' },
-  { name: 'Play 商店', package: 'com.android.vending' },
-  { name: '通讯录', package: 'com.android.contacts' },
-  { name: '浏览器', package: 'com.android.browser' },
+const PRIORITY_PACKAGES = [
+  'com.android.contacts',
+  'com.android.dialer',
+  'com.android.phone',
+  'com.android.mms',
+  'com.android.messaging',
+  'com.tencent.mm',
+  'com.google.android.apps.maps',
+  'com.baidu.BaiduMap',
+  'com.autonavi.minimap',
+  'com.android.settings',
+  'com.android.chrome',
+  'com.android.documentsui',
 ];
 
 interface AppIconProps {
@@ -60,16 +65,26 @@ interface ControlSidebarProps {
   getAppList: (showSystem?: boolean) => Promise<string[]>;
   getAppIcon: (pkg: string) => Promise<string | null>;
   getAppLabel: (pkg: string) => Promise<string>;
+  injectText?: (text: string) => Promise<void>;
+  isVirtualDisplay?: boolean;
+  togglePhysicalScreen?: () => Promise<void>;
+  turnOffPhysicalScreen?: () => Promise<void>;
+  turnOnPhysicalScreen?: () => Promise<void>;
 }
 
-export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAppList, getAppIcon, getAppLabel }: ControlSidebarProps) {
+export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAppList, getAppIcon, getAppLabel, injectText, isVirtualDisplay, togglePhysicalScreen, turnOffPhysicalScreen }: ControlSidebarProps) {
   const [panelMode, setPanelMode] = useState<'closed' | 'search' | 'apps'>('closed');
   const [searchText, setSearchText] = useState('');
   const [apps, setApps] = useState<string[] | null>(null);
   const [appLabels, setAppLabels] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(false);
   const [showSystem, setShowSystem] = useState(false);
+  const [floatingPanelPosition, setFloatingPanelPosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [pinnedApps, setPinnedApps] = useState<string[]>([]);
   const searchRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const dragStartRef = useRef({ x: 0, y: 0 });
 
   const query = searchText.toLowerCase().trim();
 
@@ -79,8 +94,33 @@ export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAp
     }
   }, [panelMode]);
 
-  const filteredPinned = PINNED_APPS.filter(
-    (a) => !query || a.name.includes(query) || a.package.includes(query),
+  useEffect(() => {
+    const loadPinnedApps = async () => {
+      const list = await getAppList(true);
+      const priorityApps = PRIORITY_PACKAGES.filter(pkg => list.includes(pkg));
+      setPinnedApps(priorityApps);
+      const labels = new Map<string, string>();
+      await Promise.all(
+        priorityApps.map(async (pkg) => {
+          try {
+            const label = await getAppLabel(pkg);
+            labels.set(pkg, label);
+          } catch {
+            labels.set(pkg, pkg.split('.').pop() || pkg);
+          }
+        }),
+      );
+      setAppLabels(prev => {
+        const newMap = new Map(prev);
+        labels.forEach((value, key) => newMap.set(key, value));
+        return newMap;
+      });
+    };
+    loadPinnedApps();
+  }, [getAppList, getAppLabel]);
+
+  const filteredPinned = pinnedApps.filter(
+    (pkg) => !query || pkg.toLowerCase().includes(query) || (appLabels.get(pkg) || '').toLowerCase().includes(query),
   );
 
   const filteredAll = apps
@@ -141,8 +181,32 @@ export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAp
       if (mode === 'apps' && !apps) {
         loadApps(false);
       }
+      if (panelRef.current) {
+        const rect = panelRef.current.getBoundingClientRect();
+        setFloatingPanelPosition({ x: rect.left, y: rect.top });
+      }
     }
   }, [panelMode, apps, loadApps]);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.target === panelRef.current || (e.target as HTMLElement).closest('.drag-handle')) {
+      setIsDragging(true);
+      dragStartRef.current = { x: e.clientX - floatingPanelPosition.x, y: e.clientY - floatingPanelPosition.y };
+    }
+  }, [floatingPanelPosition]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (isDragging) {
+      setFloatingPanelPosition({
+        x: e.clientX - dragStartRef.current.x,
+        y: e.clientY - dragStartRef.current.y,
+      });
+    }
+  }, [isDragging]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+  }, []);
 
   return (
     <>
@@ -169,11 +233,11 @@ export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAp
         <div className="w-8 h-px bg-white/10 my-1" />
 
         {/* 常用应用（仅图标） */}
-        {PINNED_APPS.map((app) => (
+        {pinnedApps.map((pkg) => (
           <AppIcon
-            key={app.package}
-            pkg={app.package}
-            name={app.name}
+            key={pkg}
+            pkg={pkg}
+            name={appLabels.get(pkg) || pkg.split('.').pop() || pkg}
             getAppIcon={getAppIcon}
             onLaunch={handleLaunchApp}
             compact
@@ -204,13 +268,35 @@ export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAp
         >
           <Grid className="w-5 h-5" />
         </button>
+
+        {/* 关闭物理屏幕按钮（仅在虚拟屏模式下显示） */}
+        {isVirtualDisplay && turnOffPhysicalScreen && (
+          <button
+            onClick={turnOffPhysicalScreen}
+            className="p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+            title="关闭物理屏幕"
+          >
+            <MonitorOff className="w-5 h-5" />
+          </button>
+        )}
       </div>
 
       {/* 悬浮弹窗 */}
       {panelMode !== 'closed' && (
-        <div className="w-72 bg-black/90 backdrop-blur-md border-r border-white/10 flex flex-col z-30">
-          {/* 标题栏 */}
-          <div className="flex items-center justify-between px-4 pt-3 pb-2">
+        <div
+          ref={panelRef}
+          className="fixed w-72 bg-black/90 backdrop-blur-md border-r border-white/10 flex flex-col z-50 shadow-2xl rounded-lg overflow-hidden"
+          style={{
+            left: `${floatingPanelPosition.x}px`,
+            top: `${floatingPanelPosition.y}px`,
+          }}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+        >
+          {/* 可拖动标题栏 */}
+          <div className="drag-handle flex items-center justify-between px-4 pt-3 pb-2 cursor-move select-none bg-white/5 hover:bg-white/10 transition-colors">
             <span className="text-white/80 text-sm font-medium">
               {panelMode === 'search' ? '搜索应用' : showSystem ? '所有应用' : '第三方应用'}
               {panelMode === 'apps' && apps && ` (${filteredAll.length})`}
@@ -261,11 +347,11 @@ export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAp
                     常用
                   </div>
                   <div className="grid grid-cols-3 gap-0.5">
-                    {filteredPinned.map((app) => (
+                    {filteredPinned.map((pkg) => (
                       <AppIcon
-                        key={app.package}
-                        pkg={app.package}
-                        name={app.name}
+                        key={pkg}
+                        pkg={pkg}
+                        name={appLabels.get(pkg) || pkg.split('.').pop() || pkg}
                         getAppIcon={getAppIcon}
                         onLaunch={handleLaunchApp}
                       />
