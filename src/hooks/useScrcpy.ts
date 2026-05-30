@@ -5,6 +5,7 @@ import type { WebCodecsVideoDecoder } from '@yume-chan/scrcpy-decoder-webcodecs'
 import type { ScrcpyControlMessageWriter } from '@yume-chan/scrcpy';
 import { ScrcpyNewDisplay, ScrcpyCaptureOrientation, ScrcpyLockOrientation, ScrcpyOrientation, AndroidKeyCode, AndroidKeyEventAction } from '@yume-chan/scrcpy';
 import type { Adb } from '@yume-chan/adb';
+import { extractAppMeta, extractIconFromApk } from '../utils/apk-utils';
 
 export interface DisplayConfig {
   width: number;
@@ -52,20 +53,6 @@ function formatAppName(pkg: string): string {
     .trim();
 }
 
-async function tryExtractIcon(adb: Adb, apkPath: string, iconPath: string): Promise<string | null> {
-  try {
-    const cmd = `unzip -p "${apkPath}" "${iconPath}" 2>/dev/null | base64 | tr -d '\n'`;
-    const output = await adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', cmd]);
-    const trimmed = output.trim();
-    if (trimmed && trimmed.length > 100) {
-      return `data:image/png;base64,${trimmed.replace(/\n/g, '')}`;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 export function useScrcpy() {
   const [state, setState] = useState<ScrcpyState>({
     isStarting: false,
@@ -81,23 +68,24 @@ export function useScrcpy() {
   const controllerRef = useRef<ScrcpyControlMessageWriter | null>(null);
   const cleanupRef = useRef<(() => Promise<void>) | null>(null);
   const adbRef = useRef<Adb | null>(null);
+  const iconCacheRef = useRef<Map<string, string | null>>(new Map());
+  const labelCacheRef = useRef<Map<string, string | null>>(new Map());
+  const rotationStateRef = useRef<{ accel: string | null; userRot: string | null } | null>(null);
 
   const startScrcpy = useCallback(async (adb: Adb, canvas: HTMLCanvasElement, displayConfig?: DisplayConfig, isRetry?: boolean) => {
     try {
       setState(prev => ({ ...prev, isStarting: true, error: null, videoWidth: 0, videoHeight: 0 }));
 
-      // 动态导入 Scrcpy 相关库
       const { AdbScrcpyClient, AdbScrcpyOptionsLatest } = await import('@yume-chan/adb-scrcpy');
       const { WebCodecsVideoDecoder } = await import('@yume-chan/scrcpy-decoder-webcodecs');
       const { WebGLVideoFrameRenderer } = await import('@yume-chan/scrcpy-decoder-webcodecs/esm/video/render/webgl.js');
       const { DefaultServerPath } = await import('@yume-chan/scrcpy');
       const { ReadableStream } = await import('@yume-chan/stream-extra');
 
-      // 先检查并推送 scrcpy-server.jar 到设备
       const serverPath = '/data/local/tmp/scrcpy-server.jar';
       try {
         console.log('正在获取 scrcpy-server.jar...');
-        const response = await fetch('/scrcpy-server.jar');
+        const response = await fetch(import.meta.env.BASE_URL + 'scrcpy-server.jar');
         console.log('fetch 结果:', response.ok, 'size:', response.headers.get('content-length'));
         if (response.ok) {
           const arrayBuffer = await response.arrayBuffer();
@@ -125,7 +113,6 @@ export function useScrcpy() {
         console.warn('推送 scrcpy-server.jar 失败，尝试使用设备上已有的文件:', pushError);
       }
 
-      // 配置 Scrcpy 选项
       const useVirtualDisplay = !!displayConfig;
       const options = new AdbScrcpyOptionsLatest({
         video: true,
@@ -145,7 +132,6 @@ export function useScrcpy() {
         ),
       });
 
-      // 启动 Scrcpy 客户端
       const client = await AdbScrcpyClient.start(
         adb,
         serverPath,
@@ -155,22 +141,36 @@ export function useScrcpy() {
       clientRef.current = client;
       adbRef.current = adb;
 
-      // 获取控制器
+      if (useVirtualDisplay) {
+        try {
+          let prevAccel = '';
+          let prevUserRot = '';
+          try {
+            prevAccel = (await adb.subprocess.noneProtocol.spawnWaitText(['settings', 'get', 'global', 'accelerometer_rotation'])).trim();
+          } catch {}
+          try {
+            prevUserRot = (await adb.subprocess.noneProtocol.spawnWaitText(['settings', 'get', 'system', 'user_rotation'])).trim();
+          } catch {}
+          rotationStateRef.current = { accel: prevAccel || null, userRot: prevUserRot || null };
+          await adb.subprocess.noneProtocol.spawnWaitText(['settings', 'put', 'global', 'accelerometer_rotation', '0']);
+          await adb.subprocess.noneProtocol.spawnWaitText(['settings', 'put', 'system', 'user_rotation', '0']);
+        } catch (e) {
+          console.warn('锁定旋转方向失败:', e);
+        }
+      }
+
       const controller = client.controller;
       if (controller) {
         controllerRef.current = controller;
       }
 
-      // 获取视频流
       const videoStream = await client.videoStream;
       if (!videoStream) {
         throw new Error('无法获取视频流');
       }
 
-      // 创建 WebGL 渲染器
       const renderer = new WebGLVideoFrameRenderer(canvas);
 
-      // 创建视频解码器
       const decoder = new WebCodecsVideoDecoder({
         codec: videoStream.metadata.codec,
         renderer,
@@ -178,7 +178,6 @@ export function useScrcpy() {
 
       decoderRef.current = decoder;
 
-      // 监听尺寸变化
       const sizeUnsubscribe = videoStream.sizeChanged((size: { width: number; height: number }) => {
         setState(prev => ({
           ...prev,
@@ -187,7 +186,6 @@ export function useScrcpy() {
         }));
       });
 
-      // 连接视频流到解码器
       const stream = videoStream.stream;
       const reader = stream.getReader();
 
@@ -220,14 +218,12 @@ export function useScrcpy() {
         isVirtualDisplay: useVirtualDisplay,
       }));
 
-      // 清理函数
       cleanupRef.current = async () => {
         sizeUnsubscribe();
         await reader.cancel();
       };
 
     } catch (error) {
-      // 虚拟屏创建失败时自动回退到镜像模式
       if (!isRetry && displayConfig && error instanceof AdbScrcpyExitedError) {
         console.warn('虚拟屏创建失败，自动切换到镜像模式:', error);
         setState(prev => ({ ...prev, isStarting: true, error: '虚拟屏创建失败，自动切换到镜像模式...' }));
@@ -420,9 +416,6 @@ export function useScrcpy() {
     }
   }, []);
 
-  const iconCacheRef = useRef<Map<string, string | null>>(new Map());
-  const labelCacheRef = useRef<Map<string, string | null>>(new Map());
-
   const getAppLabel = useCallback(async (pkg: string): Promise<string> => {
     const cached = labelCacheRef.current.get(pkg);
     if (cached !== undefined) return cached ?? formatAppName(pkg);
@@ -431,46 +424,66 @@ export function useScrcpy() {
     if (!adb) return formatAppName(pkg);
 
     try {
-      let label = '';
+      const meta = await extractAppMeta(adb, pkg);
+      if (meta.label) {
+        console.log(`[getAppLabel] found via APK parsing: "${meta.label}"`);
+        labelCacheRef.current.set(pkg, meta.label);
+        return meta.label;
+      }
 
-      // Method 1: Parse dumpsys package output directly
       const dumpOutput = await adb.subprocess.noneProtocol.spawnWaitText(['dumpsys', 'package', pkg]);
-      for (const line of dumpOutput.split('\n')) {
-        const idx = line.indexOf('label=');
-        if (idx === -1) continue;
-        const value = line.substring(idx + 6).replace(/['"]/g, '').trim();
-        const firstWord = value.split(/[\s}]/)[0] || '';
-        if (firstWord && firstWord !== 'null' && !firstWord.startsWith('0x') && !/^\d+$/.test(firstWord)) {
-          label = firstWord;
-          break;
-        }
-      }
 
-      // Method 2: Try resolve-activity with proper intent syntax
-      if (!label) {
-        const resolveOutput = await adb.subprocess.noneProtocol.spawnWaitText([
-          'cmd', 'package', 'resolve-activity', '--brief',
-          '-a', 'android.intent.action.MAIN',
-          '-c', 'android.intent.category.LAUNCHER',
-          '-p', pkg,
-        ]);
-        const resolveMatch = resolveOutput.match(/label=([^\s]+)/);
-        if (resolveMatch) {
-          const value = resolveMatch[1]!.replace(/'/g, '').trim();
-          if (value && value !== 'null' && !value.startsWith('0x') && !/^\d+$/.test(value)) {
-            label = value;
+      const strategies = [
+        () => {
+          const m = dumpOutput.match(/applicationInfo[^}]*?label=([^\s'"}}]+)/);
+          return m?.[1];
+        },
+        () => {
+          for (const line of dumpOutput.split('\n')) {
+            const idx = line.indexOf('label=');
+            if (idx === -1) continue;
+            const val = line.substring(idx + 6).replace(/['"]/g, '').trim();
+            const word = val.split(/[\s}]/)[0] || '';
+            if (word && word !== 'null' && !word.startsWith('0x') && !/^\d+$/.test(word)) return word;
           }
+          return undefined;
+        },
+        () => {
+          const m = dumpOutput.match(/pkg=Package\{[^}]*?label=([^\s'"}}]+)/);
+          return m?.[1];
+        },
+      ];
+
+      for (const strategy of strategies) {
+        const result = strategy();
+        if (result && result !== 'null' && !result.startsWith('0x') && !/^\d+$/.test(result)) {
+          console.log(`[getAppLabel] found via dumpsys: "${result}"`);
+          labelCacheRef.current.set(pkg, result);
+          return result;
         }
       }
 
-      if (label) {
-        labelCacheRef.current.set(pkg, label);
-        return label;
+      const resolveOutput = await adb.subprocess.noneProtocol.spawnWaitText([
+        'cmd', 'package', 'resolve-activity',
+        '-a', 'android.intent.action.MAIN',
+        '-c', 'android.intent.category.LAUNCHER',
+        '-p', pkg,
+      ]);
+      const resolveMatch = resolveOutput.match(/label=([^\s]+)/);
+      if (resolveMatch) {
+        const val = resolveMatch[1]!.replace(/'/g, '').trim();
+        if (val && val !== 'null' && !val.startsWith('0x') && !/^\d+$/.test(val)) {
+          console.log(`[getAppLabel] found via resolve-activity: "${val}"`);
+          labelCacheRef.current.set(pkg, val);
+          return val;
+        }
       }
 
+      console.log(`[getAppLabel] all methods failed for ${pkg}, using fallback`);
       labelCacheRef.current.set(pkg, null);
       return formatAppName(pkg);
-    } catch {
+    } catch (e) {
+      console.error(`[getAppLabel] error for ${pkg}:`, e);
       labelCacheRef.current.set(pkg, null);
       return formatAppName(pkg);
     }
@@ -484,85 +497,13 @@ export function useScrcpy() {
     if (!adb) return null;
 
     try {
-      // Step 1: Get APK path
-      const pathOutput = await adb.subprocess.noneProtocol.spawnWaitText(['pm', 'path', pkg]);
-      const apkMatch = pathOutput.match(/^package:(.+)$/m);
-      if (!apkMatch) return null;
-      const apkPath = apkMatch[1]!.trim();
-
-      // Step 2: Try to get icon path from dumpsys
-      const dumpOutput = await adb.subprocess.noneProtocol.spawnWaitText(['dumpsys', 'package', pkg]);
-      let iconPath = '';
-      for (const line of dumpOutput.split('\n')) {
-        const idx = line.indexOf('icon=');
-        if (idx === -1) continue;
-        const value = line.substring(idx + 5).replace(/['"]/g, '').trim();
-        const firstWord = value.split(/[\s}]/)[0] || '';
-        if (firstWord && !firstWord.startsWith('0x') && !/^\d+$/.test(firstWord)) {
-          iconPath = firstWord;
-          break;
-        }
+      const iconUrl = await extractIconFromApk(adb, pkg);
+      if (iconUrl) {
+        iconCacheRef.current.set(pkg, iconUrl);
+        return iconUrl;
       }
 
-      // Step 3: Try resolve-activity for icon path
-      if (!iconPath) {
-        const resolveOutput = await adb.subprocess.noneProtocol.spawnWaitText([
-          'cmd', 'package', 'resolve-activity', '--brief',
-          '-a', 'android.intent.action.MAIN',
-          '-c', 'android.intent.category.LAUNCHER',
-          '-p', pkg,
-        ]);
-        const iconMatch = resolveOutput.match(/icon=([^\s]+)/);
-        if (iconMatch) {
-          const value = iconMatch[1]!.replace(/'/g, '').trim();
-          if (value && !value.startsWith('0x') && !/^\d+$/.test(value)) {
-            iconPath = value;
-          }
-        }
-      }
-
-      // Step 4: Search APK contents for icon files
-      if (!iconPath) {
-        const listOutput = await adb.subprocess.noneProtocol.spawnWaitText(['unzip', '-l', apkPath]);
-        const iconCandidates: string[] = [];
-
-        for (const line of listOutput.split('\n')) {
-          const fileMatch = line.match(/res\/(mipmap|drawable)[^ ]*\/([^ ]+\.(png|webp))/);
-          if (fileMatch) iconCandidates.push(fileMatch[0]!);
-        }
-
-        // Score and sort: prefer high-density mipmap with common icon names
-        const score = (path: string): number => {
-          let s = 0;
-          if (path.includes('ic_launcher_round')) s += 100;
-          if (path.includes('ic_launcher')) s += 80;
-          if (path.includes('/icon')) s += 60;
-          if (path.includes('mipmap-xxxhdpi')) s += 50;
-          if (path.includes('mipmap-xxhdpi')) s += 40;
-          if (path.includes('mipmap-xhdpi')) s += 30;
-          if (path.includes('mipmap-hdpi')) s += 20;
-          return s;
-        };
-        iconCandidates.sort((a, b) => score(b) - score(a));
-
-        for (const candidate of iconCandidates) {
-          const result = await tryExtractIcon(adb, apkPath, candidate);
-          if (result) {
-            iconCacheRef.current.set(pkg, result);
-            return result;
-          }
-        }
-        iconCacheRef.current.set(pkg, null);
-        return null;
-      }
-
-      // Step 5: Extract icon using the found path
-      const result = await tryExtractIcon(adb, apkPath, iconPath);
-      if (result) {
-        iconCacheRef.current.set(pkg, result);
-        return result;
-      }
-
+      console.log(`[getAppIcon] all methods failed for ${pkg}`);
       iconCacheRef.current.set(pkg, null);
       return null;
     } catch (error) {
@@ -574,6 +515,24 @@ export function useScrcpy() {
 
   const stopScrcpy = useCallback(async () => {
     try {
+      const adb = adbRef.current;
+      if (adb) {
+        const state = rotationStateRef.current;
+        if (state) {
+          try {
+            if (state.accel !== null) {
+              await adb.subprocess.noneProtocol.spawnWaitText(['settings', 'put', 'global', 'accelerometer_rotation', state.accel]);
+            }
+            if (state.userRot !== null) {
+              await adb.subprocess.noneProtocol.spawnWaitText(['settings', 'put', 'system', 'user_rotation', state.userRot]);
+            }
+          } catch (e) {
+            console.warn('恢复旋转方向失败:', e);
+          }
+          rotationStateRef.current = null;
+        }
+      }
+
       if (cleanupRef.current) {
         await cleanupRef.current();
         cleanupRef.current = null;
@@ -612,7 +571,6 @@ export function useScrcpy() {
     if (!adb) return;
 
     try {
-      // 发送电源键事件（KEYCODE_POWER = 26）
       await adb.subprocess.noneProtocol.spawnWaitText(['input', 'keyevent', '26']);
     } catch (error) {
       console.error('切换物理屏幕状态错误:', error);
@@ -624,7 +582,6 @@ export function useScrcpy() {
     if (!adb) return;
 
     try {
-      // 检查屏幕是否已开启
       let isScreenOn = false;
       try {
         const output = await adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', 'dumpsys power | grep mWakefulness']);
@@ -634,7 +591,6 @@ export function useScrcpy() {
       }
 
       if (isScreenOn) {
-        // 发送电源键关闭屏幕
         await adb.subprocess.noneProtocol.spawnWaitText(['input', 'keyevent', '26']);
       }
     } catch (error) {
@@ -647,7 +603,6 @@ export function useScrcpy() {
     if (!adb) return;
 
     try {
-      // 检查屏幕是否已关闭
       let isScreenOff = false;
       try {
         const output = await adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', 'dumpsys power | grep mWakefulness']);
@@ -657,7 +612,6 @@ export function useScrcpy() {
       }
 
       if (isScreenOff) {
-        // 发送电源键唤醒屏幕
         await adb.subprocess.noneProtocol.spawnWaitText(['input', 'keyevent', '26']);
       }
     } catch (error) {
