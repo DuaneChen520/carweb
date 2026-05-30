@@ -233,6 +233,8 @@ export function useScrcpy() {
           audioNextTimeRef.current = 0;
           console.log('[audio] AudioContext created, state:', audioCtx.state);
 
+          let decoderConfigured = false;
+
           const decoder = new AudioDecoder({
             output: (audioData: AudioData) => {
               try {
@@ -274,15 +276,6 @@ export function useScrcpy() {
             },
           });
 
-          const codecStr = codec.webCodecId || 'opus';
-          console.log('[audio] configuring AudioDecoder with codec:', codecStr);
-          decoder.configure({
-            codec: codecStr,
-            sampleRate: 48000,
-            numberOfChannels: 2,
-          });
-          console.log('[audio] AudioDecoder configured, state:', decoder.state);
-
           audioDecoderRef.current = decoder;
 
           const audioReader = audioStream.getReader();
@@ -297,7 +290,25 @@ export function useScrcpy() {
                 }
 
                 if (value.type === 'configuration') {
-                  console.log('[audio] received configuration packet');
+                  console.log('[audio] received configuration packet, size:', value.data.byteLength);
+                  const codecStr = codec.webCodecId || 'opus';
+                  const config: AudioDecoderConfig = {
+                    codec: codecStr,
+                    sampleRate: 48000,
+                    numberOfChannels: 2,
+                  };
+                  if (value.data.byteLength > 0) {
+                    config.description = value.data;
+                  }
+                  console.log('[audio] configuring AudioDecoder with codec:', codecStr, 'description size:', value.data.byteLength);
+                  decoder.configure(config);
+                  decoderConfigured = true;
+                  console.log('[audio] AudioDecoder configured, state:', decoder.state);
+                  continue;
+                }
+
+                if (!decoderConfigured) {
+                  console.warn('[audio] skipping frame before configuration');
                   continue;
                 }
 
