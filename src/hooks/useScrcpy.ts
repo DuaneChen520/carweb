@@ -419,9 +419,9 @@ export function useScrcpy() {
     try {
       const cmd = [
         'sh', '-c',
-        `LABEL=$(dumpsys package ${pkg} 2>/dev/null | grep -m1 "label=" | sed 's/.*label=//' | tr -d "'" | xargs); ` +
+        `LABEL=$(dumpsys package ${pkg} 2>/dev/null | grep -m1 "label=" | grep -v "label=null" | sed 's/.*label=//' | tr -d "'" | xargs); ` +
         `if [ -z "$LABEL" ]; then ` +
-          `LABEL=$(cmd package resolve-activity --brief ${pkg} 2>/dev/null | grep "label=" | head -1 | sed "s/.*label=//" | xargs); ` +
+          `LABEL=$(cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p ${pkg} 2>/dev/null | grep "label=" | head -1 | sed 's/.*label=//' | tr -d "'" | xargs); ` +
         `fi; ` +
         `if [ -z "$LABEL" ]; then ` +
           `APK=$(pm path ${pkg} 2>/dev/null | head -1 | sed 's/^package://'); ` +
@@ -458,9 +458,12 @@ export function useScrcpy() {
         'sh', '-c',
         `APK=$(pm path ${pkg} 2>/dev/null | head -1 | sed 's/^package://'); ` +
         `if [ -z "$APK" ] || [ ! -f "$APK" ]; then exit 1; fi; ` +
-        `ICON_PATH=$(dumpsys package ${pkg} 2>/dev/null | grep -m1 "icon=" | sed 's/.*icon=//' | tr -d "'" | xargs); ` +
+        `ICON_PATH=$(dumpsys package ${pkg} 2>/dev/null | grep -m1 "icon=" | grep -v "icon=0" | sed 's/.*icon=//' | tr -d "'" | xargs); ` +
         `if [ -z "$ICON_PATH" ]; then ` +
-          `ICON_PATH=$(unzip -l "$APK" 2>/dev/null | grep -oE '(mipmap|drawable)[^ ]*/(ic_launcher|ic_launcher_round|ic_launcher_foreground|icon)[^ ]*\\.(png|webp)' | head -1); ` +
+          `ICON_PATH=$(cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p ${pkg} 2>/dev/null | grep "icon=" | head -1 | sed 's/.*icon=//' | tr -d "'" | xargs); ` +
+        `fi; ` +
+        `if [ -z "$ICON_PATH" ] || echo "$ICON_PATH" | grep -qE '^0x|^[0-9]+$'; then ` +
+          `ICON_PATH=$(unzip -l "$APK" 2>/dev/null | grep -oE 'res/(mipmap|drawable)[^ ]*/(ic_launcher|ic_launcher_round|ic_launcher_foreground|icon)[^ ]*\\.(png|webp)' | head -1); ` +
         `fi; ` +
         `if [ -z "$ICON_PATH" ] && command -v aapt >/dev/null 2>&1; then ` +
           `ICON_PATH=$(aapt dump badging "$APK" 2>/dev/null | grep "application-icon:" | head -1 | sed "s/.*:'\\(.*\\)'/\\1/"); ` +
