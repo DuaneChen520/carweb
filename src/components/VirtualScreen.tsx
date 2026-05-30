@@ -1,7 +1,8 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
-import { Maximize2, Minimize2, RotateCcw, Power, Smartphone, Monitor, ArrowLeftRight, Keyboard } from 'lucide-react';
+import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
+import { Maximize2, Minimize2, RotateCcw, Power, Smartphone, Monitor, ArrowLeftRight, Keyboard, ChevronDown } from 'lucide-react';
 import { AndroidMotionEventAction } from '@yume-chan/scrcpy';
-import { useScrcpy } from '../hooks/useScrcpy';
+import { useScrcpy, RESOLUTION_PRESETS } from '../hooks/useScrcpy';
+import type { ResolutionPresetKey } from '../hooks/useScrcpy';
 import { useAdbStore } from '../hooks/useAdbStore';
 import { ControlSidebar } from './ControlSidebar';
 
@@ -16,6 +17,8 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [restartCount, setRestartCount] = useState(0);
   const [useMirrorMode, setUseMirrorMode] = useState(false);
+  const [resolutionPreset, setResolutionPreset] = useState<ResolutionPresetKey>('original');
+  const [showResMenu, setShowResMenu] = useState(false);
   const [showVirtualKeyboard, setShowVirtualKeyboard] = useState(false);
   const [keyboardInput, setKeyboardInput] = useState('');
   const [isKeyboardInputFocused, setIsKeyboardInputFocused] = useState(false);
@@ -41,6 +44,22 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     return () => resizeObserver.disconnect();
   }, []);
 
+  const currentPreset = RESOLUTION_PRESETS.find(p => p.key === resolutionPreset)!;
+  const dpr = window.devicePixelRatio || 1;
+
+  const displayConfig = useMemo(() => {
+    if (useMirrorMode || containerSize.width === 0 || containerSize.height === 0) return undefined;
+    const w = Math.round(containerSize.width * currentPreset.scale * dpr);
+    const h = Math.round(containerSize.height * currentPreset.scale * dpr);
+    const pixelRatio = (w * h) / (1920 * 1080);
+    return {
+      width: w,
+      height: h,
+      dpi: Math.round(320 * currentPreset.dpiMultiplier * dpr),
+      bitRate: Math.max(1000000, Math.min(40000000, Math.round(8000000 * pixelRatio))),
+    };
+  }, [containerSize.width, containerSize.height, useMirrorMode, currentPreset, dpr]);
+
   // 启动 scrcpy
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -52,12 +71,9 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     if (useMirrorMode || containerSize.width === 0 || containerSize.height === 0) {
       startScrcpy(adb, canvas);
     } else {
-      startScrcpy(adb, canvas, {
-        width: Math.round(containerSize.width),
-        height: Math.round(containerSize.height),
-      });
+      startScrcpy(adb, canvas, displayConfig);
     }
-  }, [store.adb, isRunning, isStarting, containerSize.width, containerSize.height, restartCount, useMirrorMode, startScrcpy]);
+  }, [store.adb, isRunning, isStarting, containerSize.width, containerSize.height, restartCount, useMirrorMode, startScrcpy, resolutionPreset, displayConfig]);
 
   // 组件卸载时清理
   useEffect(() => {
@@ -67,6 +83,17 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
       }
     };
   }, [stopScrcpy]);
+
+  // 关闭分辨率菜单
+  useEffect(() => {
+    if (!showResMenu) return;
+    const handleClick = () => setShowResMenu(false);
+    const timer = setTimeout(() => document.addEventListener('click', handleClick), 0);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('click', handleClick);
+    };
+  }, [showResMenu]);
 
   // 计算自适应尺寸
   const calculateAdaptiveSize = useCallback(() => {
@@ -137,6 +164,17 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     setUseMirrorMode(m => !m);
     setRestartCount(c => c + 1);
   }, [isStarting, store.adb, stopScrcpy]);
+
+  const changeResolutionPreset = useCallback(async (preset: ResolutionPresetKey) => {
+    if (preset === resolutionPreset) return;
+    setResolutionPreset(preset);
+    setShowResMenu(false);
+    if (isRunning || isStarting) {
+      await stopScrcpy();
+      hasStartedRef.current = false;
+      setRestartCount(c => c + 1);
+    }
+  }, [resolutionPreset, isRunning, isStarting, stopScrcpy]);
 
   // 将屏幕坐标转换为视频坐标
   const screenToVideoCoords = useCallback((clientX: number, clientY: number) => {
@@ -232,7 +270,8 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   }, [showVirtualKeyboard, showKeyboard, hideKeyboard]);
 
   const displayLabel = isVirtualDisplay ? '虚拟屏' : '镜像';
-  const dpiLabel = isVirtualDisplay ? ' @ 320dpi' : '';
+  const dpiLabel = isVirtualDisplay && displayConfig?.dpi ? ` @ ${displayConfig.dpi}dpi` : '';
+  const separator = displayConfig?.width ? `${displayConfig.width}x${displayConfig.height}` : '';
 
   return (
     <div className="flex w-full h-screen bg-black">
@@ -268,6 +307,12 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
                   {videoWidth && videoHeight ? (
                     <>
                       <span>{displayLabel} {videoWidth}x{videoHeight}{dpiLabel}</span>
+                      {dpr !== 1 && (
+                        <span className="text-white/30">{dpr}x</span>
+                      )}
+                      {isVirtualDisplay && (
+                        <span className="text-blue-400/60">{currentPreset.label}</span>
+                      )}
                       {!useMirrorMode && (
                         <>
                           <span>|</span>
@@ -283,6 +328,33 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
             </div>
 
             <div className="flex items-center gap-2">
+              {isRunning && !useMirrorMode && (
+                <div className="relative">
+                  <button
+                    onClick={() => setShowResMenu(v => !v)}
+                    className="flex items-center gap-1 px-2 py-1.5 text-xs bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-white/80"
+                    title="画质设置"
+                  >
+                    {currentPreset.label}
+                    <ChevronDown className="w-3 h-3" />
+                  </button>
+                  {showResMenu && (
+                    <div className="absolute top-full right-0 mt-1 bg-black/95 backdrop-blur-md border border-white/10 rounded-lg overflow-hidden z-50 min-w-[90px] shadow-xl">
+                      {RESOLUTION_PRESETS.map(p => (
+                        <button
+                          key={p.key}
+                          onClick={() => changeResolutionPreset(p.key)}
+                          className={`w-full px-3 py-1.5 text-xs text-left hover:bg-white/10 transition-colors ${
+                            p.key === resolutionPreset ? 'text-blue-400 bg-blue-500/20' : 'text-white/70'
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               {isRunning && (
                 <button
                   onClick={toggleDisplayMode}
@@ -334,7 +406,7 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
                 </div>
                 <div className="text-white/60 text-sm mt-2">
                   {!useMirrorMode && containerSize.width > 0 && containerSize.height > 0
-                    ? `目标分辨率 ${Math.round(containerSize.width)}x${Math.round(containerSize.height)} @ 320dpi`
+                    ? `目标 ${separator} @ ${displayConfig?.dpi ?? 320}dpi（${currentPreset.label}）`
                     : '请稍候'}
                 </div>
               </div>
@@ -405,6 +477,12 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
               )}
               {isRunning && videoWidth > 0 && (
                 <span>{displayLabel} {videoWidth}x{videoHeight}{dpiLabel}</span>
+              )}
+              {isVirtualDisplay && (
+                <span className="text-white/50">{currentPreset.label}</span>
+              )}
+              {dpr !== 1 && (
+                <span className="text-white/30">{dpr}x</span>
               )}
             </div>
           </div>

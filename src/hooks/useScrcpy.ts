@@ -3,14 +3,31 @@ import type { AdbScrcpyClient, AdbScrcpyOptionsLatest } from '@yume-chan/adb-scr
 import { AdbScrcpyExitedError } from '@yume-chan/adb-scrcpy';
 import type { WebCodecsVideoDecoder } from '@yume-chan/scrcpy-decoder-webcodecs';
 import type { ScrcpyControlMessageWriter } from '@yume-chan/scrcpy';
-import { ScrcpyNewDisplay, AndroidKeyCode, AndroidKeyEventAction } from '@yume-chan/scrcpy';
+import { ScrcpyNewDisplay, ScrcpyCaptureOrientation, ScrcpyLockOrientation, ScrcpyOrientation, AndroidKeyCode, AndroidKeyEventAction } from '@yume-chan/scrcpy';
 import type { Adb } from '@yume-chan/adb';
 
 export interface DisplayConfig {
   width: number;
   height: number;
   dpi?: number;
+  bitRate?: number;
 }
+
+export type ResolutionPresetKey = 'original' | 'ultra' | 'hd' | 'smooth';
+
+export interface ResolutionPreset {
+  key: ResolutionPresetKey;
+  label: string;
+  scale: number;
+  dpiMultiplier: number;
+}
+
+export const RESOLUTION_PRESETS: ResolutionPreset[] = [
+  { key: 'original', label: '原画', scale: 1.0, dpiMultiplier: 1.0 },
+  { key: 'ultra',   label: '超清', scale: 0.75, dpiMultiplier: 1.33 },
+  { key: 'hd',      label: '高清', scale: 0.5,  dpiMultiplier: 2.0 },
+  { key: 'smooth',  label: '流畅', scale: 0.25, dpiMultiplier: 4.0 },
+];
 
 export interface AppInfo {
   package: string;
@@ -99,7 +116,7 @@ export function useScrcpy() {
       const options = new AdbScrcpyOptionsLatest({
         video: true,
         videoCodec: 'h264',
-        videoBitRate: 8000000,
+        videoBitRate: displayConfig?.bitRate ?? 8000000,
         maxFps: 60,
         audio: false,
         control: true,
@@ -108,6 +125,7 @@ export function useScrcpy() {
         ...(useVirtualDisplay
           ? {
               newDisplay: new ScrcpyNewDisplay(displayConfig.width, displayConfig.height, displayConfig.dpi ?? 320),
+              captureOrientation: new ScrcpyCaptureOrientation(ScrcpyLockOrientation.LockedInitial, ScrcpyOrientation.Orient0),
             }
           : { displayId: 0 }
         ),
