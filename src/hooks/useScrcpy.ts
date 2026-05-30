@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import type { AdbScrcpyClient, AdbScrcpyOptionsLatest } from '@yume-chan/adb-scrcpy';
 import { AdbScrcpyExitedError } from '@yume-chan/adb-scrcpy';
 import type { WebCodecsVideoDecoder } from '@yume-chan/scrcpy-decoder-webcodecs';
-import type { ScrcpyControlMessageWriter } from '@yume-chan/scrcpy';
+import type { ScrcpyControlMessageWriter, ScrcpyMediaStreamPacket } from '@yume-chan/scrcpy';
 import { ScrcpyNewDisplay, ScrcpyCaptureOrientation, ScrcpyLockOrientation, ScrcpyOrientation, AndroidKeyCode, AndroidKeyEventAction } from '@yume-chan/scrcpy';
 import type { Adb } from '@yume-chan/adb';
 import { extractAppMeta, extractIconFromApk } from '@/utils/apk-utils';
@@ -65,6 +65,9 @@ export function useScrcpy() {
 
   const clientRef = useRef<AdbScrcpyClient<AdbScrcpyOptionsLatest<true>> | null>(null);
   const decoderRef = useRef<WebCodecsVideoDecoder | null>(null);
+  const audioDecoderRef = useRef<AudioDecoder | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioNextTimeRef = useRef(0);
   const controllerRef = useRef<ScrcpyControlMessageWriter | null>(null);
   const cleanupRef = useRef<(() => Promise<void>) | null>(null);
   const adbRef = useRef<Adb | null>(null);
@@ -119,7 +122,8 @@ export function useScrcpy() {
         videoCodec: 'h264',
         videoBitRate: displayConfig?.bitRate ?? 8000000,
         maxFps: 60,
-        audio: false,
+        audio: true,
+        audioCodec: 'opus',
         control: true,
         stayAwake: true,
         showTouches: true,
@@ -209,6 +213,99 @@ export function useScrcpy() {
       };
 
       pump();
+
+      const audioStreamPromise = client.audioStream;
+      if (audioStreamPromise) {
+        audioStreamPromise.then(async (audioMeta) => {
+          if (audioMeta.type !== 'success') {
+            console.warn('音频流不可用:', audioMeta.type);
+            return;
+          }
+
+          const { codec, stream: audioStream } = audioMeta;
+
+          const audioCtx = new AudioContext({ sampleRate: 48000 });
+          audioContextRef.current = audioCtx;
+          audioNextTimeRef.current = 0;
+
+          const decoder = new AudioDecoder({
+            output: (audioData: AudioData) => {
+              try {
+                if (audioCtx.state === 'suspended') {
+                  audioCtx.resume();
+                }
+
+                const numberOfChannels = audioData.numberOfChannels;
+                const sampleRate = audioData.sampleRate;
+                const numberOfFrames = audioData.numberOfFrames;
+                const channelData = new Float32Array(numberOfFrames * numberOfChannels);
+                for (let ch = 0; ch < numberOfChannels; ch++) {
+                  const channel = new Float32Array(numberOfFrames);
+                  audioData.copyTo(channel, { planeIndex: ch });
+                  channelData.set(channel, ch * numberOfFrames);
+                }
+                audioData.close();
+
+                const audioBuffer = audioCtx.createBuffer(numberOfChannels, numberOfFrames, sampleRate);
+                for (let ch = 0; ch < numberOfChannels; ch++) {
+                  const channel = channelData.subarray(ch * numberOfFrames, (ch + 1) * numberOfFrames);
+                  audioBuffer.copyToChannel(channel, ch);
+                }
+
+                const source = audioCtx.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioCtx.destination);
+
+                const now = audioCtx.currentTime;
+                const startTime = Math.max(now, audioNextTimeRef.current);
+                source.start(startTime);
+                audioNextTimeRef.current = startTime + audioBuffer.duration;
+              } catch (e) {
+                console.warn('音频播放错误:', e);
+              }
+            },
+            error: (e) => {
+              console.error('音频解码错误:', e);
+            },
+          });
+
+          const codecStr = codec.webCodecId || 'opus';
+          decoder.configure({
+            codec: codecStr,
+            sampleRate: 48000,
+            numberOfChannels: 2,
+          });
+
+          audioDecoderRef.current = decoder;
+
+          const audioReader = audioStream.getReader();
+          const audioPump = async () => {
+            try {
+              while (true) {
+                const { done, value } = await audioReader.read();
+                if (done) break;
+
+                if (value.type === 'configuration') {
+                  continue;
+                }
+
+                const packet: EncodedAudioChunkInit = {
+                  type: value.keyframe ? 'key' : 'delta',
+                  data: value.data,
+                  timestamp: value.pts != null ? Number(value.pts) : 0,
+                };
+                decoder.decode(new EncodedAudioChunk(packet));
+              }
+            } catch (error) {
+              console.error('音频流读取错误:', error);
+            }
+          };
+
+          audioPump();
+        }).catch((e: unknown) => {
+          console.warn('音频流获取失败:', e);
+        });
+      }
 
       setState(prev => ({
         ...prev,
@@ -542,6 +639,18 @@ export function useScrcpy() {
       if (decoderRef.current) {
         decoderRef.current.dispose();
         decoderRef.current = null;
+      }
+
+      if (audioDecoderRef.current) {
+        if (audioDecoderRef.current.state !== 'closed') {
+          audioDecoderRef.current.close();
+        }
+        audioDecoderRef.current = null;
+      }
+
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+        audioContextRef.current = null;
       }
 
       if (controllerRef.current) {
