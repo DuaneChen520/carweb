@@ -5,7 +5,7 @@ import type { WebCodecsVideoDecoder } from '@yume-chan/scrcpy-decoder-webcodecs'
 import type { ScrcpyControlMessageWriter } from '@yume-chan/scrcpy';
 import { ScrcpyNewDisplay, ScrcpyCaptureOrientation, ScrcpyLockOrientation, ScrcpyOrientation, AndroidKeyCode, AndroidKeyEventAction } from '@yume-chan/scrcpy';
 import type { Adb } from '@yume-chan/adb';
-import { extractAppMeta, extractIconFromApk } from '../utils/apk-utils';
+import { extractAppMeta, extractIconFromApk } from '@/utils/apk-utils';
 
 export interface DisplayConfig {
   width: number;
