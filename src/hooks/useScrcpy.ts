@@ -419,7 +419,7 @@ export function useScrcpy() {
     try {
       const cmd = [
         'sh', '-c',
-        `LABEL=$(dumpsys package ${pkg} 2>/dev/null | grep -m1 "android:label=" | sed "s/.*android:label=//" | tr -d "'" | xargs); ` +
+        `LABEL=$(dumpsys package ${pkg} 2>/dev/null | grep -m1 "label=" | sed 's/.*label=//' | tr -d "'" | xargs); ` +
         `if [ -z "$LABEL" ]; then ` +
           `LABEL=$(cmd package resolve-activity --brief ${pkg} 2>/dev/null | grep "label=" | head -1 | sed "s/.*label=//" | xargs); ` +
         `fi; ` +
@@ -458,15 +458,15 @@ export function useScrcpy() {
         'sh', '-c',
         `APK=$(pm path ${pkg} 2>/dev/null | head -1 | sed 's/^package://'); ` +
         `if [ -z "$APK" ] || [ ! -f "$APK" ]; then exit 1; fi; ` +
-        `ICON_PATH=$(dumpsys package ${pkg} 2>/dev/null | grep -m1 "android:icon=" | sed 's/.*android:icon=//' | tr -d "'" | xargs); ` +
+        `ICON_PATH=$(dumpsys package ${pkg} 2>/dev/null | grep -m1 "icon=" | sed 's/.*icon=//' | tr -d "'" | xargs); ` +
         `if [ -z "$ICON_PATH" ]; then ` +
-          `ICON_PATH=$(unzip -l "$APK" 2>/dev/null | grep -oE 'mipmap[^ ]*/(ic_launcher|ic_launcher_round|ic_launcher_foreground)[^ ]*\\.png' | head -1); ` +
+          `ICON_PATH=$(unzip -l "$APK" 2>/dev/null | grep -oE '(mipmap|drawable)[^ ]*/(ic_launcher|ic_launcher_round|ic_launcher_foreground|icon)[^ ]*\\.(png|webp)' | head -1); ` +
         `fi; ` +
         `if [ -z "$ICON_PATH" ] && command -v aapt >/dev/null 2>&1; then ` +
           `ICON_PATH=$(aapt dump badging "$APK" 2>/dev/null | grep "application-icon:" | head -1 | sed "s/.*:'\\(.*\\)'/\\1/"); ` +
         `fi; ` +
         `if [ -n "$ICON_PATH" ]; then ` +
-          `unzip -p "$APK" "$ICON_PATH" 2>/dev/null | base64 -w0; ` +
+          `unzip -p "$APK" "$ICON_PATH" 2>/dev/null | base64 | tr -d '\n'; ` +
         `fi`
       ];
 
