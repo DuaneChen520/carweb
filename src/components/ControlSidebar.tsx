@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Search, Grid, ArrowLeft, Home, Loader2, X, MonitorOff } from 'lucide-react';
+import { Search, Grid, ArrowLeft, Home, Loader2, X, MonitorOff, Maximize2, Minimize2, ArrowLeftRight, Monitor, Power, Keyboard, ChevronDown } from 'lucide-react';
+import type { ResolutionPresetKey } from '../hooks/useScrcpy';
+import { RESOLUTION_PRESETS } from '../hooks/useScrcpy';
 
 const PRIORITY_PACKAGES = [
   'com.android.contacts',
@@ -70,9 +72,29 @@ interface ControlSidebarProps {
   togglePhysicalScreen?: () => Promise<void>;
   turnOffPhysicalScreen?: () => Promise<void>;
   turnOnPhysicalScreen?: () => Promise<void>;
+  isRunning?: boolean;
+  useMirrorMode?: boolean;
+  isFullscreen?: boolean;
+  toggleFullscreen?: () => void;
+  toggleDisplayMode?: () => void;
+  handleApplyNewSize?: () => void;
+  handleStop?: () => void;
+  toggleVirtualKeyboard?: () => void;
+  showVirtualKeyboard?: boolean;
+  currentPreset?: { key: string; label: string; scale: number; dpiMultiplier: number };
+  resolutionPreset?: ResolutionPresetKey;
+  changeResolutionPreset?: (preset: ResolutionPresetKey) => void;
+  showResMenu?: boolean;
+  setShowResMenu?: (v: boolean) => void;
 }
 
-export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAppList, getAppIcon, getAppLabel, injectText, isVirtualDisplay, togglePhysicalScreen, turnOffPhysicalScreen }: ControlSidebarProps) {
+export function ControlSidebar({
+  goBack, goHome, showRecentApps, startApp, getAppList, getAppIcon, getAppLabel, injectText,
+  isVirtualDisplay, togglePhysicalScreen, turnOffPhysicalScreen,
+  isRunning, useMirrorMode, isFullscreen, toggleFullscreen, toggleDisplayMode, handleApplyNewSize, handleStop,
+  toggleVirtualKeyboard, showVirtualKeyboard,
+  currentPreset, resolutionPreset, changeResolutionPreset, showResMenu, setShowResMenu,
+}: ControlSidebarProps) {
   const [panelMode, setPanelMode] = useState<'closed' | 'search' | 'apps'>('closed');
   const [searchText, setSearchText] = useState('');
   const [apps, setApps] = useState<string[] | null>(null);
@@ -210,9 +232,7 @@ export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAp
 
   return (
     <>
-      {/* 固定窄栏 */}
       <div className="w-13 flex flex-col items-center py-2 gap-1 bg-black/60 border-r border-white/10">
-        {/* 搜索按钮 */}
         <button
           onClick={() => togglePanel('search')}
           className={`p-2 rounded-lg transition-colors ${panelMode === 'search' ? 'bg-blue-500/30 text-blue-400' : 'text-white/50 hover:text-white hover:bg-white/10'}`}
@@ -221,7 +241,6 @@ export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAp
           <Search className="w-5 h-5" />
         </button>
 
-        {/* 全部应用按钮 */}
         <button
           onClick={() => togglePanel('apps')}
           className={`p-2 rounded-lg transition-colors ${panelMode === 'apps' ? 'bg-blue-500/30 text-blue-400' : 'text-white/50 hover:text-white hover:bg-white/10'}`}
@@ -232,7 +251,6 @@ export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAp
 
         <div className="w-8 h-px bg-white/10 my-1" />
 
-        {/* 常用应用（仅图标） */}
         {pinnedApps.map((pkg) => (
           <AppIcon
             key={pkg}
@@ -246,7 +264,73 @@ export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAp
 
         <div className="flex-1" />
 
-        {/* 导航按钮 */}
+        {isRunning && toggleVirtualKeyboard && (
+          <button
+            onClick={toggleVirtualKeyboard}
+            className={`p-2 rounded-lg transition-colors ${showVirtualKeyboard ? 'bg-blue-500/30 text-blue-400' : 'text-white/50 hover:text-white hover:bg-white/10'}`}
+            title="虚拟键盘"
+          >
+            <Keyboard className="w-5 h-5" />
+          </button>
+        )}
+
+        {isRunning && !useMirrorMode && currentPreset && setShowResMenu && (
+          <div className="relative">
+            <button
+              onClick={() => setShowResMenu(!showResMenu)}
+              className="p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+              title={`画质: ${currentPreset.label}`}
+            >
+              <ChevronDown className="w-5 h-5" />
+            </button>
+            {showResMenu && changeResolutionPreset && (
+              <div className="absolute bottom-full right-full mb-1 mr-1 bg-black/95 backdrop-blur-md border border-white/10 rounded-lg overflow-hidden z-50 min-w-[90px] shadow-xl">
+                {RESOLUTION_PRESETS.map(p => (
+                  <button
+                    key={p.key}
+                    onClick={() => changeResolutionPreset(p.key)}
+                    className={`w-full px-3 py-1.5 text-xs text-left hover:bg-white/10 transition-colors ${
+                      p.key === resolutionPreset ? 'text-blue-400 bg-blue-500/20' : 'text-white/70'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {isRunning && toggleDisplayMode && (
+          <button
+            onClick={toggleDisplayMode}
+            className="p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+            title={useMirrorMode ? '切换到虚拟屏模式' : '切换到镜像模式'}
+          >
+            <ArrowLeftRight className="w-5 h-5" />
+          </button>
+        )}
+
+        {isRunning && !useMirrorMode && handleApplyNewSize && (
+          <button
+            onClick={handleApplyNewSize}
+            className="p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+            title="重新应用窗口尺寸"
+          >
+            <Monitor className="w-5 h-5" />
+          </button>
+        )}
+
+        {toggleFullscreen && (
+          <button
+            onClick={toggleFullscreen}
+            className="p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+            title={isFullscreen ? '退出全屏' : '全屏'}
+          >
+            {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+          </button>
+        )}
+
         <button
           onClick={goBack}
           className="p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
@@ -269,7 +353,6 @@ export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAp
           <Grid className="w-5 h-5" />
         </button>
 
-        {/* 关闭物理屏幕按钮（仅在虚拟屏模式下显示） */}
         {isVirtualDisplay && turnOffPhysicalScreen && (
           <button
             onClick={turnOffPhysicalScreen}
@@ -279,9 +362,18 @@ export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAp
             <MonitorOff className="w-5 h-5" />
           </button>
         )}
+
+        {handleStop && (
+          <button
+            onClick={handleStop}
+            className="p-2 text-red-400/80 hover:text-red-400 hover:bg-red-500/20 rounded-lg transition-colors"
+            title="断开连接"
+          >
+            <Power className="w-5 h-5" />
+          </button>
+        )}
       </div>
 
-      {/* 悬浮弹窗 */}
       {panelMode !== 'closed' && (
         <div
           ref={panelRef}
@@ -295,7 +387,6 @@ export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAp
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
         >
-          {/* 可拖动标题栏 */}
           <div className="drag-handle flex items-center justify-between px-4 pt-3 pb-2 cursor-move select-none bg-white/5 hover:bg-white/10 transition-colors">
             <span className="text-white/80 text-sm font-medium">
               {panelMode === 'search' ? '搜索应用' : showSystem ? '所有应用' : '第三方应用'}
@@ -309,7 +400,6 @@ export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAp
             </button>
           </div>
 
-          {/* 搜索栏 */}
           <div className="px-3 pb-2">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/40" />
@@ -324,7 +414,6 @@ export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAp
             </div>
           </div>
 
-          {/* 系统应用开关 */}
           {panelMode === 'apps' && (
             <div className="px-4 pb-2 flex items-center gap-2">
               <button
@@ -338,7 +427,6 @@ export function ControlSidebar({ goBack, goHome, showRecentApps, startApp, getAp
             </div>
           )}
 
-          {/* 应用列表 */}
           <div className="flex-1 overflow-y-auto px-2 space-y-1">
             {panelMode === 'search' ? (
               filteredPinned.length > 0 ? (

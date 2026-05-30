@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
-import { Maximize2, Minimize2, RotateCcw, Power, Smartphone, Monitor, ArrowLeftRight, Keyboard, ChevronDown } from 'lucide-react';
+import { Maximize2, Minimize2, RotateCcw, Power, Monitor, ArrowLeftRight, Keyboard, ChevronDown } from 'lucide-react';
 import { AndroidMotionEventAction } from '@yume-chan/scrcpy';
 import { useScrcpy, RESOLUTION_PRESETS } from '../hooks/useScrcpy';
 import type { ResolutionPresetKey } from '../hooks/useScrcpy';
@@ -27,7 +27,6 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   const { startScrcpy, stopScrcpy, injectTouch, injectText, showKeyboard, hideKeyboard, startApp, goHome, goBack, showRecentApps, getAppList, getAppIcon, getAppLabel, togglePhysicalScreen, turnOffPhysicalScreen, turnOnPhysicalScreen, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay } = useScrcpy();
   const store = useAdbStore();
 
-  // 监听容器尺寸变化
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -60,7 +59,6 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     };
   }, [containerSize.width, containerSize.height, useMirrorMode, currentPreset, dpr]);
 
-  // 启动 scrcpy
   useEffect(() => {
     const canvas = canvasRef.current;
     const adb = store.adb;
@@ -75,7 +73,6 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     }
   }, [store.adb, isRunning, isStarting, containerSize.width, containerSize.height, restartCount, useMirrorMode, startScrcpy, resolutionPreset, displayConfig]);
 
-  // 组件卸载时清理
   useEffect(() => {
     return () => {
       if (hasStartedRef.current) {
@@ -84,7 +81,6 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     };
   }, [stopScrcpy]);
 
-  // 关闭分辨率菜单
   useEffect(() => {
     if (!showResMenu) return;
     const handleClick = () => setShowResMenu(false);
@@ -95,7 +91,6 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     };
   }, [showResMenu]);
 
-  // 计算自适应尺寸
   const calculateAdaptiveSize = useCallback(() => {
     if (!videoWidth || !videoHeight || !containerSize.width || !containerSize.height) {
       return { width: '100%', height: '100%' };
@@ -123,7 +118,6 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
 
   const adaptiveSize = calculateAdaptiveSize();
 
-  // 全屏切换
   const toggleFullscreen = useCallback(async () => {
     try {
       if (!isFullscreen) {
@@ -138,7 +132,6 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     }
   }, [isFullscreen]);
 
-  // 监听全屏变化
   useEffect(() => {
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
@@ -148,7 +141,6 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
-  // 重新应用当前窗口尺寸
   const handleApplyNewSize = useCallback(async () => {
     if (isStarting || !store.adb) return;
     await stopScrcpy();
@@ -156,7 +148,6 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     setRestartCount(c => c + 1);
   }, [isStarting, store.adb, stopScrcpy]);
 
-  // 切换镜像/虚拟屏模式
   const toggleDisplayMode = useCallback(async () => {
     if (isStarting || !store.adb) return;
     await stopScrcpy();
@@ -176,7 +167,6 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     }
   }, [resolutionPreset, isRunning, isStarting, stopScrcpy]);
 
-  // 将屏幕坐标转换为视频坐标
   const screenToVideoCoords = useCallback((clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
     if (!canvas || !videoWidth || !videoHeight) return null;
@@ -197,7 +187,6 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     return { pointerX, pointerY };
   }, [videoWidth, videoHeight]);
 
-  // 处理触摸/鼠标事件转发
   const handlePointerEvent = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
 
@@ -269,8 +258,6 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     }
   }, [showVirtualKeyboard, showKeyboard, hideKeyboard]);
 
-  const displayLabel = isVirtualDisplay ? '虚拟屏' : '镜像';
-  const dpiLabel = isVirtualDisplay && displayConfig?.dpi ? ` @ ${displayConfig.dpi}dpi` : '';
   const separator = displayConfig?.width ? `${displayConfig.width}x${displayConfig.height}` : '';
 
   return (
@@ -288,114 +275,26 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
         togglePhysicalScreen={togglePhysicalScreen}
         turnOffPhysicalScreen={turnOffPhysicalScreen}
         turnOnPhysicalScreen={turnOnPhysicalScreen}
+        isRunning={isRunning}
+        useMirrorMode={useMirrorMode}
+        isFullscreen={isFullscreen}
+        toggleFullscreen={toggleFullscreen}
+        toggleDisplayMode={toggleDisplayMode}
+        handleApplyNewSize={handleApplyNewSize}
+        handleStop={handleStop}
+        toggleVirtualKeyboard={toggleVirtualKeyboard}
+        showVirtualKeyboard={showVirtualKeyboard}
+        currentPreset={currentPreset}
+        resolutionPreset={resolutionPreset}
+        changeResolutionPreset={changeResolutionPreset}
+        showResMenu={showResMenu}
+        setShowResMenu={setShowResMenu}
       />
 
       <div
         ref={containerRef}
         className="flex-1 relative flex flex-col min-w-0"
       >
-        {/* 顶部工具栏 */}
-        <div className="absolute top-0 left-0 right-0 z-10 bg-gradient-to-b from-black/80 to-transparent p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Smartphone className="w-5 h-5 text-white" />
-              <div>
-                <div className="text-white text-sm font-medium">
-                  {store.deviceName || '未知设备'}
-                </div>
-                <div className="text-white/60 text-xs space-x-2">
-                  {videoWidth && videoHeight ? (
-                    <>
-                      <span>{displayLabel} {videoWidth}x{videoHeight}{dpiLabel}</span>
-                      {dpr !== 1 && (
-                        <span className="text-white/30">{dpr}x</span>
-                      )}
-                      {isVirtualDisplay && (
-                        <span className="text-blue-400/60">{currentPreset.label}</span>
-                      )}
-                      {!useMirrorMode && (
-                        <>
-                          <span>|</span>
-                          <span>窗口 {Math.round(containerSize.width)}x{Math.round(containerSize.height)}</span>
-                        </>
-                      )}
-                    </>
-                  ) : (
-                    '连接中...'
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {isRunning && !useMirrorMode && (
-                <div className="relative">
-                  <button
-                    onClick={() => setShowResMenu(v => !v)}
-                    className="flex items-center gap-1 px-2 py-1.5 text-xs bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-white/80"
-                    title="画质设置"
-                  >
-                    {currentPreset.label}
-                    <ChevronDown className="w-3 h-3" />
-                  </button>
-                  {showResMenu && (
-                    <div className="absolute top-full right-0 mt-1 bg-black/95 backdrop-blur-md border border-white/10 rounded-lg overflow-hidden z-50 min-w-[90px] shadow-xl">
-                      {RESOLUTION_PRESETS.map(p => (
-                        <button
-                          key={p.key}
-                          onClick={() => changeResolutionPreset(p.key)}
-                          className={`w-full px-3 py-1.5 text-xs text-left hover:bg-white/10 transition-colors ${
-                            p.key === resolutionPreset ? 'text-blue-400 bg-blue-500/20' : 'text-white/70'
-                          }`}
-                        >
-                          {p.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-              {isRunning && (
-                <button
-                  onClick={toggleDisplayMode}
-                  className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
-                  title={useMirrorMode ? '切换到虚拟屏模式' : '切换到镜像模式'}
-                >
-                  <ArrowLeftRight className="w-4 h-4 text-white" />
-                </button>
-              )}
-              {isRunning && !useMirrorMode && (
-                <button
-                  onClick={handleApplyNewSize}
-                  className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
-                  title="重新应用窗口尺寸"
-                >
-                  <Monitor className="w-4 h-4 text-white" />
-                </button>
-              )}
-              <button
-                onClick={toggleFullscreen}
-                className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
-                title={isFullscreen ? '退出全屏' : '全屏'}
-              >
-                {isFullscreen ? (
-                  <Minimize2 className="w-4 h-4 text-white" />
-                ) : (
-                  <Maximize2 className="w-4 h-4 text-white" />
-                )}
-              </button>
-              <button
-                onClick={handleStop}
-                className="p-2 bg-red-500/80 hover:bg-red-500 rounded-lg transition-colors"
-                title="断开连接"
-              >
-                <Power className="w-4 h-4 text-white" />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* 视频渲染区域 */}
         <div className="flex-1 flex items-center justify-center overflow-hidden">
           {isStarting && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-20">
@@ -430,19 +329,6 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
             </div>
           )}
 
-          {isRunning && !error && videoWidth > 0 && videoHeight > 0 && isVirtualDisplay && (
-            <div className="absolute top-16 left-4 z-20">
-              <div className="px-3 py-1.5 bg-yellow-500/20 border border-yellow-500/40 rounded-lg">
-                <p className="text-yellow-300 text-xs">
-                  虚拟屏默认无桌面内容，需通过触摸操作启动应用
-                </p>
-                <p className="text-yellow-400/60 text-xs mt-0.5">
-                  如显示黑屏属于正常现象，请在虚拟屏上滑动打开应用列表
-                </p>
-              </div>
-            </div>
-          )}
-
           <canvas
             ref={canvasRef}
             style={{
@@ -458,39 +344,8 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
           />
         </div>
 
-        {/* 底部状态栏 */}
-        <div className="absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-black/80 to-transparent p-4">
-          <div className="flex items-center justify-between text-white/60 text-xs">
-            <div>
-              {store.connectionType === 'usb' ? 'USB 有线' : 'WiFi 无线'}
-              <span className="ml-2 text-white/40">scrcpy v3.3.3</span>
-            </div>
-            <div className="flex items-center gap-2">
-              {isRunning && (
-                <button
-                  onClick={toggleVirtualKeyboard}
-                  className={`p-1.5 rounded-lg transition-colors ${showVirtualKeyboard ? 'bg-blue-500/30 text-blue-400' : 'text-white/50 hover:text-white hover:bg-white/10'}`}
-                  title="虚拟键盘"
-                >
-                  <Keyboard className="w-4 h-4" />
-                </button>
-              )}
-              {isRunning && videoWidth > 0 && (
-                <span>{displayLabel} {videoWidth}x{videoHeight}{dpiLabel}</span>
-              )}
-              {isVirtualDisplay && (
-                <span className="text-white/50">{currentPreset.label}</span>
-              )}
-              {dpr !== 1 && (
-                <span className="text-white/30">{dpr}x</span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* 虚拟键盘 */}
         {showVirtualKeyboard && (
-          <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-20 w-96">
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 w-96">
             <div className="bg-black/90 backdrop-blur-md border border-white/10 rounded-xl p-4 shadow-2xl">
               <div className="flex items-center gap-2">
                 <input
