@@ -24,7 +24,7 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   const [isKeyboardInputFocused, setIsKeyboardInputFocused] = useState(false);
   const hasStartedRef = useRef(false);
 
-  const { startScrcpy, stopScrcpy, injectTouch, injectText, showKeyboard, hideKeyboard, startApp, goHome, goBack, showRecentApps, getAppList, getAppIcon, getAppLabel, togglePhysicalScreen, turnOffPhysicalScreen, turnOnPhysicalScreen, resumeAudio, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay } = useScrcpy();
+  const { startScrcpy, stopScrcpy, injectTouch, injectText, showKeyboard, hideKeyboard, startApp, goHome, goBack, showRecentApps, getAppList, getAppIcon, getAppLabel, batchGetAppLabels, togglePhysicalScreen, turnOffPhysicalScreen, turnOnPhysicalScreen, resumeAudio, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay } = useScrcpy();
   const store = useAdbStore();
 
   useEffect(() => {
@@ -274,6 +274,7 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
         getAppList={getAppList}
         getAppIcon={getAppIcon}
         getAppLabel={getAppLabel}
+        batchGetAppLabels={batchGetAppLabels}
         injectText={injectText}
         isVirtualDisplay={isVirtualDisplay}
         togglePhysicalScreen={togglePhysicalScreen}

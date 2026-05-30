@@ -5,7 +5,7 @@ import type { WebCodecsVideoDecoder } from '@yume-chan/scrcpy-decoder-webcodecs'
 import type { ScrcpyControlMessageWriter, ScrcpyMediaStreamPacket } from '@yume-chan/scrcpy';
 import { ScrcpyNewDisplay, ScrcpyCaptureOrientation, ScrcpyLockOrientation, ScrcpyOrientation, AndroidKeyCode, AndroidKeyEventAction } from '@yume-chan/scrcpy';
 import type { Adb } from '@yume-chan/adb';
-import { extractAppMeta, extractIconFromApk } from '@/utils/apk-utils';
+import { extractIconFromApk } from '@/utils/apk-utils';
 
 export interface DisplayConfig {
   width: number;
@@ -550,62 +550,19 @@ export function useScrcpy() {
     if (!adb) return formatAppName(pkg);
 
     try {
-      const meta = await extractAppMeta(adb, pkg);
-      if (meta.label) {
-        console.log(`[getAppLabel] found via APK parsing: "${meta.label}"`);
-        labelCacheRef.current.set(pkg, meta.label);
-        return meta.label;
-      }
-
       const dumpOutput = await adb.subprocess.noneProtocol.spawnWaitText(['dumpsys', 'package', pkg]);
 
-      const strategies = [
-        () => {
-          const m = dumpOutput.match(/applicationInfo[^}]*?label=([^\s'"}}]+)/);
-          return m?.[1];
-        },
-        () => {
-          for (const line of dumpOutput.split('\n')) {
-            const idx = line.indexOf('label=');
-            if (idx === -1) continue;
-            const val = line.substring(idx + 6).replace(/['"]/g, '').trim();
-            const word = val.split(/[\s}]/)[0] || '';
-            if (word && word !== 'null' && !word.startsWith('0x') && !/^\d+$/.test(word)) return word;
-          }
-          return undefined;
-        },
-        () => {
-          const m = dumpOutput.match(/pkg=Package\{[^}]*?label=([^\s'"}}]+)/);
-          return m?.[1];
-        },
-      ];
-
-      for (const strategy of strategies) {
-        const result = strategy();
-        if (result && result !== 'null' && !result.startsWith('0x') && !/^\d+$/.test(result)) {
-          console.log(`[getAppLabel] found via dumpsys: "${result}"`);
-          labelCacheRef.current.set(pkg, result);
-          return result;
+      for (const line of dumpOutput.split('\n')) {
+        const idx = line.indexOf('label=');
+        if (idx === -1) continue;
+        const val = line.substring(idx + 6).replace(/['"]/g, '').trim();
+        const word = val.split(/[\s}]/)[0] || '';
+        if (word && word !== 'null' && !word.startsWith('0x') && !/^\d+$/.test(word)) {
+          labelCacheRef.current.set(pkg, word);
+          return word;
         }
       }
 
-      const resolveOutput = await adb.subprocess.noneProtocol.spawnWaitText([
-        'cmd', 'package', 'resolve-activity',
-        '-a', 'android.intent.action.MAIN',
-        '-c', 'android.intent.category.LAUNCHER',
-        '-p', pkg,
-      ]);
-      const resolveMatch = resolveOutput.match(/label=([^\s]+)/);
-      if (resolveMatch) {
-        const val = resolveMatch[1]!.replace(/'/g, '').trim();
-        if (val && val !== 'null' && !val.startsWith('0x') && !/^\d+$/.test(val)) {
-          console.log(`[getAppLabel] found via resolve-activity: "${val}"`);
-          labelCacheRef.current.set(pkg, val);
-          return val;
-        }
-      }
-
-      console.log(`[getAppLabel] all methods failed for ${pkg}, using fallback`);
       labelCacheRef.current.set(pkg, null);
       return formatAppName(pkg);
     } catch (e) {
@@ -629,7 +586,6 @@ export function useScrcpy() {
         return iconUrl;
       }
 
-      console.log(`[getAppIcon] all methods failed for ${pkg}`);
       iconCacheRef.current.set(pkg, null);
       return null;
     } catch (error) {
@@ -637,6 +593,52 @@ export function useScrcpy() {
       iconCacheRef.current.set(pkg, null);
       return null;
     }
+  }, []);
+
+  const batchGetAppLabels = useCallback(async (packages: string[]): Promise<Map<string, string>> => {
+    const adb = adbRef.current;
+    if (!adb) return new Map();
+
+    const labels = new Map<string, string>();
+    const pkgSet = new Set(packages);
+
+    try {
+      const output = await adb.subprocess.noneProtocol.spawnWaitText([
+        'sh', '-c', "dumpsys package | grep -E 'Package \\[|label='"
+      ]);
+
+      let currentPkg = '';
+
+      for (const line of output.split('\n')) {
+        const pkgMatch = line.match(/Package \[([^\]]+)\]/);
+        if (pkgMatch) {
+          currentPkg = pkgMatch[1]!;
+          continue;
+        }
+
+        if (currentPkg && pkgSet.has(currentPkg) && !labels.has(currentPkg)) {
+          const idx = line.indexOf('label=');
+          if (idx !== -1) {
+            const val = line.substring(idx + 6).replace(/['"]/g, '').trim();
+            const word = val.split(/[\s}]/)[0] || '';
+            if (word && word !== 'null' && !word.startsWith('0x') && !/^\d+$/.test(word)) {
+              labels.set(currentPkg, word);
+              labelCacheRef.current.set(currentPkg, word);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[batchGetAppLabels] error:', e);
+    }
+
+    for (const pkg of packages) {
+      if (!labels.has(pkg)) {
+        labels.set(pkg, formatAppName(pkg));
+      }
+    }
+
+    return labels;
   }, []);
 
   const stopScrcpy = useCallback(async () => {
@@ -784,6 +786,7 @@ export function useScrcpy() {
     getAppList,
     getAppIcon,
     getAppLabel,
+    batchGetAppLabels,
     togglePhysicalScreen,
     turnOffPhysicalScreen,
     turnOnPhysicalScreen,

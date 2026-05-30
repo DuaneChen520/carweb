@@ -28,17 +28,41 @@ interface AppIconProps {
 
 function AppIcon({ pkg, name, getAppIcon, onLaunch, compact }: AppIconProps) {
   const [iconUrl, setIconUrl] = useState<string | null>(null);
+  const [isVisible, setIsVisible] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
+    const el = btnRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsVisible(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.1 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!isVisible) return;
     let cancelled = false;
     getAppIcon(pkg).then((url) => {
       if (!cancelled) setIconUrl(url);
     });
     return () => { cancelled = true; };
-  }, [pkg, getAppIcon]);
+  }, [pkg, getAppIcon, isVisible]);
+
+  const displayName = name || pkg.split('.').pop() || pkg;
+  const firstLetter = displayName.charAt(0).toUpperCase();
+  const hue = pkg.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) % 360;
 
   return (
     <button
+      ref={btnRef}
       onClick={() => onLaunch(pkg)}
       className="flex flex-col items-center gap-1 p-1.5 rounded-lg hover:bg-white/10 transition-colors group"
       title={name}
@@ -46,13 +70,16 @@ function AppIcon({ pkg, name, getAppIcon, onLaunch, compact }: AppIconProps) {
       {iconUrl ? (
         <img src={iconUrl} alt={name} className="w-9 h-9 rounded-lg" />
       ) : (
-        <div className="w-9 h-9 rounded-lg bg-white/10 flex items-center justify-center">
-          <Loader2 className="w-4 h-4 text-white/30 animate-spin" />
+        <div
+          className="w-9 h-9 rounded-lg flex items-center justify-center text-white font-medium text-sm"
+          style={{ backgroundColor: `hsl(${hue}, 45%, 35%)` }}
+        >
+          {firstLetter}
         </div>
       )}
       {!compact && (
         <span className="text-[10px] text-white/50 truncate w-full text-center group-hover:text-white/80 transition-colors">
-          {name}
+          {displayName}
         </span>
       )}
     </button>
@@ -67,6 +94,7 @@ interface ControlSidebarProps {
   getAppList: (showSystem?: boolean) => Promise<string[]>;
   getAppIcon: (pkg: string) => Promise<string | null>;
   getAppLabel: (pkg: string) => Promise<string>;
+  batchGetAppLabels: (packages: string[]) => Promise<Map<string, string>>;
   injectText?: (text: string) => Promise<void>;
   isVirtualDisplay?: boolean;
   togglePhysicalScreen?: () => Promise<void>;
@@ -89,7 +117,7 @@ interface ControlSidebarProps {
 }
 
 export function ControlSidebar({
-  goBack, goHome, showRecentApps, startApp, getAppList, getAppIcon, getAppLabel, injectText,
+  goBack, goHome, showRecentApps, startApp, getAppList, getAppIcon, getAppLabel, batchGetAppLabels, injectText,
   isVirtualDisplay, togglePhysicalScreen, turnOffPhysicalScreen,
   isRunning, useMirrorMode, isFullscreen, toggleFullscreen, toggleDisplayMode, handleApplyNewSize, handleStop,
   toggleVirtualKeyboard, showVirtualKeyboard,
@@ -121,25 +149,16 @@ export function ControlSidebar({
       const list = await getAppList(true);
       const priorityApps = PRIORITY_PACKAGES.filter(pkg => list.includes(pkg));
       setPinnedApps(priorityApps);
-      const labels = new Map<string, string>();
-      await Promise.all(
-        priorityApps.map(async (pkg) => {
-          try {
-            const label = await getAppLabel(pkg);
-            labels.set(pkg, label);
-          } catch {
-            labels.set(pkg, pkg.split('.').pop() || pkg);
-          }
-        }),
-      );
-      setAppLabels(prev => {
-        const newMap = new Map(prev);
-        labels.forEach((value, key) => newMap.set(key, value));
-        return newMap;
+      batchGetAppLabels(priorityApps).then((labels) => {
+        setAppLabels(prev => {
+          const newMap = new Map(prev);
+          labels.forEach((value, key) => newMap.set(key, value));
+          return newMap;
+        });
       });
     };
     loadPinnedApps();
-  }, [getAppList, getAppLabel]);
+  }, [getAppList, batchGetAppLabels]);
 
   const filteredPinned = pinnedApps.filter(
     (pkg) => !query || pkg.toLowerCase().includes(query) || (appLabels.get(pkg) || '').toLowerCase().includes(query),
@@ -162,23 +181,14 @@ export function ControlSidebar({
     try {
       const list = await getAppList(includeSystem);
       setApps(list);
-      const labels = new Map<string, string>();
-      await Promise.all(
-        list.map(async (pkg) => {
-          try {
-            const label = await getAppLabel(pkg);
-            labels.set(pkg, label);
-          } catch {
-            labels.set(pkg, pkg.split('.').pop() || pkg);
-          }
-        }),
-      );
-      setAppLabels(labels);
       setPanelMode('apps');
+      batchGetAppLabels(list).then((labels) => {
+        setAppLabels(labels);
+      });
     } finally {
       setLoading(false);
     }
-  }, [getAppList, getAppLabel]);
+  }, [getAppList, batchGetAppLabels]);
 
   const handleLaunchApp = useCallback(
     (pkg: string) => {
