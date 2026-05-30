@@ -74,6 +74,7 @@ export function useScrcpy() {
   const iconCacheRef = useRef<Map<string, string | null>>(new Map());
   const labelCacheRef = useRef<Map<string, string | null>>(new Map());
   const rotationStateRef = useRef<{ accel: string | null; userRot: string | null } | null>(null);
+  const lastDisplayConfigRef = useRef<DisplayConfig | null>(null);
 
   const startScrcpy = useCallback(async (adb: Adb, canvas: HTMLCanvasElement, displayConfig?: DisplayConfig, isRetry?: boolean) => {
     try {
@@ -334,6 +335,9 @@ export function useScrcpy() {
           console.warn('[audio] 流获取失败:', e);
         });
       }
+
+      // 更新上次应用的显示配置
+      lastDisplayConfigRef.current = displayConfig ? { ...displayConfig } : null;
 
       setState(prev => ({
         ...prev,
@@ -770,6 +774,35 @@ export function useScrcpy() {
     }
   }, []);
 
+  const checkAndApplyNewSize = useCallback((newConfig?: DisplayConfig): boolean => {
+    // 检查新配置是否与上次应用的配置相同
+    const lastConfig = lastDisplayConfigRef.current;
+    
+    if (lastConfig === undefined && newConfig === undefined) {
+      // 两者都是 undefined，无需重启
+      return false;
+    }
+    
+    if (lastConfig === undefined || newConfig === undefined) {
+      // 一个有值一个无值，需要重启
+      return true;
+    }
+    
+    // 比较配置值是否相同
+    if (
+      lastConfig.width === newConfig.width &&
+      lastConfig.height === newConfig.height &&
+      lastConfig.dpi === newConfig.dpi &&
+      lastConfig.bitRate === newConfig.bitRate
+    ) {
+      // 配置相同，无需重启
+      return false;
+    }
+    
+    // 配置不同，需要重启
+    return true;
+  }, []);
+
   return {
     ...state,
     startScrcpy,
@@ -791,5 +824,6 @@ export function useScrcpy() {
     turnOffPhysicalScreen,
     turnOnPhysicalScreen,
     resumeAudio,
+    checkAndApplyNewSize,
   };
 }

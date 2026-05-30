@@ -24,7 +24,7 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   const [isKeyboardInputFocused, setIsKeyboardInputFocused] = useState(false);
   const hasStartedRef = useRef(false);
 
-  const { startScrcpy, stopScrcpy, injectTouch, injectText, showKeyboard, hideKeyboard, startApp, goHome, goBack, showRecentApps, getAppList, getAppIcon, getAppLabel, batchGetAppLabels, togglePhysicalScreen, turnOffPhysicalScreen, turnOnPhysicalScreen, resumeAudio, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay } = useScrcpy();
+  const { startScrcpy, stopScrcpy, injectTouch, injectText, showKeyboard, hideKeyboard, startApp, goHome, goBack, showRecentApps, getAppList, getAppIcon, getAppLabel, batchGetAppLabels, togglePhysicalScreen, turnOffPhysicalScreen, turnOnPhysicalScreen, resumeAudio, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay, checkAndApplyNewSize } = useScrcpy();
   const store = useAdbStore();
 
   useEffect(() => {
@@ -145,10 +145,19 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
 
   const handleApplyNewSize = useCallback(async () => {
     if (isStarting || !store.adb) return;
+    
+    // 检查是否需要重启（配置是否真的改变了）
+    const needRestart = checkAndApplyNewSize(displayConfig);
+    if (!needRestart) {
+      console.log('Display configuration unchanged, skipping restart');
+      return;
+    }
+    
+    console.log('Display configuration changed, restarting scrcpy');
     await stopScrcpy();
     hasStartedRef.current = false;
     setRestartCount(c => c + 1);
-  }, [isStarting, store.adb, stopScrcpy]);
+  }, [isStarting, store.adb, stopScrcpy, checkAndApplyNewSize, displayConfig]);
 
   const toggleDisplayMode = useCallback(async () => {
     if (isStarting || !store.adb) return;
