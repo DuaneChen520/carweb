@@ -124,6 +124,7 @@ export function useScrcpy() {
         maxFps: 60,
         audio: true,
         audioCodec: 'opus',
+        audioSource: 'output',
         control: true,
         stayAwake: true,
         showTouches: true,
@@ -215,18 +216,22 @@ export function useScrcpy() {
       pump();
 
       const audioStreamPromise = client.audioStream;
+      console.log('[audio] audioStream available:', !!audioStreamPromise);
       if (audioStreamPromise) {
         audioStreamPromise.then(async (audioMeta) => {
+          console.log('[audio] metadata type:', audioMeta.type);
           if (audioMeta.type !== 'success') {
-            console.warn('音频流不可用:', audioMeta.type);
+            console.warn('[audio] 音频流不可用:', audioMeta.type);
             return;
           }
 
           const { codec, stream: audioStream } = audioMeta;
+          console.log('[audio] codec:', codec.optionValue, 'webCodecId:', codec.webCodecId);
 
           const audioCtx = new AudioContext({ sampleRate: 48000 });
           audioContextRef.current = audioCtx;
           audioNextTimeRef.current = 0;
+          console.log('[audio] AudioContext created, state:', audioCtx.state);
 
           const decoder = new AudioDecoder({
             output: (audioData: AudioData) => {
@@ -261,32 +266,44 @@ export function useScrcpy() {
                 source.start(startTime);
                 audioNextTimeRef.current = startTime + audioBuffer.duration;
               } catch (e) {
-                console.warn('音频播放错误:', e);
+                console.warn('[audio] 播放错误:', e);
               }
             },
             error: (e) => {
-              console.error('音频解码错误:', e);
+              console.error('[audio] 解码错误:', e);
             },
           });
 
           const codecStr = codec.webCodecId || 'opus';
+          console.log('[audio] configuring AudioDecoder with codec:', codecStr);
           decoder.configure({
             codec: codecStr,
             sampleRate: 48000,
             numberOfChannels: 2,
           });
+          console.log('[audio] AudioDecoder configured, state:', decoder.state);
 
           audioDecoderRef.current = decoder;
 
           const audioReader = audioStream.getReader();
+          let audioFrameCount = 0;
           const audioPump = async () => {
             try {
               while (true) {
                 const { done, value } = await audioReader.read();
-                if (done) break;
+                if (done) {
+                  console.log('[audio] stream ended');
+                  break;
+                }
 
                 if (value.type === 'configuration') {
+                  console.log('[audio] received configuration packet');
                   continue;
+                }
+
+                audioFrameCount++;
+                if (audioFrameCount <= 5) {
+                  console.log('[audio] frame #', audioFrameCount, 'pts:', value.pts, 'size:', value.data.byteLength, 'keyframe:', value.keyframe);
                 }
 
                 const packet: EncodedAudioChunkInit = {
@@ -297,13 +314,13 @@ export function useScrcpy() {
                 decoder.decode(new EncodedAudioChunk(packet));
               }
             } catch (error) {
-              console.error('音频流读取错误:', error);
+              console.error('[audio] 流读取错误:', error);
             }
           };
 
           audioPump();
         }).catch((e: unknown) => {
-          console.warn('音频流获取失败:', e);
+          console.warn('[audio] 流获取失败:', e);
         });
       }
 
@@ -729,6 +746,17 @@ export function useScrcpy() {
     }
   }, []);
 
+  const resumeAudio = useCallback(() => {
+    const ctx = audioContextRef.current;
+    if (ctx && ctx.state === 'suspended') {
+      ctx.resume().then(() => {
+        console.log('[audio] AudioContext resumed on user gesture');
+      }).catch((e: unknown) => {
+        console.warn('[audio] AudioContext resume failed:', e);
+      });
+    }
+  }, []);
+
   return {
     ...state,
     startScrcpy,
@@ -748,5 +776,6 @@ export function useScrcpy() {
     togglePhysicalScreen,
     turnOffPhysicalScreen,
     turnOnPhysicalScreen,
+    resumeAudio,
   };
 }

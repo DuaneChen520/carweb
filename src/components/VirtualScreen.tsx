@@ -24,7 +24,7 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   const [isKeyboardInputFocused, setIsKeyboardInputFocused] = useState(false);
   const hasStartedRef = useRef(false);
 
-  const { startScrcpy, stopScrcpy, injectTouch, injectText, showKeyboard, hideKeyboard, startApp, goHome, goBack, showRecentApps, getAppList, getAppIcon, getAppLabel, togglePhysicalScreen, turnOffPhysicalScreen, turnOnPhysicalScreen, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay } = useScrcpy();
+  const { startScrcpy, stopScrcpy, injectTouch, injectText, showKeyboard, hideKeyboard, startApp, goHome, goBack, showRecentApps, getAppList, getAppIcon, getAppLabel, togglePhysicalScreen, turnOffPhysicalScreen, turnOnPhysicalScreen, resumeAudio, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay } = useScrcpy();
   const store = useAdbStore();
 
   useEffect(() => {
@@ -192,6 +192,8 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   const handlePointerEvent = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
 
+    resumeAudio();
+
     const coords = screenToVideoCoords(e.clientX, e.clientY);
     if (!coords || !videoWidth || !videoHeight) return;
 
@@ -229,7 +231,7 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
       actionButton,
       buttons,
     });
-  }, [screenToVideoCoords, videoWidth, videoHeight, injectTouch]);
+  }, [screenToVideoCoords, videoWidth, videoHeight, injectTouch, resumeAudio]);
 
   const handleStop = useCallback(async () => {
     await stopScrcpy();
