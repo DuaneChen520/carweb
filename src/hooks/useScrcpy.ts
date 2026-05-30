@@ -52,6 +52,20 @@ function formatAppName(pkg: string): string {
     .trim();
 }
 
+async function tryExtractIcon(adb: Adb, apkPath: string, iconPath: string): Promise<string | null> {
+  try {
+    const cmd = `unzip -p "${apkPath}" "${iconPath}" 2>/dev/null | base64 | tr -d '\n'`;
+    const output = await adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', cmd]);
+    const trimmed = output.trim();
+    if (trimmed && trimmed.length > 100) {
+      return `data:image/png;base64,${trimmed.replace(/\n/g, '')}`;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function useScrcpy() {
   const [state, setState] = useState<ScrcpyState>({
     isStarting: false,
@@ -417,27 +431,43 @@ export function useScrcpy() {
     if (!adb) return formatAppName(pkg);
 
     try {
-      const cmd = [
-        'sh', '-c',
-        `LABEL=$(dumpsys package ${pkg} 2>/dev/null | grep -m1 "label=" | grep -v "label=null" | sed 's/.*label=//' | tr -d "'" | xargs); ` +
-        `if [ -z "$LABEL" ]; then ` +
-          `LABEL=$(cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p ${pkg} 2>/dev/null | grep "label=" | head -1 | sed 's/.*label=//' | tr -d "'" | xargs); ` +
-        `fi; ` +
-        `if [ -z "$LABEL" ]; then ` +
-          `APK=$(pm path ${pkg} 2>/dev/null | head -1 | sed 's/^package://'); ` +
-          `if [ -n "$APK" ] && [ -f "$APK" ] && command -v aapt >/dev/null 2>&1; then ` +
-            `LABEL=$(aapt dump badging "$APK" 2>/dev/null | grep "application-label:" | head -1 | sed "s/application-label:'\\(.*\\)'/\\1/"); ` +
-          `fi; ` +
-        `fi; ` +
-        `echo "$LABEL"`
-      ];
+      let label = '';
 
-      const output = await adb.subprocess.noneProtocol.spawnWaitText(cmd);
-      const label = output.trim();
-      if (label && label !== 'null' && label !== '' && !label.includes('not found')) {
+      // Method 1: Parse dumpsys package output directly
+      const dumpOutput = await adb.subprocess.noneProtocol.spawnWaitText(['dumpsys', 'package', pkg]);
+      for (const line of dumpOutput.split('\n')) {
+        const idx = line.indexOf('label=');
+        if (idx === -1) continue;
+        const value = line.substring(idx + 6).replace(/['"]/g, '').trim();
+        const firstWord = value.split(/[\s}]/)[0] || '';
+        if (firstWord && firstWord !== 'null' && !firstWord.startsWith('0x') && !/^\d+$/.test(firstWord)) {
+          label = firstWord;
+          break;
+        }
+      }
+
+      // Method 2: Try resolve-activity with proper intent syntax
+      if (!label) {
+        const resolveOutput = await adb.subprocess.noneProtocol.spawnWaitText([
+          'cmd', 'package', 'resolve-activity', '--brief',
+          '-a', 'android.intent.action.MAIN',
+          '-c', 'android.intent.category.LAUNCHER',
+          '-p', pkg,
+        ]);
+        const resolveMatch = resolveOutput.match(/label=([^\s]+)/);
+        if (resolveMatch) {
+          const value = resolveMatch[1]!.replace(/'/g, '').trim();
+          if (value && value !== 'null' && !value.startsWith('0x') && !/^\d+$/.test(value)) {
+            label = value;
+          }
+        }
+      }
+
+      if (label) {
         labelCacheRef.current.set(pkg, label);
         return label;
       }
+
       labelCacheRef.current.set(pkg, null);
       return formatAppName(pkg);
     } catch {
@@ -454,35 +484,87 @@ export function useScrcpy() {
     if (!adb) return null;
 
     try {
-      const cmd = [
-        'sh', '-c',
-        `APK=$(pm path ${pkg} 2>/dev/null | head -1 | sed 's/^package://'); ` +
-        `if [ -z "$APK" ] || [ ! -f "$APK" ]; then exit 1; fi; ` +
-        `ICON_PATH=$(dumpsys package ${pkg} 2>/dev/null | grep -m1 "icon=" | grep -v "icon=0" | sed 's/.*icon=//' | tr -d "'" | xargs); ` +
-        `if [ -z "$ICON_PATH" ]; then ` +
-          `ICON_PATH=$(cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p ${pkg} 2>/dev/null | grep "icon=" | head -1 | sed 's/.*icon=//' | tr -d "'" | xargs); ` +
-        `fi; ` +
-        `if [ -z "$ICON_PATH" ] || echo "$ICON_PATH" | grep -qE '^0x|^[0-9]+$'; then ` +
-          `ICON_PATH=$(unzip -l "$APK" 2>/dev/null | grep -oE 'res/(mipmap|drawable)[^ ]*/(ic_launcher|ic_launcher_round|ic_launcher_foreground|icon)[^ ]*\\.(png|webp)' | head -1); ` +
-        `fi; ` +
-        `if [ -z "$ICON_PATH" ] && command -v aapt >/dev/null 2>&1; then ` +
-          `ICON_PATH=$(aapt dump badging "$APK" 2>/dev/null | grep "application-icon:" | head -1 | sed "s/.*:'\\(.*\\)'/\\1/"); ` +
-        `fi; ` +
-        `if [ -n "$ICON_PATH" ]; then ` +
-          `unzip -p "$APK" "$ICON_PATH" 2>/dev/null | base64 | tr -d '\n'; ` +
-        `fi`
-      ];
+      // Step 1: Get APK path
+      const pathOutput = await adb.subprocess.noneProtocol.spawnWaitText(['pm', 'path', pkg]);
+      const apkMatch = pathOutput.match(/^package:(.+)$/m);
+      if (!apkMatch) return null;
+      const apkPath = apkMatch[1]!.trim();
 
-      const output = await adb.subprocess.noneProtocol.spawnWaitText(cmd);
-      const trimmed = output.trim();
-      if (!trimmed || trimmed.includes('error') || trimmed.includes('Archive') || trimmed.includes('Bad zip') || trimmed.length < 100) {
+      // Step 2: Try to get icon path from dumpsys
+      const dumpOutput = await adb.subprocess.noneProtocol.spawnWaitText(['dumpsys', 'package', pkg]);
+      let iconPath = '';
+      for (const line of dumpOutput.split('\n')) {
+        const idx = line.indexOf('icon=');
+        if (idx === -1) continue;
+        const value = line.substring(idx + 5).replace(/['"]/g, '').trim();
+        const firstWord = value.split(/[\s}]/)[0] || '';
+        if (firstWord && !firstWord.startsWith('0x') && !/^\d+$/.test(firstWord)) {
+          iconPath = firstWord;
+          break;
+        }
+      }
+
+      // Step 3: Try resolve-activity for icon path
+      if (!iconPath) {
+        const resolveOutput = await adb.subprocess.noneProtocol.spawnWaitText([
+          'cmd', 'package', 'resolve-activity', '--brief',
+          '-a', 'android.intent.action.MAIN',
+          '-c', 'android.intent.category.LAUNCHER',
+          '-p', pkg,
+        ]);
+        const iconMatch = resolveOutput.match(/icon=([^\s]+)/);
+        if (iconMatch) {
+          const value = iconMatch[1]!.replace(/'/g, '').trim();
+          if (value && !value.startsWith('0x') && !/^\d+$/.test(value)) {
+            iconPath = value;
+          }
+        }
+      }
+
+      // Step 4: Search APK contents for icon files
+      if (!iconPath) {
+        const listOutput = await adb.subprocess.noneProtocol.spawnWaitText(['unzip', '-l', apkPath]);
+        const iconCandidates: string[] = [];
+
+        for (const line of listOutput.split('\n')) {
+          const fileMatch = line.match(/res\/(mipmap|drawable)[^ ]*\/([^ ]+\.(png|webp))/);
+          if (fileMatch) iconCandidates.push(fileMatch[0]!);
+        }
+
+        // Score and sort: prefer high-density mipmap with common icon names
+        const score = (path: string): number => {
+          let s = 0;
+          if (path.includes('ic_launcher_round')) s += 100;
+          if (path.includes('ic_launcher')) s += 80;
+          if (path.includes('/icon')) s += 60;
+          if (path.includes('mipmap-xxxhdpi')) s += 50;
+          if (path.includes('mipmap-xxhdpi')) s += 40;
+          if (path.includes('mipmap-xhdpi')) s += 30;
+          if (path.includes('mipmap-hdpi')) s += 20;
+          return s;
+        };
+        iconCandidates.sort((a, b) => score(b) - score(a));
+
+        for (const candidate of iconCandidates) {
+          const result = await tryExtractIcon(adb, apkPath, candidate);
+          if (result) {
+            iconCacheRef.current.set(pkg, result);
+            return result;
+          }
+        }
         iconCacheRef.current.set(pkg, null);
         return null;
       }
 
-      const dataUrl = `data:image/png;base64,${trimmed.replace(/\n/g, '')}`;
-      iconCacheRef.current.set(pkg, dataUrl);
-      return dataUrl;
+      // Step 5: Extract icon using the found path
+      const result = await tryExtractIcon(adb, apkPath, iconPath);
+      if (result) {
+        iconCacheRef.current.set(pkg, result);
+        return result;
+      }
+
+      iconCacheRef.current.set(pkg, null);
+      return null;
     } catch (error) {
       console.error('获取应用图标错误:', error);
       iconCacheRef.current.set(pkg, null);
