@@ -127,6 +127,7 @@ export function useScrcpy() {
           ? {
               newDisplay: new ScrcpyNewDisplay(displayConfig.width, displayConfig.height, displayConfig.dpi ?? 320),
               captureOrientation: new ScrcpyCaptureOrientation(ScrcpyLockOrientation.LockedInitial, ScrcpyOrientation.Orient0),
+              displayImePolicy: 'local' as const,
             }
           : { displayId: 0 }
         ),
