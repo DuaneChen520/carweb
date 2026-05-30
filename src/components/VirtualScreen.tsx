@@ -118,10 +118,12 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
 
   const adaptiveSize = calculateAdaptiveSize();
 
+  const outerRef = useRef<HTMLDivElement>(null);
+
   const toggleFullscreen = useCallback(async () => {
     try {
       if (!isFullscreen) {
-        await containerRef.current?.requestFullscreen();
+        await outerRef.current?.requestFullscreen();
         setIsFullscreen(true);
       } else {
         await document.exitFullscreen();
@@ -261,7 +263,7 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   const separator = displayConfig?.width ? `${displayConfig.width}x${displayConfig.height}` : '';
 
   return (
-    <div className="flex w-full h-screen bg-black">
+    <div ref={outerRef} className="flex w-full h-screen bg-black">
       <ControlSidebar
         goBack={goBack}
         goHome={goHome}
