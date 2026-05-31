@@ -774,6 +774,37 @@ export function useScrcpy() {
     }
   }, []);
 
+  const resizeDisplay = useCallback(async (width: number, height: number): Promise<boolean> => {
+    // 尝试使用 scrcpy 4.0 的 flex display 功能调整虚拟屏大小（无需重启）
+    // 如果失败，返回 false，表示需要使用传统的重启方式
+    const controller = controllerRef.current;
+    if (!controller) return false;
+
+    try {
+      // scrcpy 4.0 的 resize display 控制消息格式：
+      // 字节 0: 消息类型 (18 = SC_CONTROL_MSG_TYPE_RESIZE_DISPLAY)
+      // 字节 1-2: 宽度 (uint16, big-endian)
+      // 字节 3-4: 高度 (uint16, big-endian)
+      
+      console.log('尝试使用 scrcpy 4.0 flex display 调整大小:', width, 'x', height);
+      
+      // 构建消息字节
+      const buffer = new ArrayBuffer(5);
+      const view = new DataView(buffer);
+      view.setUint8(0, 18);           // SC_CONTROL_MSG_TYPE_RESIZE_DISPLAY = 18
+      view.setUint16(1, width, false);  // 宽度 (big-endian)
+      view.setUint16(3, height, false); // 高度 (big-endian)
+      
+      // 使用 ScrcpyControlMessageWriter 的公开 write 方法
+      await controller.write(new Uint8Array(buffer));
+      console.log('flex display resize 消息已发送');
+      return true;
+    } catch (error) {
+      console.warn('使用 flex display 调整大小失败，使用传统重启方式:', error);
+      return false;
+    }
+  }, []);
+
   const checkAndApplyNewSize = useCallback((newConfig?: DisplayConfig): boolean => {
     // 检查新配置是否与上次应用的配置相同
     const lastConfig = lastDisplayConfigRef.current;
@@ -825,5 +856,6 @@ export function useScrcpy() {
     turnOnPhysicalScreen,
     resumeAudio,
     checkAndApplyNewSize,
+    resizeDisplay,
   };
 }

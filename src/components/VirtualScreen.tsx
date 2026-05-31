@@ -24,7 +24,7 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   const [isKeyboardInputFocused, setIsKeyboardInputFocused] = useState(false);
   const hasStartedRef = useRef(false);
 
-  const { startScrcpy, stopScrcpy, injectTouch, injectText, showKeyboard, hideKeyboard, startApp, goHome, goBack, showRecentApps, getAppList, getAppIcon, getAppLabel, batchGetAppLabels, togglePhysicalScreen, turnOffPhysicalScreen, turnOnPhysicalScreen, resumeAudio, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay, checkAndApplyNewSize } = useScrcpy();
+  const { startScrcpy, stopScrcpy, injectTouch, injectText, showKeyboard, hideKeyboard, startApp, goHome, goBack, showRecentApps, getAppList, getAppIcon, getAppLabel, batchGetAppLabels, togglePhysicalScreen, turnOffPhysicalScreen, turnOnPhysicalScreen, resumeAudio, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay, checkAndApplyNewSize, resizeDisplay } = useScrcpy();
   const store = useAdbStore();
 
   useEffect(() => {
@@ -153,11 +153,22 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
       return;
     }
     
+    if (displayConfig && isVirtualDisplay) {
+      // 尝试使用 scrcpy 4.0 flex display 功能进行热调整
+      const success = await resizeDisplay(displayConfig.width, displayConfig.height);
+      if (success) {
+        // 热调整成功，跳过重启
+        console.log('Successfully resized virtual display using flex display');
+        return;
+      }
+    }
+    
+    // 热调整失败或不适用，使用传统重启方式
     console.log('Display configuration changed, restarting scrcpy');
     await stopScrcpy();
     hasStartedRef.current = false;
     setRestartCount(c => c + 1);
-  }, [isStarting, store.adb, stopScrcpy, checkAndApplyNewSize, displayConfig]);
+  }, [isStarting, store.adb, stopScrcpy, checkAndApplyNewSize, displayConfig, resizeDisplay, isVirtualDisplay]);
 
   const toggleDisplayMode = useCallback(async () => {
     if (isStarting || !store.adb) return;
