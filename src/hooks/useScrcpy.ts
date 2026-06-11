@@ -3,7 +3,7 @@ import type { AdbScrcpyClient, AdbScrcpyOptionsLatest } from '@yume-chan/adb-scr
 import { AdbScrcpyExitedError } from '@yume-chan/adb-scrcpy';
 import type { WebCodecsVideoDecoder } from '@yume-chan/scrcpy-decoder-webcodecs';
 import type { ScrcpyControlMessageWriter, ScrcpyMediaStreamPacket } from '@yume-chan/scrcpy';
-import { ScrcpyNewDisplay, ScrcpyCaptureOrientation, ScrcpyLockOrientation, ScrcpyOrientation, AndroidKeyCode, AndroidKeyEventAction } from '@yume-chan/scrcpy';
+import { ScrcpyNewDisplay, ScrcpyCaptureOrientation, AndroidKeyCode, AndroidKeyEventAction } from '@yume-chan/scrcpy';
 import type { Adb } from '@yume-chan/adb';
 import { extractIconFromApk } from '@/utils/apk-utils';
 
@@ -131,7 +131,7 @@ export function useScrcpy() {
         ...(useVirtualDisplay
           ? {
               newDisplay: new ScrcpyNewDisplay(displayConfig.width, displayConfig.height, displayConfig.dpi ?? 320),
-              captureOrientation: new ScrcpyCaptureOrientation(ScrcpyLockOrientation.LockedInitial, ScrcpyOrientation.Orient0),
+              captureOrientation: ScrcpyCaptureOrientation.Unlocked,
               displayImePolicy: 'local' as const,
             }
           : { displayId: 0 }
