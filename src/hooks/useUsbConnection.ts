@@ -60,16 +60,7 @@ export function useUsbConnection() {
   }, [store]);
 
   const disconnect = useCallback(async () => {
-    try {
-      const adb = store.adb;
-      if (adb) {
-        await adb.close();
-      }
-    } catch (error) {
-      console.error('断开连接错误:', error);
-    } finally {
-      store.reset();
-    }
+    await store.disconnect();
   }, [store]);
 
   return {

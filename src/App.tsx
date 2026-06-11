@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ConnectionPanel } from './components/ConnectionPanel';
 import { VirtualScreen } from './components/VirtualScreen';
+import { ScrcpyProvider } from './contexts/ScrcpyContext';
 
 function App() {
   const [isMirroring, setIsMirroring] = useState(false);
@@ -16,7 +17,9 @@ function App() {
   return (
     <div className="w-full h-screen bg-slate-900">
       {isMirroring ? (
-        <VirtualScreen onStop={handleStopMirror} />
+        <ScrcpyProvider>
+          <VirtualScreen onStop={handleStopMirror} />
+        </ScrcpyProvider>
       ) : (
         <ConnectionPanel onStartMirror={handleStartMirror} />
       )}

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Search, Grid, ArrowLeft, Home, Loader2, X, MonitorOff, Maximize2, Minimize2, ArrowLeftRight, Monitor, Power, Keyboard, ChevronDown } from 'lucide-react';
-import type { ResolutionPresetKey } from '../hooks/useScrcpy';
-import { RESOLUTION_PRESETS } from '../hooks/useScrcpy';
+import type { ResolutionPresetKey } from '../hooks/scrcpy';
+import { RESOLUTION_PRESETS } from '../hooks/scrcpy';
+import { useScrcpyContext } from '../contexts/ScrcpyContext';
 
 const PRIORITY_PACKAGES = [
   'com.android.contacts',
@@ -87,19 +88,7 @@ function AppIcon({ pkg, name, getAppIcon, onLaunch, compact }: AppIconProps) {
 }
 
 interface ControlSidebarProps {
-  goBack: () => Promise<void>;
-  goHome: () => Promise<void>;
-  showRecentApps: () => Promise<void>;
-  startApp: (appName: string) => Promise<void>;
-  getAppList: (showSystem?: boolean) => Promise<string[]>;
-  getAppIcon: (pkg: string) => Promise<string | null>;
-  getAppLabel: (pkg: string) => Promise<string>;
-  batchGetAppLabels: (packages: string[]) => Promise<Map<string, string>>;
-  injectText?: (text: string) => Promise<void>;
   isVirtualDisplay?: boolean;
-  togglePhysicalScreen?: () => Promise<void>;
-  turnOffPhysicalScreen?: () => Promise<void>;
-  turnOnPhysicalScreen?: () => Promise<void>;
   isRunning?: boolean;
   useMirrorMode?: boolean;
   isFullscreen?: boolean;
@@ -117,12 +106,12 @@ interface ControlSidebarProps {
 }
 
 export function ControlSidebar({
-  goBack, goHome, showRecentApps, startApp, getAppList, getAppIcon, getAppLabel, batchGetAppLabels, injectText,
-  isVirtualDisplay, togglePhysicalScreen, turnOffPhysicalScreen,
-  isRunning, useMirrorMode, isFullscreen, toggleFullscreen, toggleDisplayMode, handleApplyNewSize, handleStop,
+  isVirtualDisplay, isRunning, useMirrorMode, isFullscreen, toggleFullscreen, toggleDisplayMode, handleApplyNewSize, handleStop,
   toggleVirtualKeyboard, showVirtualKeyboard,
   currentPreset, resolutionPreset, changeResolutionPreset, showResMenu, setShowResMenu,
 }: ControlSidebarProps) {
+  const scrcpy = useScrcpyContext();
+  const { goBack, goHome, showRecentApps, startApp, getAppList, getAppIcon, getAppLabel, batchGetAppLabels, injectText, togglePhysicalScreen, turnOffPhysicalScreen, turnOnPhysicalScreen } = scrcpy;
   const [panelMode, setPanelMode] = useState<'closed' | 'search' | 'apps'>('closed');
   const [searchText, setSearchText] = useState('');
   const [apps, setApps] = useState<string[] | null>(null);

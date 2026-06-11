@@ -1,9 +1,10 @@
 import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
-import { Maximize2, Minimize2, RotateCcw, Power, Monitor, ArrowLeftRight, Keyboard, ChevronDown } from 'lucide-react';
+import { RotateCcw } from 'lucide-react';
 import { AndroidMotionEventAction } from '@yume-chan/scrcpy';
-import { useScrcpy, RESOLUTION_PRESETS } from '../hooks/useScrcpy';
-import type { ResolutionPresetKey } from '../hooks/useScrcpy';
+import { RESOLUTION_PRESETS } from '../hooks/scrcpy';
+import type { ResolutionPresetKey } from '../hooks/scrcpy';
 import { useAdbStore } from '../hooks/useAdbStore';
+import { useScrcpyContext } from '../contexts/ScrcpyContext';
 import { ControlSidebar } from './ControlSidebar';
 
 interface VirtualScreenProps {
@@ -21,10 +22,9 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   const [showResMenu, setShowResMenu] = useState(false);
   const [showVirtualKeyboard, setShowVirtualKeyboard] = useState(false);
   const [keyboardInput, setKeyboardInput] = useState('');
-  const [isKeyboardInputFocused, setIsKeyboardInputFocused] = useState(false);
   const hasStartedRef = useRef(false);
 
-  const { startScrcpy, stopScrcpy, injectTouch, injectText, showKeyboard, hideKeyboard, startApp, goHome, goBack, showRecentApps, getAppList, getAppIcon, getAppLabel, batchGetAppLabels, togglePhysicalScreen, turnOffPhysicalScreen, turnOnPhysicalScreen, resumeAudio, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay } = useScrcpy();
+  const { startScrcpy, stopScrcpy, injectTouch, injectText, showKeyboard, hideKeyboard, resumeAudio, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay } = useScrcpyContext();
   const store = useAdbStore();
 
   useEffect(() => {
@@ -255,7 +255,6 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     if (showVirtualKeyboard) {
       await hideKeyboard();
       setShowVirtualKeyboard(false);
-      setIsKeyboardInputFocused(false);
     } else {
       await showKeyboard();
       setShowVirtualKeyboard(true);
@@ -267,19 +266,7 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   return (
     <div ref={outerRef} className="flex w-full h-screen bg-black">
       <ControlSidebar
-        goBack={goBack}
-        goHome={goHome}
-        showRecentApps={showRecentApps}
-        startApp={startApp}
-        getAppList={getAppList}
-        getAppIcon={getAppIcon}
-        getAppLabel={getAppLabel}
-        batchGetAppLabels={batchGetAppLabels}
-        injectText={injectText}
         isVirtualDisplay={isVirtualDisplay}
-        togglePhysicalScreen={togglePhysicalScreen}
-        turnOffPhysicalScreen={turnOffPhysicalScreen}
-        turnOnPhysicalScreen={turnOnPhysicalScreen}
         isRunning={isRunning}
         useMirrorMode={useMirrorMode}
         isFullscreen={isFullscreen}
@@ -358,8 +345,6 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
                   value={keyboardInput}
                   onChange={(e) => setKeyboardInput(e.target.value)}
                   onKeyDown={handleKeyPress}
-                  onFocus={() => setIsKeyboardInputFocused(true)}
-                  onBlur={() => setIsKeyboardInputFocused(false)}
                   placeholder="输入文字..."
                   className="flex-1 px-3 py-2 bg-white/10 rounded-lg text-white text-sm placeholder-white/30 outline-none focus:ring-2 focus:ring-blue-500/50"
                   autoFocus
