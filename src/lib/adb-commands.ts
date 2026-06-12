@@ -85,52 +85,38 @@ export async function getInstalledPackages(adb: Adb, includeSystem = false): Pro
 }
 
 export async function getAppLabel(adb: Adb, pkg: string): Promise<string> {
-  const output = await runAdbCommand(adb, `dumpsys package ${pkg}`);
-  for (const line of output.split('\n')) {
-    const idx = line.indexOf('label=');
-    if (idx === -1) continue;
-    const val = line.substring(idx + 6).replace(/['"]/g, '').trim();
-    const word = val.split(/[\s}]/)[0] || '';
-    if (word && word !== 'null' && !word.startsWith('0x') && !/^\d+$/.test(word)) {
-      return word;
+  try {
+    const { extractAppMeta } = await import('@/utils/apk-utils');
+    const meta = await extractAppMeta(adb, pkg);
+    if (meta.label) {
+      return meta.label;
     }
+  } catch (e) {
+    console.warn('[getAppLabel] extractAppMeta failed for', pkg, e);
   }
   return formatPackageName(pkg);
 }
 
 export async function batchGetAppLabels(adb: Adb, packages: string[]): Promise<Map<string, string>> {
   const labels = new Map<string, string>();
-  const pkgSet = new Set(packages);
+  const { extractAppMeta } = await import('@/utils/apk-utils');
 
-  try {
-    const output = await runAdbCommand(adb, "dumpsys package | grep -E 'Package \\[|label='");
-    let currentPkg = '';
-
-    for (const line of output.split('\n')) {
-      const pkgMatch = line.match(/Package \[([^\]]+)\]/);
-      if (pkgMatch) {
-        currentPkg = pkgMatch[1]!;
-        continue;
-      }
-
-      if (currentPkg && pkgSet.has(currentPkg) && !labels.has(currentPkg)) {
-        const idx = line.indexOf('label=');
-        if (idx !== -1) {
-          const val = line.substring(idx + 6).replace(/['"]/g, '').trim();
-          const word = val.split(/[\s}]/)[0] || '';
-          if (word && word !== 'null' && !word.startsWith('0x') && !/^\d+$/.test(word)) {
-            labels.set(currentPkg, word);
-          }
+  // 并发获取，限制并发数为 5 避免过载
+  const CONCURRENCY = 5;
+  for (let i = 0; i < packages.length; i += CONCURRENCY) {
+    const batch = packages.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(
+      batch.map(async (pkg) => {
+        try {
+          const meta = await extractAppMeta(adb, pkg);
+          return [pkg, meta.label] as const;
+        } catch {
+          return [pkg, null] as const;
         }
-      }
-    }
-  } catch (e) {
-    console.error('[batchGetAppLabels] error:', e);
-  }
-
-  for (const pkg of packages) {
-    if (!labels.has(pkg)) {
-      labels.set(pkg, formatPackageName(pkg));
+      })
+    );
+    for (const [pkg, label] of results) {
+      labels.set(pkg, label ?? formatPackageName(pkg));
     }
   }
 

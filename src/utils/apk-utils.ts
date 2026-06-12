@@ -1,6 +1,6 @@
 import type { Adb, AdbNoneProtocolProcess } from '@yume-chan/adb';
 import { parseAndroidManifest } from './binary-xml';
-import { resolveStringResource } from './resources-arsc';
+import { resolveStringResource, resolveDrawableResource } from './resources-arsc';
 
 function readProcessOutput(process: AdbNoneProtocolProcess): Promise<ArrayBuffer> {
   const chunks: Uint8Array[] = [];
@@ -72,6 +72,7 @@ export async function getApkPath(adb: Adb, pkg: string): Promise<string | null> 
 export interface AppMeta {
   label: string | null;
   iconResourceId: number | null;
+  iconPath: string | null;
 }
 
 /**
@@ -80,19 +81,25 @@ export interface AppMeta {
  */
 export async function extractAppMeta(adb: Adb, pkg: string): Promise<AppMeta> {
   const apkPath = await getApkPath(adb, pkg);
-  if (!apkPath) return { label: null, iconResourceId: null };
+  if (!apkPath) return { label: null, iconResourceId: null, iconPath: null };
 
   const manifestBuffer = await downloadAndroidManifest(adb, apkPath);
-  if (!manifestBuffer) return { label: null, iconResourceId: null };
+  if (!manifestBuffer) return { label: null, iconResourceId: null, iconPath: null };
 
   const manifest = parseAndroidManifest(manifestBuffer);
-  if (!manifest.label && !manifest.icon) return { label: null, iconResourceId: null };
+  if (!manifest.label && !manifest.icon) return { label: null, iconResourceId: null, iconPath: null };
 
   let label: string | null = null;
   let iconResourceId: number | null = null;
+  let iconPath: string | null = null;
 
   if (manifest.icon) {
     iconResourceId = manifest.icon;
+    // Resolve icon resource ID to file path
+    const arscBuffer = await downloadResourcesArsc(adb, apkPath);
+    if (arscBuffer) {
+      iconPath = resolveDrawableResource(arscBuffer, manifest.icon);
+    }
   }
 
   if (manifest.label) {
@@ -109,18 +116,35 @@ export async function extractAppMeta(adb: Adb, pkg: string): Promise<AppMeta> {
     }
   }
 
-  return { label, iconResourceId };
+  return { label, iconResourceId, iconPath };
 }
 
 /**
- * Extract an icon image from the APK given a resource ID.
- * Searches for drawable/mipmap files in the APK.
+ * Extract an icon image from the APK.
+ * First tries to use the resolved icon path from resources.arsc,
+ * then falls back to filename-based guessing.
  */
 export async function extractIconFromApk(adb: Adb, pkg: string): Promise<string | null> {
   const apkPath = await getApkPath(adb, pkg);
   if (!apkPath) return null;
 
   try {
+    // First try to get the exact icon path from extractAppMeta
+    const meta = await extractAppMeta(adb, pkg);
+    if (meta.iconPath) {
+      try {
+        const process = await adb.subprocess.noneProtocol.spawn(['unzip', '-p', apkPath, meta.iconPath]);
+        const buffer = await readProcessOutput(process);
+        if (buffer.byteLength >= 100) {
+          const blob = new Blob([buffer], { type: 'image/png' });
+          return URL.createObjectURL(blob);
+        }
+      } catch {
+        // Fall through to filename-based approach
+      }
+    }
+
+    // Fallback: scan for icon files by filename
     const listOutput = await adb.subprocess.noneProtocol.spawnWaitText(['unzip', '-l', apkPath]);
     const iconCandidates: string[] = [];
 

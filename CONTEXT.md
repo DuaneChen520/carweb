@@ -51,3 +51,26 @@ dpi = min(width, height) × 160 / 600
 
 ### 码率计算
 码率与像素总数成正比：以 1080p×8Mbps 为基准等比计算（1Mbps~40Mbps 限幅）。
+
+### 应用信息解析（App Info Parsing）
+通过 ADB 从 Android 设备获取应用名称和图标的机制。
+
+**解析流程**：
+1. 通过 `adb.sync().read()` 全量下载 APK 文件到浏览器
+2. 使用 `app-info-parser` 的 `ApkParser` 部分解析（AndroidManifest.xml + resources.arsc + 图标）
+3. 解析结果持久化到 IndexedDB，避免重复解析
+
+**内存管理**：
+- **峰值限制**：车机内存的 1/4（通过 `navigator.deviceMemory` 获取，fallback 到 4GB）
+- **估算模型**：APK 文件大小 = 内存占用
+- **超限处理**：单个应用 APK 大小 > 峰值限制 → 跳过解析，显示包名
+
+**解析策略**：
+- **串行解析**：一次只解析一个应用，避免内存峰值叠加
+- **排序优化**：小型应用优先解析（按 APK 大小升序），大型应用最后
+- **进度反馈**：实时显示解析进度（已解析/总数）
+
+**持久化存储**：
+- **存储位置**：IndexedDB（以 `packageName` 为 key）
+- **存储内容**：`{ packageName, label, iconBase64, versionCode, lastParsed }`
+- **失效策略**：`versionCode` 变化时重新解析

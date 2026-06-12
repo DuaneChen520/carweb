@@ -110,13 +110,17 @@ export interface ParsedManifest {
 export function parseAndroidManifest(buffer: ArrayBuffer): ParsedManifest {
   const data = new DataView(buffer);
   const magic = data.getUint32(0, true);
-  if (magic !== 0x00080003) {
+
+  // Android 12+ uses protobuf-based AXML with magic 0x000C0003 (header=12)
+  // Older versions use 0x00080003 (header=8)
+  if (magic !== 0x00080003 && magic !== 0x000C0003) {
     console.error('[parseAXML] Invalid magic:', magic.toString(16));
     return { label: null, icon: null };
   }
 
+  const headerSize = (magic >> 16) & 0xffff; // 8 or 12
   let stringPool: StringPool | null = null;
-  let offset = 8;
+  let offset = headerSize;
 
   const namespaceMap = new Map<number, string>();
 

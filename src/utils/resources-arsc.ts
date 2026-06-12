@@ -5,6 +5,7 @@ const CHUNK_RES_TABLE_TYPE = 0x0201;
 const CHUNK_STRING_POOL = 0x0001;
 
 const VALUE_TYPE_STRING = 0x03;
+const VALUE_TYPE_REFERENCE = 0x01;
 
 function readArscStringPool(data: DataView, offset: number): string[] {
   const stringCount = data.getUint32(offset + 8, true);
@@ -148,6 +149,110 @@ export function resolveStringResource(arscBuffer: ArrayBuffer, resourceId: numbe
               if (strIndex >= 0 && strIndex < globalStrings.length) {
                 return globalStrings[strIndex]!;
               }
+            }
+          }
+        }
+
+        packageOffset += innerSize;
+        continue;
+      }
+
+      packageOffset += innerSize;
+    }
+
+    offset += chunkSize;
+  }
+
+  return null;
+}
+
+/**
+ * Resolve a drawable/mipmap resource ID to a file path string.
+ * Returns the relative path inside the APK, e.g. "res/mipmap-xxxhdpi/ic_launcher.png".
+ */
+export function resolveDrawableResource(arscBuffer: ArrayBuffer, resourceId: number): string | null {
+  const data = new DataView(arscBuffer);
+  const magic = data.getUint16(0, true);
+  if (magic !== CHUNK_RES_TABLE) {
+    return null;
+  }
+
+  let globalStrings: string[] | null = null;
+  let offset = 12;
+
+  while (offset < data.byteLength - 11) {
+    const chunkType = data.getUint16(offset, true);
+    const chunkSize = data.getUint32(offset + 4, true);
+    if (chunkSize < 12) break;
+
+    if (chunkType === CHUNK_STRING_POOL) {
+      if (!globalStrings) {
+        globalStrings = readArscStringPool(data, offset);
+      }
+      offset += chunkSize;
+      continue;
+    }
+
+    if (chunkType !== CHUNK_RES_TABLE_PACKAGE) {
+      offset += chunkSize;
+      continue;
+    }
+
+    const packageId = data.getUint32(offset + 8, true);
+    const targetPackageId = (resourceId >> 24) & 0xff;
+
+    if (packageId !== targetPackageId) {
+      offset += chunkSize;
+      continue;
+    }
+
+    const targetTypeId = (resourceId >> 16) & 0xff;
+    const targetEntryIndex = resourceId & 0xffff;
+
+    let packageOffset = offset + 12 + 256;
+    const packageEnd = offset + chunkSize;
+
+    while (packageOffset < packageEnd - 11) {
+      const innerType = data.getUint16(packageOffset, true);
+      const innerSize = data.getUint32(packageOffset + 4, true);
+      if (innerSize < 12) break;
+
+      if (innerType === CHUNK_STRING_POOL) {
+        packageOffset += innerSize;
+        continue;
+      }
+
+      if (innerType === CHUNK_RES_TABLE_TYPE_SPEC) {
+        packageOffset += innerSize;
+        continue;
+      }
+
+      if (innerType === CHUNK_RES_TABLE_TYPE) {
+        const typeId = data.getUint8(packageOffset + 8);
+        const entryCount = data.getUint32(packageOffset + 12, true);
+        const entriesStart = data.getUint32(packageOffset + 16, true);
+
+        if (typeId === targetTypeId && targetEntryIndex < entryCount) {
+          const entriesOffsetBase = packageOffset + 28;
+          const entryOffset = data.getUint32(entriesOffsetBase + targetEntryIndex * 4, true);
+
+          if (entryOffset !== 0xFFFFFFFF) {
+            const entryPos = packageOffset + entriesStart + entryOffset;
+            const entrySize = data.getUint16(entryPos, true);
+            const valueStart = entryPos + entrySize;
+
+            const valueType = data.getUint8(valueStart + 3);
+            const valueData = data.getUint32(valueStart + 4, true);
+
+            if (valueType === VALUE_TYPE_STRING && globalStrings) {
+              if (valueData >= 0 && valueData < globalStrings.length) {
+                return globalStrings[valueData]!;
+              }
+            }
+
+            // If it's a reference, recursively resolve
+            if (valueType === VALUE_TYPE_REFERENCE && valueData !== 0) {
+              return resolveDrawableResource(arscBuffer, valueData);
             }
           }
         }

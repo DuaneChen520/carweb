@@ -1,4 +1,4 @@
-export const SW_TARGET = 960;
+export const SW_TARGET = 800;
 export const ANDROID_MDPI_BASELINE = 160;
 
 export function calculateDpi(width: number, height: number): number {
