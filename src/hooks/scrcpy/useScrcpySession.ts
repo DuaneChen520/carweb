@@ -17,6 +17,7 @@ import {
   hideIme,
   turnOffScreen,
   turnOnScreen,
+  resizeDisplay as adbResizeDisplay,
 } from '@/lib/adb-commands';
 import type { RotationState } from '@/lib/adb-commands';
 
@@ -33,14 +34,13 @@ export interface ResolutionPreset {
   key: ResolutionPresetKey;
   label: string;
   scale: number;
-  dpiMultiplier: number;
 }
 
 export const RESOLUTION_PRESETS: ResolutionPreset[] = [
-  { key: 'original', label: '原画', scale: 1.0, dpiMultiplier: 1.0 },
-  { key: 'ultra',   label: '超清', scale: 0.75, dpiMultiplier: 1.33 },
-  { key: 'hd',      label: '高清', scale: 0.5,  dpiMultiplier: 2.0 },
-  { key: 'smooth',  label: '流畅', scale: 0.25, dpiMultiplier: 4.0 },
+  { key: 'original', label: '原画', scale: 1.0 },
+  { key: 'ultra',   label: '超清', scale: 0.75 },
+  { key: 'hd',      label: '高清', scale: 0.5 },
+  { key: 'smooth',  label: '流畅', scale: 0.25 },
 ];
 
 export interface ScrcpyState {
@@ -275,6 +275,18 @@ export function useScrcpySession() {
     }
   }, []);
 
+  const resizeDisplay = useCallback(async (width: number, height: number, dpi: number) => {
+    const adb = adbRef.current;
+    if (!adb) return;
+
+    try {
+      await adbResizeDisplay(adb, 0, width, height, dpi);
+      controllerRef.current?.resetVideo();
+    } catch (error) {
+      console.error('调整虚拟屏尺寸错误:', error);
+    }
+  }, []);
+
   return {
     ...state,
     startScrcpy,
@@ -294,6 +306,7 @@ export function useScrcpySession() {
     togglePhysicalScreen,
     turnOffPhysicalScreen,
     turnOnPhysicalScreen,
+    resizeDisplay,
     resumeAudio: audioDecoder.resume,
   };
 }

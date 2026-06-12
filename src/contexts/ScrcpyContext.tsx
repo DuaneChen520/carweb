@@ -30,6 +30,7 @@ interface ScrcpyContextValue extends ScrcpyState {
   togglePhysicalScreen: () => Promise<void>;
   turnOffPhysicalScreen: () => Promise<void>;
   turnOnPhysicalScreen: () => Promise<void>;
+  resizeDisplay: (width: number, height: number, dpi: number) => Promise<void>;
   resumeAudio: () => void;
 }
 
@@ -62,6 +63,7 @@ export function ScrcpyProvider({ children }: { children: ReactNode }) {
     session.togglePhysicalScreen,
     session.turnOffPhysicalScreen,
     session.turnOnPhysicalScreen,
+    session.resizeDisplay,
     session.resumeAudio,
   ]);
 

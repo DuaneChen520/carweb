@@ -32,11 +32,22 @@ Scrcpy 3.x 新增的选项（替代旧的 `lockVideoOrientation`），控制视�
 - **高清（HD）**: ~0.5x 缩放，明显减负
 - **流畅（Smooth）**: ~0.25x 缩放，极致减负
 
-### DPI 缩放补偿（devicePixelRatio Compensation）
-虚拟屏分辨率计算时自动乘以 `window.devicePixelRatio`，以充分利用高分屏（HiDPI/Retina）的物理像素密度：
-- 车机浏览器（DPR=1）：无影响，行为不变
-- Windows 200% 缩放（DPR=2）：分辨率翻倍，画面更锐利
-- macOS Retina（DPR=2）：同样受益
+### Smallest Width（sw）
+Android 概念，指设备可用屏幕区域在宽度和高度两个维度中的较小值（以 dp 为单位）：
+```
+sw(dp) = min(width_px, height_px) × 160 / dpi
+```
+应用通过 sw 来判断设备尺寸类别。标准大屏阈值为 `sw ≥ 600dp`，超过该值的设备被视为平板/可折叠大屏，触发响应式布局。
 
-DPI 值也同步乘以 DPR，保证 Android UI 控件在不同缩放比例下的物理阅读尺寸一致。
+### sw 锚点 DPI 计算
+虚拟屏的 DPI 不再使用固定基数乘以倍率，而是以目标 sw 值（600dp）为锚点反向计算：
+```
+dpi = min(width, height) × 160 / 600
+```
+这样保证任意分辨率下应用的 sw 判定一致，均达到大屏阈值。
+
+### DPR 与 DPI 解耦
+`window.devicePixelRatio`（DPR）会影响分辨率宽高（w/h），但 DPI 由 sw 公式自动响应：DPR 翻倍 → w/h 翻倍 → DPI 翻倍 → sw 不变。跨设备（不同 DPR）下 sw 表现一致，无需额外补偿。
+
+### 码率计算
 码率与像素总数成正比：以 1080p×8Mbps 为基准等比计算（1Mbps~40Mbps 限幅）。

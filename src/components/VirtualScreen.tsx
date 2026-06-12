@@ -3,6 +3,7 @@ import { RotateCcw } from 'lucide-react';
 import { AndroidMotionEventAction } from '@yume-chan/scrcpy';
 import { RESOLUTION_PRESETS } from '../hooks/scrcpy';
 import type { ResolutionPresetKey } from '../hooks/scrcpy';
+import { calculateDpi } from '../utils/display';
 import { useAdbStore } from '../hooks/useAdbStore';
 import { useScrcpyContext } from '../contexts/ScrcpyContext';
 import { ControlSidebar } from './ControlSidebar';
@@ -23,6 +24,9 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   const [showVirtualKeyboard, setShowVirtualKeyboard] = useState(false);
   const [keyboardInput, setKeyboardInput] = useState('');
   const hasStartedRef = useRef(false);
+  const isResizingRef = useRef(false);
+  const prevDisplayConfigRef = useRef<{ width: number; height: number } | null>(null);
+  const initialStartDoneRef = useRef(false);
 
   const { startScrcpy, stopScrcpy, injectTouch, injectText, showKeyboard, hideKeyboard, resumeAudio, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay } = useScrcpyContext();
   const store = useAdbStore();
@@ -54,7 +58,7 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     return {
       width: w,
       height: h,
-      dpi: Math.round(320 * currentPreset.dpiMultiplier * dpr),
+      dpi: calculateDpi(w, h),
       bitRate: Math.max(1000000, Math.min(40000000, Math.round(8000000 * pixelRatio))),
     };
   }, [containerSize.width, containerSize.height, useMirrorMode, currentPreset, dpr]);
@@ -62,16 +66,47 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   useEffect(() => {
     const canvas = canvasRef.current;
     const adb = store.adb;
-    if (!canvas || !adb || isRunning || isStarting) return;
+    if (!canvas || !adb || isRunning || isStarting || isResizingRef.current) return;
 
     hasStartedRef.current = true;
 
     if (useMirrorMode || containerSize.width === 0 || containerSize.height === 0) {
       startScrcpy(adb, canvas);
     } else {
+      prevDisplayConfigRef.current = { width: displayConfig!.width, height: displayConfig!.height };
       startScrcpy(adb, canvas, displayConfig);
     }
+    initialStartDoneRef.current = true;
   }, [store.adb, isRunning, isStarting, containerSize.width, containerSize.height, restartCount, useMirrorMode, startScrcpy, resolutionPreset, displayConfig]);
+
+  useEffect(() => {
+    if (!isRunning || useMirrorMode || !displayConfig || isStarting || isResizingRef.current || !initialStartDoneRef.current) return;
+
+    const prev = prevDisplayConfigRef.current;
+    if (prev && prev.width === displayConfig.width && prev.height === displayConfig.height) return;
+
+    prevDisplayConfigRef.current = { width: displayConfig.width, height: displayConfig.height };
+
+    let timeoutId: NodeJS.Timeout;
+    const restart = async () => {
+      isResizingRef.current = true;
+      await stopScrcpy();
+      hasStartedRef.current = false;
+      initialStartDoneRef.current = false;
+      setRestartCount(c => c + 1);
+      timeoutId = setTimeout(() => {
+        isResizingRef.current = false;
+      }, 200);
+    };
+    restart();
+
+    return () => clearTimeout(timeoutId);
+  }, [displayConfig?.width, displayConfig?.height, isRunning, useMirrorMode, isStarting, stopScrcpy]);
+
+  useEffect(() => {
+    prevDisplayConfigRef.current = null;
+    initialStartDoneRef.current = false;
+  }, [useMirrorMode]);
 
   useEffect(() => {
     return () => {

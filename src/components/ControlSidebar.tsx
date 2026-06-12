@@ -98,7 +98,7 @@ interface ControlSidebarProps {
   handleStop?: () => void;
   toggleVirtualKeyboard?: () => void;
   showVirtualKeyboard?: boolean;
-  currentPreset?: { key: string; label: string; scale: number; dpiMultiplier: number };
+  currentPreset?: { key: string; label: string; scale: number };
   resolutionPreset?: ResolutionPresetKey;
   changeResolutionPreset?: (preset: ResolutionPresetKey) => void;
   showResMenu?: boolean;
@@ -234,9 +234,9 @@ export function ControlSidebar({
     <>
       <div className="w-13 flex flex-col items-center py-2 gap-1 bg-black/60 border-r border-white/10">
         <button
-          onClick={() => togglePanel('search')}
-          className={`p-2 rounded-lg transition-colors ${panelMode === 'search' ? 'bg-blue-500/30 text-blue-400' : 'text-white/50 hover:text-white hover:bg-white/10'}`}
-          title="搜索应用"
+          onClick={() => togglePanel('apps')}
+          className={`p-2 rounded-lg transition-colors ${panelMode === 'apps' ? 'bg-blue-500/30 text-blue-400' : 'text-white/50 hover:text-white hover:bg-white/10'}`}
+          title="搜索引用"
         >
           <Search className="w-5 h-5" />
         </button>

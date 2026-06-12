@@ -167,6 +167,17 @@ export async function turnOnScreen(adb: Adb): Promise<void> {
   }
 }
 
+export async function resizeDisplay(
+  adb: Adb,
+  displayId: number,
+  width: number,
+  height: number,
+  dpi: number
+): Promise<void> {
+  await runAdbCommand(adb, `wm size -d ${displayId} ${width}x${height}`);
+  await runAdbCommand(adb, `wm density -d ${displayId} ${dpi}`);
+}
+
 function formatPackageName(pkg: string): string {
   const segments = pkg.split('.');
   const last = segments[segments.length - 1];

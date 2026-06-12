@@ -17,6 +17,10 @@ export default defineConfig({
   build: {
     sourcemap: 'hidden',
   },
+  test: {
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    exclude: ['ya-webadb-main/**'],
+  },
   plugins: [
     react({
       babel: {
