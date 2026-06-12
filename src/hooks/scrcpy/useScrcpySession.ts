@@ -112,7 +112,7 @@ export function useScrcpySession() {
         audioSource: 'output',
         control: true,
         stayAwake: true,
-        showTouches: true,
+        showTouches: false,
         ...(useVirtualDisplay
           ? {
               newDisplay: new ScrcpyNewDisplay(displayConfig.width, displayConfig.height, displayConfig.dpi ?? 320),
@@ -284,7 +284,7 @@ export function useScrcpySession() {
     showKeyboard,
     hideKeyboard,
     startApp: inputInjector.startApp,
-    goHome: inputInjector.goBack,
+    goHome: inputInjector.goHome,
     goBack: inputInjector.goBack,
     showRecentApps: inputInjector.showRecentApps,
     getAppList: appManager.getAppList,
