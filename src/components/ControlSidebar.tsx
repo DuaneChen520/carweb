@@ -111,7 +111,7 @@ export function ControlSidebar({
   currentPreset, resolutionPreset, changeResolutionPreset, showResMenu, setShowResMenu,
 }: ControlSidebarProps) {
   const scrcpy = useScrcpyContext();
-  const { goBack, goHome, showRecentApps, startApp, getAppList, getAppIcon, getAppLabel, batchGetAppLabels, injectText, togglePhysicalScreen, turnOffPhysicalScreen, turnOnPhysicalScreen } = scrcpy;
+  const { goBack, goHome, showRecentApps, startApp, getAppList, getAppIcon, getAppLabel, batchGetAppLabels, injectText, turnOffPhysicalScreen, turnOnPhysicalScreen } = scrcpy;
   const [panelMode, setPanelMode] = useState<'closed' | 'search' | 'apps'>('closed');
   const [searchText, setSearchText] = useState('');
   const [apps, setApps] = useState<string[] | null>(null);
@@ -121,6 +121,7 @@ export function ControlSidebar({
   const [floatingPanelPosition, setFloatingPanelPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [pinnedApps, setPinnedApps] = useState<string[]>([]);
+  const [physicalScreenOn, setPhysicalScreenOn] = useState(true);
   const searchRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef({ x: 0, y: 0 });
@@ -283,7 +284,7 @@ export function ControlSidebar({
               <ChevronDown className="w-5 h-5" />
             </button>
             {showResMenu && changeResolutionPreset && (
-              <div className="absolute bottom-full right-full mb-1 mr-1 bg-black/95 backdrop-blur-md border border-white/10 rounded-lg overflow-hidden z-50 min-w-[90px] shadow-xl">
+              <div className="absolute bottom-full left-full mb-0 ml-1 bg-black/95 backdrop-blur-md border border-white/10 rounded-lg overflow-hidden z-50 min-w-[90px] shadow-xl">
                 {RESOLUTION_PRESETS.map(p => (
                   <button
                     key={p.key}
@@ -352,13 +353,20 @@ export function ControlSidebar({
           <Grid className="w-5 h-5" />
         </button>
 
-        {isVirtualDisplay && turnOffPhysicalScreen && (
+        {isVirtualDisplay && turnOffPhysicalScreen && turnOnPhysicalScreen && (
           <button
-            onClick={turnOffPhysicalScreen}
+            onClick={async () => {
+              if (physicalScreenOn) {
+                await turnOffPhysicalScreen();
+              } else {
+                await turnOnPhysicalScreen();
+              }
+              setPhysicalScreenOn(!physicalScreenOn);
+            }}
             className="p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
-            title="关闭物理屏幕"
+            title={physicalScreenOn ? '关闭物理屏幕' : '开启物理屏幕'}
           >
-            <MonitorOff className="w-5 h-5" />
+            {physicalScreenOn ? <MonitorOff className="w-5 h-5" /> : <Monitor className="w-5 h-5" />}
           </button>
         )}
 
@@ -376,7 +384,7 @@ export function ControlSidebar({
       {panelMode !== 'closed' && (
         <div
           ref={panelRef}
-          className="fixed w-72 bg-black/90 backdrop-blur-md border-r border-white/10 flex flex-col z-50 shadow-2xl rounded-lg overflow-hidden"
+          className="fixed w-72 max-h-[calc(100vh-2rem)] bg-black/90 backdrop-blur-md border-r border-white/10 flex flex-col z-50 shadow-2xl rounded-lg overflow-hidden"
           style={{
             left: `${floatingPanelPosition.x}px`,
             top: `${floatingPanelPosition.y}px`,

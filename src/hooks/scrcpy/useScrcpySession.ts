@@ -112,16 +112,20 @@ export function useScrcpySession() {
         audioSource: 'output',
         control: true,
         stayAwake: true,
-        showTouches: true,
+        showTouches: false,
         ...(useVirtualDisplay
           ? {
               newDisplay: new ScrcpyNewDisplay(displayConfig.width, displayConfig.height, displayConfig.dpi ?? 320),
               captureOrientation: ScrcpyCaptureOrientation.Unlocked,
-              displayImePolicy: 'local' as const,
-            }
-          : { displayId: 0 }
+               displayImePolicy: 'local' as const,
+               flexDisplay: true, // Enable flex display for dynamic resizing
+             }
+           : { displayId: 0 }
         ),
       });
+
+      // Debug: log serialized options
+      console.log('Scrcpy options:', options.serialize());
 
       const client = await AdbScrcpyClient.start(adb, serverPath, options);
       clientRef.current = client;
@@ -168,6 +172,7 @@ export function useScrcpySession() {
         message = 'scrcpy server exited prematurely';
         if (error.output.length > 0) {
           message += ': ' + error.output.join('; ');
+          console.error('Scrcpy server output:', error.output);
         }
       } else if (error instanceof Error) {
         message = error.message;
@@ -275,6 +280,31 @@ export function useScrcpySession() {
     }
   }, []);
 
+  const resizeDisplay = useCallback(async (width: number, height: number, dpi: number = 320) => {
+    const controller = controllerRef.current;
+    if (!controller) {
+      console.warn('resizeDisplay: controller not available');
+      return;
+    }
+
+    try {
+      // Create resize display message manually
+      // Format: type (1 byte) + width (4 bytes) + height (4 bytes) + dpi (4 bytes)
+      const buffer = new ArrayBuffer(13);
+      const view = new DataView(buffer);
+      view.setUint8(0, 18); // TYPE_RESIZE_DISPLAY = 18
+      view.setInt32(1, width, true);
+      view.setInt32(5, height, true);
+      view.setInt32(9, dpi, true);
+      
+      // Send the message through the controller's write method
+      await controller.write(new Uint8Array(buffer));
+      console.log(`Resize display: ${width}x${height} @ ${dpi}dpi`);
+    } catch (error) {
+      console.error('调整显示尺寸错误:', error);
+    }
+  }, []);
+
   return {
     ...state,
     startScrcpy,
@@ -284,7 +314,7 @@ export function useScrcpySession() {
     showKeyboard,
     hideKeyboard,
     startApp: inputInjector.startApp,
-    goHome: inputInjector.goBack,
+    goHome: inputInjector.goHome,
     goBack: inputInjector.goBack,
     showRecentApps: inputInjector.showRecentApps,
     getAppList: appManager.getAppList,
@@ -295,5 +325,6 @@ export function useScrcpySession() {
     turnOffPhysicalScreen,
     turnOnPhysicalScreen,
     resumeAudio: audioDecoder.resume,
+    resizeDisplay,
   };
 }

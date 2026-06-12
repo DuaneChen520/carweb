@@ -24,7 +24,7 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   const [keyboardInput, setKeyboardInput] = useState('');
   const hasStartedRef = useRef(false);
 
-  const { startScrcpy, stopScrcpy, injectTouch, injectText, showKeyboard, hideKeyboard, resumeAudio, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay } = useScrcpyContext();
+  const { startScrcpy, stopScrcpy, injectTouch, injectText, showKeyboard, hideKeyboard, resumeAudio, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay, resizeDisplay } = useScrcpyContext();
   const store = useAdbStore();
 
   useEffect(() => {
@@ -90,6 +90,30 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
       document.removeEventListener('click', handleClick);
     };
   }, [showResMenu]);
+
+  // Handle window resize for flex display
+  useEffect(() => {
+    if (!isRunning || !isVirtualDisplay || !displayConfig) return;
+
+    // Debounce resize events to avoid too many resize requests
+    let resizeTimeout: NodeJS.Timeout;
+    const handleResize = () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        if (displayConfig) {
+          resizeDisplay(displayConfig.width, displayConfig.height, displayConfig.dpi);
+        }
+      }, 300);
+    };
+
+    // Listen for window resize events
+    window.addEventListener('resize', handleResize);
+    
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      clearTimeout(resizeTimeout);
+    };
+  }, [isRunning, isVirtualDisplay, displayConfig, resizeDisplay]);
 
   const calculateAdaptiveSize = useCallback(() => {
     if (!videoWidth || !videoHeight || !containerSize.width || !containerSize.height) {
