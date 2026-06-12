@@ -274,7 +274,7 @@ export function ControlSidebar({
           </button>
         )}
 
-        {isRunning && !useMirrorMode && currentPreset && setShowResMenu && (
+        {isRunning && currentPreset && setShowResMenu && (
           <div className="relative">
             <button
               onClick={() => setShowResMenu(!showResMenu)}
@@ -311,7 +311,7 @@ export function ControlSidebar({
           </button>
         )}
 
-        {isRunning && !useMirrorMode && handleApplyNewSize && (
+        {isRunning && handleApplyNewSize && (
           <button
             onClick={handleApplyNewSize}
             className="p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"

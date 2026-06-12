@@ -18,6 +18,9 @@ import {
   turnOffScreen,
   turnOnScreen,
   resizeDisplay as adbResizeDisplay,
+  getCurrentForegroundApp,
+  getVirtualDisplayId,
+  startAppOnDisplay,
 } from '@/lib/adb-commands';
 import type { RotationState } from '@/lib/adb-commands';
 
@@ -50,6 +53,7 @@ export interface ScrcpyState {
   videoWidth: number;
   videoHeight: number;
   isVirtualDisplay: boolean;
+  fallbackToMirror: boolean;
 }
 
 export function useScrcpySession() {
@@ -60,12 +64,14 @@ export function useScrcpySession() {
     videoWidth: 0,
     videoHeight: 0,
     isVirtualDisplay: false,
+    fallbackToMirror: false,
   });
 
   const clientRef = useRef<AdbScrcpyClient<AdbScrcpyOptionsLatest<true>> | null>(null);
   const controllerRef = useRef<ScrcpyControlMessageWriter | null>(null);
   const adbRef = useRef<Adb | null>(null);
   const rotationStateRef = useRef<RotationState | null>(null);
+  const displayIdRef = useRef<number | null>(null);
 
   const videoDecoder = useVideoDecoder();
   const audioDecoder = useAudioDecoder();
@@ -73,7 +79,12 @@ export function useScrcpySession() {
   const appManager = useAppManager();
 
   const startScrcpy = useCallback(async (adb: Adb, canvas: HTMLCanvasElement, displayConfig?: DisplayConfig, isRetry?: boolean) => {
+    const useVirtualDisplay = !!displayConfig;
+    console.log('[DEBUG-vscreen] startScrcpy 调用: displayConfig =', displayConfig, ', isRetry =', isRetry, ', useVirtualDisplay =', useVirtualDisplay);
+
     try {
+      // 清空旧的 displayId，强制 ensureDisplayId 重新查询
+      displayIdRef.current = null;
       setState(prev => ({ ...prev, isStarting: true, error: null, videoWidth: 0, videoHeight: 0 }));
 
       const { AdbScrcpyClient, AdbScrcpyOptionsLatest } = await import('@yume-chan/adb-scrcpy');
@@ -107,9 +118,7 @@ export function useScrcpySession() {
         videoCodec: 'h264',
         videoBitRate: displayConfig?.bitRate ?? 8000000,
         maxFps: 60,
-        audio: true,
-        audioCodec: 'opus',
-        audioSource: 'output',
+        audio: false,
         control: true,
         stayAwake: true,
         showTouches: false,
@@ -122,6 +131,8 @@ export function useScrcpySession() {
           : { displayId: 0 }
         ),
       });
+      console.log('[DEBUG-vscreen] scrcpy 选项: useVirtualDisplay =', useVirtualDisplay,
+        useVirtualDisplay ? `, newDisplay = ${displayConfig!.width}x${displayConfig!.height}@${displayConfig!.dpi}dpi` : ', displayId = 0 (镜像)');
 
       const client = await AdbScrcpyClient.start(adb, serverPath, options);
       clientRef.current = client;
@@ -149,6 +160,16 @@ export function useScrcpySession() {
 
       audioDecoder.setupAudioStream(client);
 
+      // 获取虚拟屏的 displayId
+      if (useVirtualDisplay) {
+        const vid = await getVirtualDisplayId(adb);
+        displayIdRef.current = vid;
+        console.log('[DEBUG-restore] startScrcpy: 虚拟屏 displayId =', vid);
+      } else {
+        displayIdRef.current = 0;
+        console.log('[DEBUG-restore] startScrcpy: 镜像模式 displayId = 0');
+      }
+
       setState(prev => ({
         ...prev,
         isStarting: false,
@@ -158,8 +179,17 @@ export function useScrcpySession() {
         isVirtualDisplay: useVirtualDisplay,
       }));
     } catch (error) {
+      console.error('[DEBUG-vscreen] startScrcpy 失败: error =', error,
+        ', displayConfig =', displayConfig,
+        ', isRetry =', isRetry,
+        ', errorType =', error?.constructor?.name,
+        ', isAdbScrcpyExitedError =', error instanceof AdbScrcpyExitedError);
+
       if (!isRetry && displayConfig && error instanceof AdbScrcpyExitedError) {
-        setState(prev => ({ ...prev, isStarting: true, error: '虚拟屏创建失败，自动切换到镜像模式...' }));
+        console.warn('[DEBUG-vscreen] ★ 虚拟屏创建失败，回退到镜像模式! error.output =', (error as any).output);
+        // 设置 fallbackToMirror 标志，让 VirtualScreen 知道发生了回退
+        // 递归调用 startScrcpy 时，...prev 会保留 fallbackToMirror: true
+        setState(prev => ({ ...prev, isStarting: true, error: null, fallbackToMirror: true }));
         return startScrcpy(adb, canvas, undefined, true);
       }
 
@@ -202,6 +232,9 @@ export function useScrcpySession() {
         clientRef.current = null;
       }
 
+      displayIdRef.current = null;
+
+      // 立即更新状态，不等待虚拟屏销毁
       setState({
         isStarting: false,
         isRunning: false,
@@ -209,6 +242,7 @@ export function useScrcpySession() {
         videoWidth: 0,
         videoHeight: 0,
         isVirtualDisplay: false,
+        fallbackToMirror: false,
       });
     } catch (error) {
       console.error('停止 Scrcpy 错误:', error);
@@ -287,10 +321,65 @@ export function useScrcpySession() {
     }
   }, []);
 
+  // 延迟重试获取虚拟屏 displayId（scrcpy 刚启动时虚拟屏可能尚未注册）
+  const ensureDisplayId = useCallback(async (): Promise<number | null> => {
+    if (displayIdRef.current !== null) return displayIdRef.current;
+    const adb = adbRef.current;
+    if (!adb) return null;
+
+    console.log('[DEBUG-restore] ensureDisplayId: displayId 为 null, 尝试重新获取...');
+    // 最多重试 5 次，每次间隔 500ms
+    for (let i = 0; i < 5; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      const vid = await getVirtualDisplayId(adb);
+      if (vid !== null) {
+        displayIdRef.current = vid;
+        console.log('[DEBUG-restore] ensureDisplayId: 第', i + 1, '次重试成功, displayId =', vid);
+        return vid;
+      }
+    }
+    console.log('[DEBUG-restore] ensureDisplayId: 5 次重试均失败');
+    return null;
+  }, []);
+
+  const getForegroundApp = useCallback(async (): Promise<string | null> => {
+    const adb = adbRef.current;
+    if (!adb) {
+      console.log('[DEBUG-restore] getForegroundApp: adb 为空, 返回 null');
+      return null;
+    }
+    const displayId = await ensureDisplayId();
+    console.log('[DEBUG-restore] getForegroundApp: displayId =', displayId);
+    const result = await getCurrentForegroundApp(adb, displayId ?? 0);
+    console.log('[DEBUG-restore] getForegroundApp: 查询结果 =', result);
+    return result;
+  }, [ensureDisplayId]);
+
+  const startAppOnDisplayFn = useCallback(async (packageName: string) => {
+    const adb = adbRef.current;
+    if (!adb) {
+      console.log('[DEBUG-restore] startAppOnDisplay: adb 为空, 无法启动');
+      return;
+    }
+    const displayId = await ensureDisplayId();
+    console.log('[DEBUG-restore] startAppOnDisplay: packageName =', packageName, ', displayId =', displayId);
+    if (displayId !== null) {
+      await startAppOnDisplay(adb, packageName, displayId);
+      console.log('[DEBUG-restore] startAppOnDisplay: 命令已执行');
+    } else {
+      console.log('[DEBUG-restore] startAppOnDisplay: displayId 仍为 null, 无法启动');
+    }
+  }, [ensureDisplayId]);
+
+  const clearFallback = useCallback(() => {
+    setState(prev => ({ ...prev, fallbackToMirror: false }));
+  }, []);
+
   return {
     ...state,
     startScrcpy,
     stopScrcpy,
+    clearFallback,
     injectTouch: inputInjector.injectTouch,
     injectText: inputInjector.injectText,
     showKeyboard,
@@ -307,6 +396,8 @@ export function useScrcpySession() {
     turnOffPhysicalScreen,
     turnOnPhysicalScreen,
     resizeDisplay,
+    getForegroundApp,
+    startAppOnDisplay: startAppOnDisplayFn,
     resumeAudio: audioDecoder.resume,
   };
 }

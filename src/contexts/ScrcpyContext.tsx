@@ -5,6 +5,7 @@ import type { Adb } from '@yume-chan/adb';
 interface ScrcpyContextValue extends ScrcpyState {
   startScrcpy: (adb: Adb, canvas: HTMLCanvasElement, displayConfig?: DisplayConfig, isRetry?: boolean) => Promise<void>;
   stopScrcpy: () => Promise<void>;
+  clearFallback: () => void;
   injectTouch: (message: {
     action: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
     pointerId: bigint;
@@ -20,6 +21,7 @@ interface ScrcpyContextValue extends ScrcpyState {
   showKeyboard: () => Promise<void>;
   hideKeyboard: () => Promise<void>;
   startApp: (appName: string) => Promise<void>;
+  startAppOnDisplay: (packageName: string) => Promise<void>;
   goHome: () => Promise<void>;
   goBack: () => Promise<void>;
   showRecentApps: () => Promise<void>;
@@ -31,6 +33,7 @@ interface ScrcpyContextValue extends ScrcpyState {
   turnOffPhysicalScreen: () => Promise<void>;
   turnOnPhysicalScreen: () => Promise<void>;
   resizeDisplay: (width: number, height: number, dpi: number) => Promise<void>;
+  getForegroundApp: () => Promise<string | null>;
   resumeAudio: () => void;
 }
 
@@ -46,13 +49,16 @@ export function ScrcpyProvider({ children }: { children: ReactNode }) {
     session.videoWidth,
     session.videoHeight,
     session.isVirtualDisplay,
+    session.fallbackToMirror,
     session.startScrcpy,
     session.stopScrcpy,
+    session.clearFallback,
     session.injectTouch,
     session.injectText,
     session.showKeyboard,
     session.hideKeyboard,
     session.startApp,
+    session.startAppOnDisplay,
     session.goHome,
     session.goBack,
     session.showRecentApps,
@@ -64,6 +70,7 @@ export function ScrcpyProvider({ children }: { children: ReactNode }) {
     session.turnOffPhysicalScreen,
     session.turnOnPhysicalScreen,
     session.resizeDisplay,
+    session.getForegroundApp,
     session.resumeAudio,
   ]);
 
