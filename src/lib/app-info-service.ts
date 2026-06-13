@@ -1,8 +1,7 @@
 import type { Adb } from '@yume-chan/adb';
 import { AppInfoCache, type AppInfo } from './app-info-cache';
 import { parseApk, getMaxMemoryBytes } from './apk-parser';
-import { getApkPath } from '@/utils/apk-utils';
-import { getInstalledPackages } from './adb-commands';
+import { getInstalledPackages, runAdbCommand } from './adb-commands';
 
 export type ParseProgress = {
   total: number;
@@ -16,6 +15,7 @@ export type ParseCallback = (progress: ParseProgress) => void;
 export class AppInfoService {
   private cache = new AppInfoCache();
   private parsing = false;
+  private abortController: AbortController | null = null;
 
   getMemoryLimit(): number {
     return getMaxMemoryBytes();
@@ -25,6 +25,13 @@ export class AppInfoService {
     const cached = await this.cache.get(packageName);
     if (!cached) return true;
     return cached.versionCode !== versionCode;
+  }
+
+  abort(): void {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+    }
   }
 
   async parseAllApps(
@@ -37,6 +44,8 @@ export class AppInfoService {
     }
 
     this.parsing = true;
+    this.abortController = new AbortController();
+    const { signal } = this.abortController;
     const results = new Map<string, AppInfo>();
     const memoryLimit = this.getMemoryLimit();
 
@@ -49,34 +58,34 @@ export class AppInfoService {
         current: '',
       };
 
-      // Sort by size ascending - need to get sizes first
       const packagesWithSize = await this.getPackageSizes(adb, packages);
       packagesWithSize.sort((a, b) => a.size - b.size);
 
       for (const pkg of packagesWithSize) {
+        if (signal.aborted) break;
+
         progress.current = pkg.name;
         onProgress?.(progress);
 
-        // Check cache first
         const cached = await this.cache.get(pkg.name);
         if (cached && cached.versionCode === pkg.versionCode) {
           results.set(pkg.name, cached);
           progress.parsed++;
+          onProgress?.(progress);
           continue;
         }
 
-        // Check memory limit
         if (pkg.size > memoryLimit) {
           console.warn(`[AppInfoService] Skipping ${pkg.name}: ${pkg.size} bytes exceeds limit ${memoryLimit}`);
           progress.skipped++;
           progress.parsed++;
+          onProgress?.(progress);
           continue;
         }
 
-        // Download and parse APK
         try {
           const apkData = await this.downloadApk(adb, pkg.apkPath);
-          if (!apkData) {
+          if (!apkData || signal.aborted) {
             progress.parsed++;
             continue;
           }
@@ -106,6 +115,7 @@ export class AppInfoService {
       }
     } finally {
       this.parsing = false;
+      this.abortController = null;
     }
 
     return results;
@@ -119,19 +129,26 @@ export class AppInfoService {
     adb: Adb,
     packages: string[]
   ): Promise<Array<{ name: string; apkPath: string; size: number; versionCode: number }>> {
+    const pathOutput = await runAdbCommand(adb, 'pm list packages -f');
+    const pathMap = new Map<string, string>();
+    for (const line of pathOutput.split('\n')) {
+      const match = line.match(/package:(.+)=(.+)/);
+      if (match) {
+        pathMap.set(match[2]!, match[1]!);
+      }
+    }
+
     const results: Array<{ name: string; apkPath: string; size: number; versionCode: number }> = [];
 
     for (const pkg of packages) {
-      try {
-        const apkPath = await getApkPath(adb, pkg);
-        if (!apkPath) continue;
+      const apkPath = pathMap.get(pkg);
+      if (!apkPath) continue;
 
+      try {
         const sizeOutput = await adb.subprocess.noneProtocol.spawnWaitText(['stat', '-c', '%s', apkPath]);
         const size = parseInt(sizeOutput.trim(), 10) || 0;
 
-        const versionOutput = await adb.subprocess.noneProtocol.spawnWaitText([
-          'sh', '-c', `dumpsys package ${pkg} | grep versionCode`,
-        ]);
+        const versionOutput = await runAdbCommand(adb, `dumpsys package ${pkg} | grep versionCode`);
         const versionMatch = versionOutput.match(/versionCode=(\d+)/);
         const versionCode = versionMatch ? parseInt(versionMatch[1], 10) : 0;
 

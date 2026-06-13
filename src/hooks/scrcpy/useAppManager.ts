@@ -83,6 +83,10 @@ export function useAppManager() {
     await serviceRef.current.parseAllApps(adb, includeSystem, onProgress);
   }, []);
 
+  const abortParseApps = useCallback(() => {
+    serviceRef.current.abort();
+  }, []);
+
   return useMemo(() => ({
     setAdb,
     getAppList,
@@ -90,7 +94,8 @@ export function useAppManager() {
     getAppIcon,
     batchGetAppLabels,
     parseAllApps,
-  }), [setAdb, getAppList, getAppLabel, getAppIcon, batchGetAppLabels, parseAllApps]);
+    abortParseApps,
+  }), [setAdb, getAppList, getAppLabel, getAppIcon, batchGetAppLabels, parseAllApps, abortParseApps]);
 }
 
 function formatPackageName(pkg: string): string {

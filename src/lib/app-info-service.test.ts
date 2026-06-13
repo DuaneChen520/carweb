@@ -1,9 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AppInfoService } from './app-info-service';
 
-// Mock ADB and dependencies
 vi.mock('app-info-parser', () => ({
-  ApkParser: vi.fn().mockImplementation(() => ({
+  default: vi.fn().mockImplementation(() => ({
     parse: vi.fn().mockResolvedValue({
       package: 'com.test.app',
       label: 'Test App',
