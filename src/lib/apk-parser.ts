@@ -1,4 +1,4 @@
-import { ApkParser } from 'app-info-parser';
+import AppInfoParser from 'app-info-parser';
 
 export interface ParsedApkInfo {
   packageName: string;
@@ -23,23 +23,14 @@ export async function parseApk(
   }
 
   try {
-    const parser = new ApkParser();
-    const result = await parser.parse(apkData);
-
-    let iconBase64: string | null = null;
-    if (result.icon) {
-      if (result.icon instanceof ArrayBuffer) {
-        const blob = new Blob([result.icon], { type: 'image/png' });
-        iconBase64 = await blobToBase64(blob);
-      } else if (typeof result.icon === 'string') {
-        iconBase64 = result.icon;
-      }
-    }
+    const blob = new Blob([apkData], { type: 'application/vnd.android.package-archive' });
+    const parser = new AppInfoParser(blob);
+    const result = await parser.parse();
 
     return {
       packageName: result.package || '',
       label: result.label || null,
-      iconBase64,
+      iconBase64: typeof result.icon === 'string' ? result.icon : null,
       versionCode: result.versionCode || 0,
     };
   } catch (e) {
@@ -48,11 +39,3 @@ export async function parseApk(
   }
 }
 
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
