@@ -130,7 +130,7 @@ export class AppInfoService {
         const size = parseInt(sizeOutput.trim(), 10) || 0;
 
         const versionOutput = await adb.subprocess.noneProtocol.spawnWaitText([
-          'dumpsys', 'package', pkg, '|', 'grep', 'versionCode',
+          'sh', '-c', `dumpsys package ${pkg} | grep versionCode`,
         ]);
         const versionMatch = versionOutput.match(/versionCode=(\d+)/);
         const versionCode = versionMatch ? parseInt(versionMatch[1], 10) : 0;
