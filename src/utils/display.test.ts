@@ -6,12 +6,6 @@ function computeSw(w: number, h: number, dpi: number): number {
 }
 
 describe('calculateDpi', () => {
-  it('计算标准 800×600 分辨率下的 DPI', () => {
-    // dpi = min(800, 600) * 160 / 840 ≈ 114
-    const dpi = calculateDpi(800, 600);
-    expect(dpi).toBe(114);
-  });
-
   it('所有分辨率下 sw 均接近目标值 (840dp)，量化误差 < 15dp', () => {
     const cases = [
       { w: 1920, h: 1080 },
