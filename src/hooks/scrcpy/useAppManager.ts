@@ -6,11 +6,13 @@ import {
   getAppLabel as fetchAppLabel,
   batchGetAppLabels as fetchBatchAppLabels,
 } from '@/lib/adb-commands';
+import { AppInfoService, type ParseProgress } from '@/lib/app-info-service';
 
 export function useAppManager() {
   const adbRef = useRef<Adb | null>(null);
   const iconCacheRef = useRef<Map<string, string | null>>(new Map());
   const labelCacheRef = useRef<Map<string, string | null>>(new Map());
+  const serviceRef = useRef(new AppInfoService());
 
   const setAdb = useCallback((adb: Adb | null) => {
     adbRef.current = adb;
@@ -23,6 +25,9 @@ export function useAppManager() {
   }, []);
 
   const getAppLabel = useCallback(async (pkg: string): Promise<string> => {
+    const serviceInfo = await serviceRef.current.getAppInfo(pkg);
+    if (serviceInfo?.label) return serviceInfo.label;
+
     const cached = labelCacheRef.current.get(pkg);
     if (cached !== undefined) return cached ?? formatPackageName(pkg);
 
@@ -35,6 +40,9 @@ export function useAppManager() {
   }, []);
 
   const getAppIcon = useCallback(async (pkg: string): Promise<string | null> => {
+    const serviceInfo = await serviceRef.current.getAppInfo(pkg);
+    if (serviceInfo?.iconBase64) return serviceInfo.iconBase64;
+
     const cached = iconCacheRef.current.get(pkg);
     if (undefined !== cached) return cached;
 
@@ -65,13 +73,24 @@ export function useAppManager() {
     return labels;
   }, []);
 
+  const parseAllApps = useCallback(async (
+    includeSystem: boolean = false,
+    onProgress?: (progress: ParseProgress) => void
+  ): Promise<void> => {
+    const adb = adbRef.current;
+    if (!adb) return;
+
+    await serviceRef.current.parseAllApps(adb, includeSystem, onProgress);
+  }, []);
+
   return useMemo(() => ({
     setAdb,
     getAppList,
     getAppLabel,
     getAppIcon,
     batchGetAppLabels,
-  }), [setAdb, getAppList, getAppLabel, getAppIcon, batchGetAppLabels]);
+    parseAllApps,
+  }), [setAdb, getAppList, getAppLabel, getAppIcon, batchGetAppLabels, parseAllApps]);
 }
 
 function formatPackageName(pkg: string): string {
