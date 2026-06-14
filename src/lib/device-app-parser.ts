@@ -137,9 +137,23 @@ export class DeviceAppParser {
     }
 
     console.log(`[DeviceAppParser] 解析完成: ${validApps.length} 个有效应用`);
+
+    // Validate errors array
+    const validErrors: AppError[] = [];
+    if (Array.isArray(result.errors)) {
+      for (const err of result.errors) {
+        if (err && typeof err === 'object' && typeof err.packageName === 'string') {
+          validErrors.push({
+            packageName: err.packageName,
+            error: typeof err.error === 'string' ? err.error : 'Unknown error',
+          });
+        }
+      }
+    }
+
     return {
       apps: validApps,
-      errors: Array.isArray(result.errors) ? result.errors : [],
+      errors: validErrors,
     };
   }
 

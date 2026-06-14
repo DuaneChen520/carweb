@@ -65,6 +65,13 @@ export class AppInfoService {
           continue;
         }
 
+        // Cache-hit optimization: skip if already cached with same versionCode
+        const cached = await this.cache.get(app.packageName);
+        if (cached && cached.versionCode === app.versionCode) {
+          results.set(app.packageName, cached);
+          continue;
+        }
+
         const appInfo: AppInfo = {
           packageName: app.packageName,
           label: app.label,
@@ -72,8 +79,10 @@ export class AppInfoService {
           versionCode: app.versionCode,
           lastParsed: Date.now(),
         };
-        // Fire-and-forget: cache writes are a write-behind optimization
-        this.cache.set(app.packageName, appInfo);
+        // Write-behind cache: catch IndexedDB errors (quota, connection closed)
+        this.cache.set(app.packageName, appInfo).catch((err) => {
+          console.warn(`[AppInfoService] 缓存写入失败 (${app.packageName}):`, err);
+        });
         results.set(app.packageName, appInfo);
       }
 
@@ -180,8 +189,7 @@ export class AppInfoService {
         }
       }
     } finally {
-      this.parsing = false;
-      this.abortController = null;
+      // State management is handled by the outer parseAllApps method
     }
 
     return results;
