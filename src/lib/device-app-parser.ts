@@ -31,6 +31,7 @@ function validateTargetPath(path: string): void {
 export class DeviceAppParser {
   private static readonly DEX_URL = import.meta.env.BASE_URL + 'app-info-fetcher.dex';
   private static readonly DEFAULT_DEX_PATH = '/data/local/tmp/app-info-fetcher.dex';
+  private static readonly SCRIPT_PATH = '/data/local/tmp/run-app-info.sh';
   private cachedDexData: ArrayBuffer | null = null;
 
   private async fetchDexData(): Promise<ArrayBuffer> {
@@ -76,24 +77,65 @@ export class DeviceAppParser {
     return true;
   }
 
+  private generateScript(dexPath: string): string {
+    return `#!/system/bin/sh
+# Auto-generated script for running AppInfoFetcher
+# Do not edit - this script is managed by CarWeb
+
+# Set ANDROID_DATA (required by app_process)
+export ANDROID_DATA=/data/local/tmp
+
+# Set CLASSPATH to the DEX file
+export CLASSPATH=${dexPath}
+
+# Create dalvik-cache directory if it doesn't exist
+mkdir -p /data/local/tmp/dalvik-cache
+
+# Run the AppInfoFetcher
+exec app_process /data/local/tmp com.carweb.appinfo.AppInfoFetcher
+`;
+  }
+
+  private async pushScript(adb: Adb, scriptContent: string): Promise<void> {
+    const encoder = new TextEncoder();
+    const scriptBytes = encoder.encode(scriptContent);
+
+    console.log(`[DeviceAppParser] 推送脚本到设备: ${DeviceAppParser.SCRIPT_PATH}`);
+    const sync = await adb.sync();
+    await sync.write({
+      filename: DeviceAppParser.SCRIPT_PATH,
+      file: new ReadableStream({
+        start(controller) {
+          controller.enqueue(scriptBytes);
+          controller.close();
+        },
+      }),
+    });
+
+    // Make script executable
+    await adb.subprocess.noneProtocol.spawnWaitText(['chmod', '755', DeviceAppParser.SCRIPT_PATH]);
+    console.log('[DeviceAppParser] 脚本推送完成');
+  }
+
   async executeDex(adb: Adb, dexPath?: string): Promise<ParseResult> {
     const targetPath = dexPath || DeviceAppParser.DEFAULT_DEX_PATH;
     validateTargetPath(targetPath);
 
-    // Use env to set CLASSPATH (more portable than export)
-    const command = `env CLASSPATH=${targetPath} app_process / com.carweb.appinfo.AppInfoFetcher`;
+    // Generate and push script
+    const scriptContent = this.generateScript(targetPath);
+    await this.pushScript(adb, scriptContent);
 
-    console.log('[DeviceAppParser] 在设备上执行 DEX...');
-    console.log(`[DeviceAppParser] 命令: ${command}`);
+    console.log('[DeviceAppParser] 在设备上执行脚本...');
+    console.log(`[DeviceAppParser] 脚本路径: ${DeviceAppParser.SCRIPT_PATH}`);
     const startTime = Date.now();
     const DEX_TIMEOUT_MS = 30_000;
 
     let resultPromise: Promise<string>;
     if (adb.subprocess.shellProtocol) {
-      resultPromise = adb.subprocess.shellProtocol.spawnWaitText(['sh', '-c', command])
+      resultPromise = adb.subprocess.shellProtocol.spawnWaitText(['sh', DeviceAppParser.SCRIPT_PATH])
         .then((waitResult) => waitResult.stdout);
     } else {
-      resultPromise = adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', command]);
+      resultPromise = adb.subprocess.noneProtocol.spawnWaitText(['sh', DeviceAppParser.SCRIPT_PATH]);
     }
 
     const timeoutPromise = new Promise<never>((_, reject) =>
@@ -102,7 +144,7 @@ export class DeviceAppParser {
 
     const result = await Promise.race([resultPromise, timeoutPromise]);
     const elapsed = Date.now() - startTime;
-    console.log(`[DeviceAppParser] DEX 执行完成, 耗时: ${elapsed}ms`);
+    console.log(`[DeviceAppParser] 脚本执行完成, 耗时: ${elapsed}ms`);
     console.log(`[DeviceAppParser] 原始响应前500字符: ${result.substring(0, 500)}`);
     return this.parseJsonResult(result);
   }
@@ -166,8 +208,8 @@ export class DeviceAppParser {
     const targetPath = dexPath || DeviceAppParser.DEFAULT_DEX_PATH;
     validateTargetPath(targetPath);
 
-    console.log(`[DeviceAppParser] 清理设备上的 DEX: ${targetPath}`);
-    const command = `rm -f '${targetPath}'`;
+    console.log(`[DeviceAppParser] 清理设备上的文件: ${targetPath}, ${DeviceAppParser.SCRIPT_PATH}`);
+    const command = `rm -f '${targetPath}' '${DeviceAppParser.SCRIPT_PATH}'`;
 
     if (adb.subprocess.shellProtocol) {
       await adb.subprocess.shellProtocol.spawnWaitText(command);
@@ -175,7 +217,7 @@ export class DeviceAppParser {
       await adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', command]);
     }
 
-    console.log('[DeviceAppParser] DEX 清理完成');
+    console.log('[DeviceAppParser] 清理完成');
     return true;
   }
 
