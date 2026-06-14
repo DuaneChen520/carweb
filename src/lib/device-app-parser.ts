@@ -81,13 +81,13 @@ export class DeviceAppParser {
     validateTargetPath(targetPath);
 
     const command = [
-      `CLASSPATH=${targetPath}`,
-      'app_process',
-      '/',
-      'com.carweb.appinfo.AppInfoFetcher',
+      'sh',
+      '-c',
+      `CLASSPATH=${targetPath} app_process / com.carweb.appinfo.AppInfoFetcher`,
     ];
 
     console.log('[DeviceAppParser] 在设备上执行 DEX...');
+    console.log(`[DeviceAppParser] 命令: ${command.join(' ')}`);
     const startTime = Date.now();
     const DEX_TIMEOUT_MS = 30_000;
     const resultPromise = adb.subprocess.noneProtocol.spawnWaitText(command);
@@ -98,11 +98,19 @@ export class DeviceAppParser {
     const result = await Promise.race([resultPromise, timeoutPromise]);
     const elapsed = Date.now() - startTime;
     console.log(`[DeviceAppParser] DEX 执行完成, 耗时: ${elapsed}ms`);
+    console.log(`[DeviceAppParser] 原始响应前500字符: ${result.substring(0, 500)}`);
     return this.parseJsonResult(result);
   }
 
   parseJsonResult(jsonString: string): ParseResult {
-    console.log(`[DeviceAppParser] 收到 JSON 响应: ${jsonString.length} bytes`);
+    console.log(`[DeviceAppParser] 收到响应: ${jsonString.length} bytes`);
+    console.log(`[DeviceAppParser] 响应内容: ${jsonString.substring(0, 500)}`);
+
+    // Check if the response is an error message
+    if (jsonString.startsWith('Error:') || jsonString.startsWith('Exception:')) {
+      throw new Error(`DEX execution failed: ${jsonString}`);
+    }
+
     const result = JSON.parse(jsonString) as Record<string, unknown>;
 
     if (!result.apps || !Array.isArray(result.apps)) {
