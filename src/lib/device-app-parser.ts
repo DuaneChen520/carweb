@@ -88,6 +88,21 @@ export class DeviceAppParser {
     const startTime = Date.now();
     const DEX_TIMEOUT_MS = 30_000;
 
+    // Debug: Test shell connection first
+    console.log('[DeviceAppParser] 测试 shell 连接...');
+    const testResult = await adb.subprocess.noneProtocol.spawnWaitText(['echo', 'hello']);
+    console.log(`[DeviceAppParser] Shell 测试结果: "${testResult}"`);
+
+    // Debug: Check if DEX file exists
+    console.log('[DeviceAppParser] 检查 DEX 文件是否存在...');
+    const lsResult = await adb.subprocess.noneProtocol.spawnWaitText(['ls', '-la', targetPath]);
+    console.log(`[DeviceAppParser] ls 结果: "${lsResult}"`);
+
+    // Debug: Test CLASSPATH setting
+    console.log('[DeviceAppParser] 测试 CLASSPATH 设置...');
+    const classpathTest = await adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', `CLASSPATH=${targetPath} echo $CLASSPATH`]);
+    console.log(`[DeviceAppParser] CLASSPATH 测试: "${classpathTest}"`);
+
     let resultPromise: Promise<string>;
     if (adb.subprocess.shellProtocol) {
       resultPromise = adb.subprocess.shellProtocol.spawnWaitText(['sh', '-c', command])
