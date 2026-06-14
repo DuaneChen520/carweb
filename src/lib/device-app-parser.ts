@@ -80,8 +80,8 @@ export class DeviceAppParser {
     const targetPath = dexPath || DeviceAppParser.DEFAULT_DEX_PATH;
     validateTargetPath(targetPath);
 
-    // Use export to ensure CLASSPATH is available to app_process
-    const command = `export CLASSPATH=${targetPath} && app_process / com.carweb.appinfo.AppInfoFetcher 2>&1`;
+    // Use env to set CLASSPATH (more portable than export)
+    const command = `env CLASSPATH=${targetPath} app_process / com.carweb.appinfo.AppInfoFetcher`;
 
     console.log('[DeviceAppParser] 在设备上执行 DEX...');
     console.log(`[DeviceAppParser] 命令: ${command}`);
