@@ -117,7 +117,7 @@ export function ControlSidebar({
   currentPreset, resolutionPreset, changeResolutionPreset, showResMenu, setShowResMenu,
 }: ControlSidebarProps) {
   const scrcpy = useScrcpyContext();
-  const { goBack, goHome, showRecentApps, startApp, getAppList, getAppIcon, batchGetAppLabels, parseAllApps, turnOffPhysicalScreen, turnOnPhysicalScreen } = scrcpy;
+  const { goBack, goHome, showRecentApps, startApp, getAppList, getAppIcon, getCachedAppLabels, parseAllApps, turnOffPhysicalScreen, turnOnPhysicalScreen } = scrcpy;
   const [panelMode, setPanelMode] = useState<'closed' | 'search' | 'apps'>('closed');
   const [searchText, setSearchText] = useState('');
   const [apps, setApps] = useState<string[] | null>(null);
@@ -148,7 +148,7 @@ export function ControlSidebar({
       const list = await getAppList(true);
       const priorityApps = PRIORITY_PACKAGES.filter(pkg => list.includes(pkg));
       setPinnedApps(priorityApps);
-      batchGetAppLabels(priorityApps).then((labels) => {
+      getCachedAppLabels(priorityApps).then((labels) => {
         setAppLabels(prev => {
           const newMap = new Map(prev);
           labels.forEach((value, key) => newMap.set(key, value));
@@ -157,7 +157,7 @@ export function ControlSidebar({
       });
     };
     loadPinnedApps();
-  }, [getAppList, batchGetAppLabels]);
+  }, [getAppList, getCachedAppLabels]);
 
   const filteredPinned = pinnedApps.filter(
     (pkg) => !query || pkg.toLowerCase().includes(query) || (appLabels.get(pkg) || '').toLowerCase().includes(query),
@@ -181,13 +181,11 @@ export function ControlSidebar({
       setApps(list);
       setPanelMode('apps');
 
-      // 快速提取 → 立即从缓存读取（确保始终使用最新数据）
-      batchGetAppLabels(list).then(async () => {
-        const updated = await scrcpy.getCachedAppLabels(list);
-        setAppLabels(updated);
-      });
+      // 从缓存读取标签（首次打开可能为空，DEX完成后刷新）
+      const cached = await scrcpy.getCachedAppLabels(list);
+      setAppLabels(cached);
 
-      // 后台全量解析（下载完整 APK 后用 app-info-parser，获得准确 label/icon）
+      // 后台 DEX 全量解析（获得准确 label/icon，写入缓存）
       parseAllApps(false, (p) => setParseProgress(p))
         .then(async () => {
           setParseProgress(null);
@@ -198,7 +196,7 @@ export function ControlSidebar({
     } finally {
       setLoading(false);
     }
-  }, [getAppList, batchGetAppLabels, parseAllApps, scrcpy]);
+  }, [getAppList, parseAllApps, scrcpy]);
 
   const handleLaunchApp = useCallback(
     (pkg: string) => {
