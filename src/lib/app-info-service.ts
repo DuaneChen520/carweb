@@ -2,6 +2,7 @@ import type { Adb } from '@yume-chan/adb';
 import { AppInfoCache, type AppInfo } from './app-info-cache';
 import { parseApk, getMaxMemoryBytes } from './apk-parser';
 import { getInstalledPackages, runAdbCommand } from './adb-commands';
+import { DeviceAppParser } from './device-app-parser';
 
 export type ParseProgress = {
   total: number;
@@ -14,6 +15,7 @@ export type ParseCallback = (progress: ParseProgress) => void;
 
 export class AppInfoService {
   private cache = new AppInfoCache();
+  private deviceParser = new DeviceAppParser();
   private parsing = false;
   private abortController: AbortController | null = null;
 
@@ -46,6 +48,60 @@ export class AppInfoService {
     this.parsing = true;
     this.abortController = new AbortController();
     const { signal } = this.abortController;
+
+    try {
+      // Try device-side parser first (faster, no APK download needed)
+      console.log('[AppInfoService] 尝试使用设备端解析器...');
+      const deviceResult = await this.deviceParser.parseAllApps(adb, signal);
+
+      // Convert device parser results to AppInfo format
+      const results = new Map<string, AppInfo>();
+      for (const app of deviceResult.apps) {
+        // Filter system apps when includeSystem is false
+        if (
+          !includeSystem &&
+          (app.packageName.startsWith('android.') || app.packageName.startsWith('com.android.'))
+        ) {
+          continue;
+        }
+
+        const appInfo: AppInfo = {
+          packageName: app.packageName,
+          label: app.label,
+          iconBase64: app.iconBase64,
+          versionCode: app.versionCode,
+          lastParsed: Date.now(),
+        };
+        // Fire-and-forget: cache writes are a write-behind optimization
+        this.cache.set(app.packageName, appInfo);
+        results.set(app.packageName, appInfo);
+      }
+
+      // Log partial errors from device parser
+      if (deviceResult.errors.length > 0) {
+        console.warn('[AppInfoService] 设备端解析部分应用失败:', deviceResult.errors);
+      }
+
+      console.log(`[AppInfoService] 设备端解析成功: ${results.size} 个应用`);
+      onProgress?.({ total: results.size, parsed: results.size, skipped: 0, current: '' });
+
+      return results;
+    } catch (error) {
+      // Device parser failed, fallback to browser-side parsing
+      console.warn('[AppInfoService] 设备端解析失败，回退到浏览器端解析:', error);
+      return this.parseAllAppsViaBrowser(adb, includeSystem, signal, onProgress);
+    } finally {
+      this.parsing = false;
+      this.abortController = null;
+    }
+  }
+
+  private async parseAllAppsViaBrowser(
+    adb: Adb,
+    includeSystem: boolean,
+    signal: AbortSignal,
+    onProgress?: ParseCallback
+  ): Promise<Map<string, AppInfo>> {
     const results = new Map<string, AppInfo>();
     const memoryLimit = this.getMemoryLimit();
 
