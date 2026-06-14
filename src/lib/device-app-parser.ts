@@ -84,25 +84,29 @@ export class DeviceAppParser {
 
 # Debug output
 echo "SCRIPT START" >&2
-echo "ANDROID_DATA=\$ANDROID_DATA" >&2
+echo "ANDROID_DATA=$ANDROID_DATA" >&2
+echo "ANDROID_ROOT=$ANDROID_ROOT" >&2
 echo "CLASSPATH=${dexPath}" >&2
 
-# Set ANDROID_DATA (required by app_process)
-export ANDROID_DATA=/data/local/tmp
+# Set ANDROID_DATA (required by app_process) - must be /data, not /data/local/tmp
+export ANDROID_DATA=/data
+
+# Set ANDROID_ROOT (required by app_process for framework classes)
+export ANDROID_ROOT=/system
 
 # Set CLASSPATH to the DEX file
 export CLASSPATH=${dexPath}
 
 # Create dalvik-cache directory if it doesn't exist
-mkdir -p /data/local/tmp/dalvik-cache
+mkdir -p /data/dalvik-cache
 
 # Check if DEX file exists
 ls -la ${dexPath} >&2
 
-# Run the AppInfoFetcher with stderr redirected to stdout
+# Run the AppInfoFetcher - stderr stays on stderr (diagnostic), stdout is JSON
 echo "RUNNING APP_PROCESS..." >&2
-app_process /data/local/tmp com.carweb.appinfo.AppInfoFetcher 2>&1
-echo "APP_PROCESS EXIT CODE: \$?" >&2
+app_process /system/bin com.carweb.appinfo.AppInfoFetcher
+echo "APP_PROCESS EXIT CODE: $?" >&2
 `;
   }
 
@@ -167,11 +171,18 @@ echo "APP_PROCESS EXIT CODE: \$?" >&2
 
   parseJsonResult(jsonString: string): ParseResult {
     console.log(`[DeviceAppParser] 收到响应: ${jsonString.length} bytes`);
-    console.log(`[DeviceAppParser] 响应内容: ${jsonString.substring(0, 500)}`);
+    console.log(`[DeviceAppParser] 响应内容: ${jsonString.substring(0, 200)}`);
+    console.log(`[DeviceAppParser] 响应末尾: ${jsonString.substring(jsonString.length - 200)}`);
 
     // Check if the response is an error message
     if (jsonString.startsWith('Error:') || jsonString.startsWith('Exception:')) {
       throw new Error(`DEX execution failed: ${jsonString}`);
+    }
+
+    // Try to find valid JSON - strip any trailing content after the first complete JSON object
+    const jsonEnd = jsonString.lastIndexOf('}');
+    if (jsonEnd > 0) {
+      jsonString = jsonString.substring(0, jsonEnd + 1);
     }
 
     const result = JSON.parse(jsonString) as Record<string, unknown>;
@@ -193,7 +204,7 @@ echo "APP_PROCESS EXIT CODE: \$?" >&2
         validApps.push({
           packageName: app.packageName,
           label: (typeof app.label === 'string' ? app.label : null) as string | null,
-          iconBase64: (typeof app.iconBase64 === 'string' ? app.iconBase64 : null) as string | null,
+          iconBase64: typeof app.iconBase64 === 'string' ? `data:image/png;base64,${app.iconBase64}` : null,
           versionCode: app.versionCode,
         });
       }

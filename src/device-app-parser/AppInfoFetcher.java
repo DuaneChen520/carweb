@@ -64,14 +64,117 @@ public class AppInfoFetcher {
     }
     
     private static PackageManager getPackageManager() {
-        // 通过反射获取PackageManager实例
-        // 这是在app_process环境中获取PackageManager的标准方法
+        Throwable lastException = null;
+
+        // 先初始化 Looper（app_process 的 main thread 没有 Looper）
         try {
-            Class<?> activityThread = Class.forName("android.app.ActivityThread");
-            Object systemMain = activityThread.getMethod("systemMain").invoke(null);
-            return (PackageManager) systemMain.getClass().getMethod("getPackageManager").invoke(systemMain);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to get PackageManager", e);
+            Class<?> looperClass = Class.forName("android.os.Looper");
+            looperClass.getMethod("prepare").invoke(null);
+            System.err.println("[INIT] Looper.prepare() done");
+        } catch (Throwable e) {
+            System.err.println("[INIT] Looper.prepare() failed: " + e.getMessage());
+        }
+
+        // 方法1: systemMain()
+        try {
+            System.err.println("[M1] calling systemMain...");
+            Class<?> atClass = Class.forName("android.app.ActivityThread");
+            Object at = atClass.getMethod("systemMain").invoke(null);
+            System.err.println("[M1] at=" + (at != null));
+
+            Object ctx = atClass.getMethod("getSystemContext").invoke(at);
+            System.err.println("[M1] ctx=" + (ctx != null));
+
+            if (ctx != null) {
+                Object pm = ctx.getClass().getMethod("getPackageManager").invoke(ctx);
+                System.err.println("[M1] pm=" + (pm != null));
+                if (pm != null) return (PackageManager) pm;
+            }
+        } catch (Throwable e) {
+            lastException = e;
+            System.err.println("[M1] FAIL: " + e.getClass().getSimpleName());
+            Throwable cause = e.getCause();
+            while (cause != null) {
+                System.err.println("[M1]   CAUSE: " + cause.getClass().getSimpleName() + ": " + cause.getMessage());
+                cause = cause.getCause();
+            }
+        }
+
+        // 方法2: 使用构造函数 + attach (某些设备需要)
+        try {
+            System.err.println("[M2] creating ActivityThread...");
+            Class<?> atClass = Class.forName("android.app.ActivityThread");
+            java.lang.reflect.Constructor<?> ctor = atClass.getDeclaredConstructor();
+            ctor.setAccessible(true);
+            Object at = ctor.newInstance();
+            System.err.println("[M2] at=" + (at != null));
+
+            java.lang.reflect.Method attachMethod = atClass.getDeclaredMethod("attach", boolean.class);
+            attachMethod.setAccessible(true);
+            attachMethod.invoke(at, true);
+            System.err.println("[M2] attach done");
+
+            Object ctx = atClass.getMethod("getSystemContext").invoke(at);
+            System.err.println("[M2] ctx=" + (ctx != null));
+
+            if (ctx != null) {
+                Object pm = ctx.getClass().getMethod("getPackageManager").invoke(ctx);
+                System.err.println("[M2] pm=" + (pm != null));
+                if (pm != null) return (PackageManager) pm;
+            }
+        } catch (Throwable e) {
+            lastException = e;
+            System.err.println("[M2] FAIL: " + e.getClass().getSimpleName());
+            Throwable cause = e.getCause();
+            while (cause != null) {
+                System.err.println("[M2]   CAUSE: " + cause.getClass().getSimpleName() + ": " + cause.getMessage());
+                cause = cause.getCause();
+            }
+        }
+
+        // 方法3: 使用ContextImpl.createSystemContext (某些ROM需要)
+        try {
+            System.err.println("[M3] creating ActivityThread...");
+            Class<?> atClass = Class.forName("android.app.ActivityThread");
+            java.lang.reflect.Constructor<?> ctor = atClass.getDeclaredConstructor();
+            ctor.setAccessible(true);
+            Object at = ctor.newInstance();
+            System.err.println("[M3] at=" + (at != null));
+
+            System.err.println("[M3] calling ContextImpl.createSystemContext...");
+            Class<?> contextImplClass = Class.forName("android.app.ContextImpl");
+            java.lang.reflect.Method createSystemContext = contextImplClass.getMethod("createSystemContext", atClass);
+            Object ctx = createSystemContext.invoke(null, at);
+            System.err.println("[M3] ctx=" + (ctx != null));
+
+            if (ctx != null) {
+                Object pm = ctx.getClass().getMethod("getPackageManager").invoke(ctx);
+                System.err.println("[M3] pm=" + (pm != null));
+                if (pm != null) return (PackageManager) pm;
+            }
+        } catch (Throwable e) {
+            lastException = e;
+            System.err.println("[M3] FAIL: " + e.getClass().getSimpleName());
+            Throwable cause = e.getCause();
+            while (cause != null) {
+                System.err.println("[M3]   CAUSE: " + cause.getClass().getSimpleName() + ": " + cause.getMessage());
+                cause = cause.getCause();
+            }
+        }
+
+        // 所有方法都失败，抛出异常，打印完整原因链
+        System.err.println("=== Full cause chain ===");
+        printCauseChain(lastException);
+        throw new RuntimeException("Failed to get PackageManager - all initialization methods failed", lastException);
+    }
+
+    private static void printCauseChain(Throwable t) {
+        int depth = 0;
+        while (t != null && depth < 5) {
+            System.err.println("  [" + depth + "] " + t.getClass().getSimpleName() + ": " + 
+                (t.getMessage() != null ? t.getMessage() : "(no message)"));
+            t = t.getCause();
+            depth++;
         }
     }
     

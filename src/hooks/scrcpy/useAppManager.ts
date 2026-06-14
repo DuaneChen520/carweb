@@ -41,7 +41,10 @@ export function useAppManager() {
 
   const getAppIcon = useCallback(async (pkg: string): Promise<string | null> => {
     const serviceInfo = await serviceRef.current.getAppInfo(pkg);
-    if (serviceInfo?.iconBase64) return serviceInfo.iconBase64;
+    if (serviceInfo?.iconBase64) {
+      const icon = serviceInfo.iconBase64;
+      return icon.startsWith('data:') ? icon : `data:image/png;base64,${icon}`;
+    }
 
     const cached = iconCacheRef.current.get(pkg);
     if (undefined !== cached) return cached;
