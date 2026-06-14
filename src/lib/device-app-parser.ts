@@ -80,17 +80,22 @@ export class DeviceAppParser {
     const targetPath = dexPath || DeviceAppParser.DEFAULT_DEX_PATH;
     validateTargetPath(targetPath);
 
-    const command = [
-      'sh',
-      '-c',
-      `CLASSPATH=${targetPath} app_process / com.carweb.appinfo.AppInfoFetcher`,
-    ];
+    // Redirect stderr to stdout to capture error messages
+    const command = `CLASSPATH=${targetPath} app_process / com.carweb.appinfo.AppInfoFetcher 2>&1`;
 
     console.log('[DeviceAppParser] 在设备上执行 DEX...');
-    console.log(`[DeviceAppParser] 命令: ${command.join(' ')}`);
+    console.log(`[DeviceAppParser] 命令: ${command}`);
     const startTime = Date.now();
     const DEX_TIMEOUT_MS = 30_000;
-    const resultPromise = adb.subprocess.noneProtocol.spawnWaitText(command);
+
+    let resultPromise: Promise<string>;
+    if (adb.subprocess.shellProtocol) {
+      resultPromise = adb.subprocess.shellProtocol.spawnWaitText(['sh', '-c', command])
+        .then((waitResult) => waitResult.stdout);
+    } else {
+      resultPromise = adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', command]);
+    }
+
     const timeoutPromise = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('DEX execution timed out')), DEX_TIMEOUT_MS)
     );
