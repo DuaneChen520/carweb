@@ -87,6 +87,29 @@ export function useAppManager() {
     serviceRef.current.abort();
   }, []);
 
+  const getCachedAppLabels = useCallback(async (packages: string[]): Promise<Map<string, string>> => {
+    const labels = new Map<string, string>();
+    for (const pkg of packages) {
+      const info = await serviceRef.current.getAppInfo(pkg);
+      labels.set(pkg, info?.label ?? formatPackageName(pkg));
+    }
+    return labels;
+  }, []);
+
+  const clearAppInfoCache = useCallback(async (): Promise<void> => {
+    await serviceRef.current.clearCache();
+    iconCacheRef.current.clear();
+    labelCacheRef.current.clear();
+  }, []);
+
+  const getCacheInfo = useCallback(async (): Promise<{ count: number; size: number }> => {
+    const [count, size] = await Promise.all([
+      serviceRef.current.getCacheCount(),
+      serviceRef.current.getCacheSize(),
+    ]);
+    return { count, size };
+  }, []);
+
   return useMemo(() => ({
     setAdb,
     getAppList,
@@ -95,7 +118,10 @@ export function useAppManager() {
     batchGetAppLabels,
     parseAllApps,
     abortParseApps,
-  }), [setAdb, getAppList, getAppLabel, getAppIcon, batchGetAppLabels, parseAllApps, abortParseApps]);
+    getCachedAppLabels,
+    clearAppInfoCache,
+    getCacheInfo,
+  }), [setAdb, getAppList, getAppLabel, getAppIcon, batchGetAppLabels, parseAllApps, abortParseApps, getCachedAppLabels, clearAppInfoCache, getCacheInfo]);
 }
 
 function formatPackageName(pkg: string): string {

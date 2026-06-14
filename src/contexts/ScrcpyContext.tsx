@@ -1,6 +1,7 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import { useScrcpySession, type ScrcpyState, type DisplayConfig } from '@/hooks/scrcpy';
 import type { Adb } from '@yume-chan/adb';
+import type { ParseProgress } from '@/lib/app-info-service';
 
 interface ScrcpyContextValue extends ScrcpyState {
   startScrcpy: (adb: Adb, canvas: HTMLCanvasElement, displayConfig?: DisplayConfig, isRetry?: boolean) => Promise<void>;
@@ -29,6 +30,11 @@ interface ScrcpyContextValue extends ScrcpyState {
   getAppIcon: (pkg: string) => Promise<string | null>;
   getAppLabel: (pkg: string) => Promise<string>;
   batchGetAppLabels: (packages: string[]) => Promise<Map<string, string>>;
+  parseAllApps: (includeSystem: boolean, onProgress?: (progress: ParseProgress) => void) => Promise<void>;
+  abortParseApps: () => void;
+  getCachedAppLabels: (packages: string[]) => Promise<Map<string, string>>;
+  clearAppInfoCache: () => Promise<void>;
+  getCacheInfo: () => Promise<{ count: number; size: number }>;
   togglePhysicalScreen: () => Promise<void>;
   turnOffPhysicalScreen: () => Promise<void>;
   turnOnPhysicalScreen: () => Promise<void>;
@@ -66,6 +72,11 @@ export function ScrcpyProvider({ children }: { children: ReactNode }) {
     session.getAppIcon,
     session.getAppLabel,
     session.batchGetAppLabels,
+    session.parseAllApps,
+    session.abortParseApps,
+    session.getCachedAppLabels,
+    session.clearAppInfoCache,
+    session.getCacheInfo,
     session.togglePhysicalScreen,
     session.turnOffPhysicalScreen,
     session.turnOnPhysicalScreen,

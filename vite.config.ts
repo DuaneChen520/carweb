@@ -6,12 +6,31 @@ import { dirname, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+const ipaStubPath = resolve(__dirname, 'src/lib/ipa-stub.ts');
+
 // https://vite.dev/config/
 export default defineConfig({
   base: '/carweb/',
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
+      './ipa': ipaStubPath,
+    },
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      plugins: [
+        {
+          name: 'stub-ipa',
+          setup(build) {
+            build.onResolve({ filter: /^\.\/ipa$/ }, (args) => {
+              if (args.importer.includes('app-info-parser/src/index.js')) {
+                return { path: ipaStubPath };
+              }
+            });
+          },
+        },
+      ],
     },
   },
   build: {
@@ -20,6 +39,7 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     exclude: ['ya-webadb-main/**'],
+    setupFiles: ['./src/test/setup.ts'],
   },
   plugins: [
     react({
@@ -37,6 +57,6 @@ export default defineConfig({
       clickUrl: 'https://www.trae.ai/solo?showJoin=1',
       autoTheme: true,
       autoThemeTarget: '#root'
-    }), 
+    }),
   ],
 })

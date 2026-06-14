@@ -70,9 +70,15 @@ export class AppInfoService {
         const cached = await this.cache.get(pkg.name);
         if (cached && cached.versionCode === pkg.versionCode) {
           results.set(pkg.name, cached);
+          const iconOk = cached.iconBase64 ? '✓' : '✗';
+          console.log(`[Cache] ${pkg.name} HIT label="${cached.label ?? ''}" icon=${iconOk}`);
           progress.parsed++;
           onProgress?.(progress);
           continue;
+        } else if (cached) {
+          console.log(`[Cache] ${pkg.name} STALE (version ${cached.versionCode} → ${pkg.versionCode})`);
+        } else {
+          console.log(`[Cache] ${pkg.name} MISS`);
         }
 
         if (pkg.size > memoryLimit) {
@@ -92,6 +98,7 @@ export class AppInfoService {
 
           const parsed = await parseApk(apkData, memoryLimit);
           if (!parsed) {
+            console.log(`[Parse] ${pkg.name} ✗ parseApk returned null`);
             progress.parsed++;
             continue;
           }
@@ -104,12 +111,15 @@ export class AppInfoService {
             lastParsed: Date.now(),
           };
 
+          const iconOk = parsed.iconBase64 ? '✓' : '✗';
+          console.log(`[Parse] ${pkg.name} ✓ label="${parsed.label ?? ''}" icon=${iconOk}`);
+
           await this.cache.set(pkg.name, appInfo);
           results.set(pkg.name, appInfo);
           progress.parsed++;
           onProgress?.(progress);
         } catch (e) {
-          console.error(`[AppInfoService] Failed to parse ${pkg.name}:`, e);
+          console.log(`[Parse] ${pkg.name} ✗ ${(e as Error)?.message ?? e}`);
           progress.parsed++;
         }
       }
@@ -123,6 +133,18 @@ export class AppInfoService {
 
   async getAppInfo(packageName: string): Promise<AppInfo | null> {
     return this.cache.get(packageName);
+  }
+
+  async getCacheCount(): Promise<number> {
+    return this.cache.count();
+  }
+
+  async getCacheSize(): Promise<number> {
+    return this.cache.getCacheSize();
+  }
+
+  async clearCache(): Promise<void> {
+    await this.cache.clear();
   }
 
   private async getPackageSizes(

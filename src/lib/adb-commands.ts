@@ -184,23 +184,15 @@ export async function getCurrentForegroundApp(adb: Adb, displayId: number): Prom
       // 在目标 display 分段内查找 mResumedActivity
       if (line.includes('mResumedActivity')) {
         const match = line.match(/\{[^}]*u0 ([^/]+)\//);
-        if (match) {
-          console.log('[DEBUG-restore] getCurrentForegroundApp: 从 mResumedActivity 匹配到 =', match[1], ', displayId =', displayId);
-          return match[1];
-        }
+        if (match) return match[1];
       }
 
-      // 备用: * Hist #0 开头的行也包含顶部 Activity
       if (line.includes('* Hist')) {
         const match = line.match(/\{[^}]*u0 ([^/]+)\//) || line.match(/ComponentInfo\{[^/]*\/([^/]+)\/[^}]*\}/);
-        if (match) {
-          console.log('[DEBUG-restore] getCurrentForegroundApp: 从 * Hist 匹配到 =', match[1], ', displayId =', displayId);
-          return match[1];
-        }
+        if (match) return match[1];
       }
     }
 
-    console.log('[DEBUG-restore] getCurrentForegroundApp: 未匹配, displayId =', displayId);
     return null;
   } catch (error) {
     console.warn('[DEBUG-restore] 获取前台应用失败:', error);
@@ -211,91 +203,40 @@ export async function getCurrentForegroundApp(adb: Adb, displayId: number): Prom
 export async function getVirtualDisplayId(adb: Adb): Promise<number | null> {
   try {
     const output = await runAdbCommand(adb, 'dumpsys display');
-    console.log('[DEBUG-restore] getVirtualDisplayId: dumpsys display 前3000字符 =', output.substring(0, 3000));
 
-    // 策略1: 解析 mViewports 行，格式:
-    // DisplayViewport{type=VIRTUAL, valid=true, isActive=true, displayId=553, uniqueId='virtual:com.android.shell,2000,scrcpy,550', ...}
-    // 这是最可靠的方式，单行包含 type + displayId + uniqueId
     const viewportMatches = [...output.matchAll(/DisplayViewport\{[^}]*type=VIRTUAL[^}]*displayId=(\d+)[^}]*uniqueId='[^']*scrcpy[^']*'[^}]*\}/g)];
     if (viewportMatches.length > 0) {
-      // 取最后一个匹配（最新的虚拟屏）
-      const id = parseInt(viewportMatches[viewportMatches.length - 1]![1]!, 10);
-      console.log('[DEBUG-restore] getVirtualDisplayId: 从 mViewports 匹配到 scrcpy VIRTUAL display, id =', id);
-      return id;
+      return parseInt(viewportMatches[viewportMatches.length - 1]![1]!, 10);
     }
 
-    // 策略2: 解析 DisplayDeviceInfo + mDisplayId 配对
-    // 格式: DisplayDeviceInfo{"scrcpy": ...FLAG_OWN_CONTENT_ONLY...} 后面跟 mDisplayId=N
     const lines = output.split('\n');
-    let lastDeviceInfo = '';
-    let lastDeviceDisplayId: number | null = null;
-
-    // 收集所有 scrcpy display
-    const scrcpyDisplays: Array<{
-      id: number;
-      hasOwnContent: boolean;
-      hasTouchVirtual: boolean;
-      isPrivate: boolean;
-    }> = [];
+    const scrcpyDisplays: Array<{ id: number; hasOwnContent: boolean; hasTouchVirtual: boolean; isPrivate: boolean; }> = [];
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]!;
-
       if (line.includes('DisplayDeviceInfo')) {
-        lastDeviceInfo = line;
-        lastDeviceDisplayId = null;
-        // 在后续行中查找 mDisplayId
+        let displayId: number | null = null;
         for (let j = i + 1; j < Math.min(i + 10, lines.length); j++) {
           const idMatch = lines[j]!.match(/mDisplayId=(\d+)/);
-          if (idMatch) {
-            lastDeviceDisplayId = parseInt(idMatch[1]!, 10);
-            break;
-          }
-          // 遇到下一个 DisplayDeviceInfo 就停止
+          if (idMatch) { displayId = parseInt(idMatch[1]!, 10); break; }
           if (lines[j]!.includes('DisplayDeviceInfo')) break;
         }
-
-        // 如果这个 DisplayDeviceInfo 是 scrcpy 且找到了 mDisplayId
-        if (lastDeviceInfo.includes('scrcpy') && lastDeviceDisplayId !== null) {
+        if (line.includes('scrcpy') && displayId !== null) {
           scrcpyDisplays.push({
-            id: lastDeviceDisplayId,
-            hasOwnContent: lastDeviceInfo.includes('FLAG_OWN_CONTENT_ONLY'),
-            hasTouchVirtual: lastDeviceInfo.includes('touch VIRTUAL'),
-            isPrivate: lastDeviceInfo.includes('FLAG_PRIVATE'),
+            id: displayId,
+            hasOwnContent: line.includes('FLAG_OWN_CONTENT_ONLY'),
+            hasTouchVirtual: line.includes('touch VIRTUAL'),
+            isPrivate: line.includes('FLAG_PRIVATE'),
           });
         }
       }
     }
 
-    console.log('[DEBUG-restore] getVirtualDisplayId: 从 DisplayDeviceInfo 找到的 scrcpy displays =', JSON.stringify(scrcpyDisplays));
-
-    // 按优先级选择: FLAG_OWN_CONTENT_ONLY > touch VIRTUAL > 非 PRIVATE > 兜底最后一个
-    const ownContent = scrcpyDisplays.find(d => d.hasOwnContent);
-    if (ownContent) {
-      console.log('[DEBUG-restore] getVirtualDisplayId: 选择 FLAG_OWN_CONTENT_ONLY, id =', ownContent.id);
-      return ownContent.id;
-    }
-
-    const touchVirtual = scrcpyDisplays.find(d => d.hasTouchVirtual);
-    if (touchVirtual) {
-      console.log('[DEBUG-restore] getVirtualDisplayId: 选择 touch VIRTUAL, id =', touchVirtual.id);
-      return touchVirtual.id;
-    }
-
-    const nonPrivate = scrcpyDisplays.find(d => !d.isPrivate);
-    if (nonPrivate) {
-      console.log('[DEBUG-restore] getVirtualDisplayId: 选择非 PRIVATE, id =', nonPrivate.id);
-      return nonPrivate.id;
-    }
-
-    const last = scrcpyDisplays[scrcpyDisplays.length - 1];
-    if (last) {
-      console.log('[DEBUG-restore] getVirtualDisplayId: 兜底选择最后一个, id =', last.id);
-      return last.id;
-    }
-
-    console.log('[DEBUG-restore] getVirtualDisplayId: 未找到任何 scrcpy display');
-    return null;
+    return scrcpyDisplays.find(d => d.hasOwnContent)?.id
+      ?? scrcpyDisplays.find(d => d.hasTouchVirtual)?.id
+      ?? scrcpyDisplays.find(d => !d.isPrivate)?.id
+      ?? scrcpyDisplays[scrcpyDisplays.length - 1]?.id
+      ?? null;
   } catch (error) {
     console.warn('[DEBUG-restore] 获取虚拟屏 displayId 失败:', error);
     return null;
@@ -305,11 +246,31 @@ export async function getVirtualDisplayId(adb: Adb): Promise<number | null> {
 export async function startAppOnDisplay(adb: Adb, packageName: string, displayId: number): Promise<void> {
   try {
     const cmd = `am start --display ${displayId} ${packageName}`;
-    console.log('[DEBUG-restore] startAppOnDisplay: 执行命令 =', cmd);
-    const result = await runAdbCommand(adb, cmd);
-    console.log('[DEBUG-restore] startAppOnDisplay: 命令结果 =', result);
+    await runAdbCommand(adb, cmd);
   } catch (error) {
     console.warn('[DEBUG-restore] 在虚拟屏启动应用失败:', error);
+  }
+}
+
+export async function getDefaultHomePackage(adb: Adb): Promise<string | null> {
+  try {
+    const output = await runAdbCommand(adb, [
+      'cmd', 'package', 'resolve-activity',
+      '--brief', '-a', 'android.intent.action.MAIN',
+      '-c', 'android.intent.category.HOME',
+    ]);
+    const pkg = output.split('/')[0]?.trim();
+    return pkg || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function forceStopPackage(adb: Adb, packageName: string): Promise<void> {
+  try {
+    await runAdbCommand(adb, `am force-stop ${packageName}`);
+  } catch {
+    // ignore
   }
 }
 
