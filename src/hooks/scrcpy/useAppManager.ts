@@ -1,6 +1,5 @@
 import { useRef, useCallback, useMemo } from 'react';
 import type { Adb } from '@yume-chan/adb';
-import { extractIconFromApk } from '@/utils/apk-utils';
 import {
   getInstalledPackages,
   getAppLabel as fetchAppLabel,
@@ -10,7 +9,6 @@ import { AppInfoService, type ParseProgress } from '@/lib/app-info-service';
 
 export function useAppManager() {
   const adbRef = useRef<Adb | null>(null);
-  const iconCacheRef = useRef<Map<string, string | null>>(new Map());
   const labelCacheRef = useRef<Map<string, string | null>>(new Map());
   const serviceRef = useRef(new AppInfoService());
 
@@ -45,22 +43,7 @@ export function useAppManager() {
       const icon = serviceInfo.iconBase64;
       return icon.startsWith('data:') ? icon : `data:image/png;base64,${icon}`;
     }
-
-    const cached = iconCacheRef.current.get(pkg);
-    if (undefined !== cached) return cached;
-
-    const adb = adbRef.current;
-    if (!adb) return null;
-
-    try {
-      const iconUrl = await extractIconFromApk(adb, pkg);
-      iconCacheRef.current.set(pkg, iconUrl);
-      return iconUrl;
-    } catch (error) {
-      console.error('获取应用图标错误:', error);
-      iconCacheRef.current.set(pkg, null);
-      return null;
-    }
+    return null;
   }, []);
 
   const batchGetAppLabels = useCallback(async (packages: string[]): Promise<Map<string, string>> => {
@@ -101,7 +84,6 @@ export function useAppManager() {
 
   const clearAppInfoCache = useCallback(async (): Promise<void> => {
     await serviceRef.current.clearCache();
-    iconCacheRef.current.clear();
     labelCacheRef.current.clear();
   }, []);
 
