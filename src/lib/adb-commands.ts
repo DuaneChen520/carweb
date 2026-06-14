@@ -74,14 +74,40 @@ export async function hideIme(adb: Adb): Promise<void> {
 }
 
 export async function getInstalledPackages(adb: Adb, includeSystem = false): Promise<string[]> {
-  const cmd = includeSystem ? 'pm list packages' : 'pm list packages -3';
-  const output = await runAdbCommand(adb, cmd);
-  return output
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith('package:'))
-    .map((line) => line.slice(8))
-    .sort();
+  if (includeSystem) {
+    const output = await runAdbCommand(adb, 'pm list packages');
+    return output
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith('package:'))
+      .map((line) => line.slice(8))
+      .sort();
+  }
+
+  // 查询所有有桌面图标的 app（包含电话/短信等有用系统 app，排除无 UI 的系统组件）
+  const output = await runAdbCommand(adb, 'pm query-activities -a android.intent.action.MAIN -c android.intent.category.LAUNCHER');
+  const packages = new Set<string>();
+  for (const line of output.split('\n')) {
+    const trimmed = line.trim();
+    // 格式: "package.name/com.activity.Name" 或包含 package: 前缀
+    if (trimmed.includes('/')) {
+      const pkg = trimmed.split('/')[0]?.replace(/^package:/, '').trim();
+      if (pkg && pkg.includes('.')) packages.add(pkg);
+    }
+  }
+
+  // Fallback: if query-activities returns nothing, use pm list packages -3
+  if (packages.size === 0) {
+    const fallback = await runAdbCommand(adb, 'pm list packages -3');
+    return fallback
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith('package:'))
+      .map((line) => line.slice(8))
+      .sort();
+  }
+
+  return [...packages].sort();
 }
 
 export async function getAppLabel(adb: Adb, pkg: string): Promise<string> {
