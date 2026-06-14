@@ -104,6 +104,8 @@ interface ControlSidebarProps {
   handleStop?: () => void;
   toggleVirtualKeyboard?: () => void;
   showVirtualKeyboard?: boolean;
+  keyboardMode?: 'phone' | 'browser';
+  setKeyboardMode?: (mode: 'phone' | 'browser') => void;
   currentPreset?: { key: string; label: string; scale: number };
   resolutionPreset?: ResolutionPresetKey;
   changeResolutionPreset?: (preset: ResolutionPresetKey) => void;
@@ -114,6 +116,7 @@ interface ControlSidebarProps {
 export function ControlSidebar({
   isVirtualDisplay, isRunning, useMirrorMode, isFullscreen, toggleFullscreen, toggleDisplayMode, handleApplyNewSize, handleStop,
   toggleVirtualKeyboard, showVirtualKeyboard,
+  keyboardMode, setKeyboardMode,
   currentPreset, resolutionPreset, changeResolutionPreset, showResMenu, setShowResMenu,
 }: ControlSidebarProps) {
   const scrcpy = useScrcpyContext();
@@ -425,6 +428,22 @@ export function ControlSidebar({
                 <div className="flex items-center justify-between gap-3">
                   <span>缓存大小</span>
                   <span className="text-white font-mono">{formatCacheSize(cacheInfo?.size ?? 0)}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span>键盘模式</span>
+                  <button
+                    onClick={() => {
+                      if (!setKeyboardMode) return;
+                      const next = keyboardMode === 'phone' ? 'browser' : 'phone';
+                      setKeyboardMode(next);
+                      localStorage.setItem('carweb-keyboard-mode', next);
+                    }}
+                    className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
+                      keyboardMode === 'browser' ? 'bg-blue-500/30 text-blue-400' : 'bg-white/10 text-white/60'
+                    }`}
+                  >
+                    {keyboardMode === 'phone' ? '📱 手机' : '⌨️ 浏览器'}
+                  </button>
                 </div>
                 <button
                   onClick={async () => {

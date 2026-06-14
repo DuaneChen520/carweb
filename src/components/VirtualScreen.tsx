@@ -23,7 +23,10 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   const [resolutionPreset, setResolutionPreset] = useState<ResolutionPresetKey>('original');
   const [showResMenu, setShowResMenu] = useState(false);
   const [showVirtualKeyboard, setShowVirtualKeyboard] = useState(false);
-  const [keyboardInput, setKeyboardInput] = useState('');
+  const [keyboardMode, setKeyboardMode] = useState<'phone' | 'browser'>(() => {
+    return (localStorage.getItem('carweb-keyboard-mode') as 'phone' | 'browser') || 'phone';
+  });
+  const browserInputRef = useRef<HTMLInputElement>(null);
   const hasStartedRef = useRef(false);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const foregroundAppRef = useRef<string | null>(null);
@@ -347,19 +350,6 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     onStop();
   }, [stopScrcpy, onStop]);
 
-  const handleSendText = useCallback(async () => {
-    if (keyboardInput.trim()) {
-      await injectText(keyboardInput);
-      setKeyboardInput('');
-    }
-  }, [keyboardInput, injectText]);
-
-  const handleKeyPress = useCallback(async (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      await handleSendText();
-    }
-  }, [handleSendText]);
-
   const toggleVirtualKeyboard = useCallback(async () => {
     if (showVirtualKeyboard) {
       await hideKeyboard();
@@ -369,6 +359,13 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
       setShowVirtualKeyboard(true);
     }
   }, [showVirtualKeyboard, showKeyboard, hideKeyboard]);
+
+  // Auto-focus browser input when keyboard mode is browser
+  useEffect(() => {
+    if (showVirtualKeyboard && keyboardMode === 'browser' && browserInputRef.current) {
+      browserInputRef.current.focus();
+    }
+  }, [showVirtualKeyboard, keyboardMode]);
 
   const separator = displayConfig?.width ? `${displayConfig.width}x${displayConfig.height}` : '';
 
@@ -385,6 +382,8 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
         handleStop={handleStop}
         toggleVirtualKeyboard={toggleVirtualKeyboard}
         showVirtualKeyboard={showVirtualKeyboard}
+        keyboardMode={keyboardMode}
+        setKeyboardMode={setKeyboardMode}
         currentPreset={currentPreset}
         resolutionPreset={resolutionPreset}
         changeResolutionPreset={changeResolutionPreset}
@@ -459,28 +458,34 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
           />
         </div>
 
-        {showVirtualKeyboard && (
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 w-96">
-            <div className="bg-black/90 backdrop-blur-md border border-white/10 rounded-xl p-4 shadow-2xl">
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={keyboardInput}
-                  onChange={(e) => setKeyboardInput(e.target.value)}
-                  onKeyDown={handleKeyPress}
-                  placeholder="输入文字..."
-                  className="flex-1 px-3 py-2 bg-white/10 rounded-lg text-white text-sm placeholder-white/30 outline-none focus:ring-2 focus:ring-blue-500/50"
-                  autoFocus
-                />
-                <button
-                  onClick={handleSendText}
-                  className="px-4 py-2 bg-blue-500 hover:bg-blue-600 rounded-lg text-white text-sm transition-colors"
-                >
-                  发送
-                </button>
-              </div>
-            </div>
-          </div>
+        {showVirtualKeyboard && keyboardMode === 'browser' && (
+          <input
+            ref={browserInputRef}
+            type="text"
+            className="absolute inset-0 w-full h-full opacity-0 z-10 cursor-default"
+            style={{ caretColor: 'transparent' }}
+            onCompositionEnd={(e) => {
+              const text = e.data;
+              if (text) {
+                injectText(text);
+              }
+              // Clear the input for next composition
+              if (browserInputRef.current) {
+                browserInputRef.current.value = '';
+              }
+            }}
+            onKeyDown={(e) => {
+              // Handle non-composition keys
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                injectText('\n');
+              } else if (e.key === 'Backspace') {
+                e.preventDefault();
+                // injectText handles empty string gracefully
+              }
+              // For regular characters, let them go through composition
+            }}
+          />
         )}
       </div>
     </div>
