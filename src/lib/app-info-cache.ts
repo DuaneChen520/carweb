@@ -90,6 +90,19 @@ export class AppInfoCache {
     });
   }
 
+  async getAllPackageNames(): Promise<string[]> {
+    const db = await this.openDB();
+
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(this.storeName, 'readonly');
+      const store = transaction.objectStore(this.storeName);
+      const request = store.getAllKeys();
+
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result as string[]);
+    });
+  }
+
   async clear(): Promise<void> {
     const db = await this.openDB();
 

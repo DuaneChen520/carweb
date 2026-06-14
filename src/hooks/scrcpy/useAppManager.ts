@@ -95,6 +95,10 @@ export function useAppManager() {
     return { count, size };
   }, []);
 
+  const getAllCachedPackages = useCallback(async (): Promise<string[]> => {
+    return serviceRef.current.getAllCachedPackages();
+  }, []);
+
   return useMemo(() => ({
     setAdb,
     getAppList,
@@ -104,9 +108,10 @@ export function useAppManager() {
     parseAllApps,
     abortParseApps,
     getCachedAppLabels,
+    getAllCachedPackages,
     clearAppInfoCache,
     getCacheInfo,
-  }), [setAdb, getAppList, getAppLabel, getAppIcon, batchGetAppLabels, parseAllApps, abortParseApps, getCachedAppLabels, clearAppInfoCache, getCacheInfo]);
+  }), [setAdb, getAppList, getAppLabel, getAppIcon, batchGetAppLabels, parseAllApps, abortParseApps, getCachedAppLabels, getAllCachedPackages, clearAppInfoCache, getCacheInfo]);
 }
 
 function formatPackageName(pkg: string): string {

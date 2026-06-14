@@ -176,27 +176,23 @@ export function ControlSidebar({
 
   const loadApps = useCallback(async () => {
     setLoading(true);
+    setPanelMode('apps');
     try {
-      const list = await getAppList(false);
-      setApps(list);
-      setPanelMode('apps');
+      // DEX 全量解析（获得准确的 label/icon/packageList，写入缓存）
+      await parseAllApps(false, (p) => setParseProgress(p));
 
-      // 从缓存读取标签（首次打开可能为空，DEX完成后刷新）
-      const cached = await scrcpy.getCachedAppLabels(list);
-      setAppLabels(cached);
-
-      // 后台 DEX 全量解析（获得准确 label/icon，写入缓存）
-      parseAllApps(false, (p) => setParseProgress(p))
-        .then(async () => {
-          setParseProgress(null);
-          const updated = await scrcpy.getCachedAppLabels(list);
-          setAppLabels(updated);
-        })
-        .catch(() => setParseProgress(null));
+      // DEX 完成后从缓存读取最终结果
+      const allPackages = await scrcpy.getAllCachedPackages();
+      setApps(allPackages);
+      const labels = await scrcpy.getCachedAppLabels(allPackages);
+      setAppLabels(labels);
+      setParseProgress(null);
+    } catch {
+      setParseProgress(null);
     } finally {
       setLoading(false);
     }
-  }, [getAppList, parseAllApps, scrcpy]);
+  }, [parseAllApps, scrcpy]);
 
   const handleLaunchApp = useCallback(
     (pkg: string) => {

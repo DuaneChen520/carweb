@@ -370,6 +370,7 @@ export function useScrcpySession() {
     parseAllApps: appManager.parseAllApps,
     abortParseApps: appManager.abortParseApps,
     getCachedAppLabels: appManager.getCachedAppLabels,
+    getAllCachedPackages: appManager.getAllCachedPackages,
     clearAppInfoCache: appManager.clearAppInfoCache,
     getCacheInfo: appManager.getCacheInfo,
     togglePhysicalScreen,

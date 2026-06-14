@@ -45,14 +45,6 @@ export class AppInfoService {
       // Convert device parser results to AppInfo format
       const results = new Map<string, AppInfo>();
       for (const app of deviceResult.apps) {
-        // Filter system apps when includeSystem is false
-        if (
-          !includeSystem &&
-          (app.packageName.startsWith('android.') || app.packageName.startsWith('com.android.'))
-        ) {
-          continue;
-        }
-
         // Cache-hit optimization: skip if already cached with same versionCode
         const cached = await this.cache.get(app.packageName);
         if (cached && cached.versionCode === app.versionCode) {
@@ -94,6 +86,10 @@ export class AppInfoService {
 
   async getAppInfo(packageName: string): Promise<AppInfo | null> {
     return this.cache.get(packageName);
+  }
+
+  async getAllCachedPackages(): Promise<string[]> {
+    return this.cache.getAllPackageNames();
   }
 
   async getCacheCount(): Promise<number> {

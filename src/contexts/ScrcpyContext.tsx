@@ -33,6 +33,7 @@ interface ScrcpyContextValue extends ScrcpyState {
   parseAllApps: (includeSystem: boolean, onProgress?: (progress: ParseProgress) => void) => Promise<void>;
   abortParseApps: () => void;
   getCachedAppLabels: (packages: string[]) => Promise<Map<string, string>>;
+  getAllCachedPackages: () => Promise<string[]>;
   clearAppInfoCache: () => Promise<void>;
   getCacheInfo: () => Promise<{ count: number; size: number }>;
   togglePhysicalScreen: () => Promise<void>;
@@ -75,6 +76,7 @@ export function ScrcpyProvider({ children }: { children: ReactNode }) {
     session.parseAllApps,
     session.abortParseApps,
     session.getCachedAppLabels,
+    session.getAllCachedPackages,
     session.clearAppInfoCache,
     session.getCacheInfo,
     session.togglePhysicalScreen,
