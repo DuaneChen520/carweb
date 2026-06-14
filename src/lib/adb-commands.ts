@@ -74,43 +74,30 @@ export async function hideIme(adb: Adb): Promise<void> {
 }
 
 // 已知的系统组件包名前缀/模式（无用户界面，不应出现在应用列表中）
+// 注意：DEX 端通过 launcher intent 查询已做过滤，此列表仅作为 TypeScript 端的备用过滤
 const SYSTEM_COMPONENT_PATTERNS = [
   'com.android.providers.',    // ContentProvider (telephony, media, downloads, etc.)
   'com.android.systemui',      // 状态栏/导航栏
   'com.android.shell',         // Shell
-  'com.android.certinstaller', // 证书安装
-  'com.android.certinstaller',
-  'com.android.storagemanager',
-  'com.android.traceur',       // 系统跟踪
-  'com.android.vending',       // Google Play Services 后台
-  'com.google.android.gms',    // Google Play Services 后台
-  'com.google.android.gsf',    // Google Services Framework
-  'com.qualcomm.',             // 高通组件
-  'com.mediatek.',             // 联发科组件
-  'com.samsung.android.app.',  // 三星后台服务
-  'com.sec.android.',          // 三星后台组件
 ];
 
 export async function getInstalledPackages(adb: Adb, includeSystem = false): Promise<string[]> {
-  if (includeSystem) {
-    const output = await runAdbCommand(adb, 'pm list packages');
-    return output
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.startsWith('package:'))
-      .map((line) => line.slice(8))
-      .sort();
-  }
-
-  // 获取所有 app，过滤掉已知的系统组件
+  // 统一获取所有 app，DEX 端负责过滤系统组件
   const output = await runAdbCommand(adb, 'pm list packages');
-  return output
+  let packages = output
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.startsWith('package:'))
-    .map((line) => line.slice(8))
-    .filter((pkg) => !SYSTEM_COMPONENT_PATTERNS.some((pattern) => pkg.startsWith(pattern)))
-    .sort();
+    .map((line) => line.slice(8));
+
+  if (!includeSystem) {
+    // TypeScript 端备用过滤：排除最明确的系统组件（DEX 会做完整过滤）
+    packages = packages.filter(
+      (pkg) => !SYSTEM_COMPONENT_PATTERNS.some((pattern) => pkg.startsWith(pattern))
+    );
+  }
+
+  return packages.sort();
 }
 
 export async function getAppLabel(adb: Adb, pkg: string): Promise<string> {

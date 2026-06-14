@@ -2,13 +2,16 @@ package com.carweb.appinfo;
 
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
 import android.util.Base64;
 
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class AppInfoFetcher {
     public static void main(String[] args) {
@@ -19,11 +22,23 @@ public class AppInfoFetcher {
             // 获取所有已安装应用
             List<PackageInfo> packages = pm.getInstalledPackages(0);
             
+            // 预查询所有有桌面图标的包名（一次查询，O(1) 过滤）
+            Set<String> launcherPackages = new HashSet<>();
+            List<ResolveInfo> launchers = pm.queryIntentActivities(
+                new android.content.Intent(android.content.Intent.ACTION_MAIN)
+                    .addCategory(android.content.Intent.CATEGORY_LAUNCHER), 0);
+            for (ResolveInfo ri : launchers) {
+                launcherPackages.add(ri.activityInfo.packageName);
+            }
+            System.err.println("[INIT] launcher packages: " + launcherPackages.size());
+            
             // 构建结果
             List<AppInfo> apps = new ArrayList<>();
             List<AppError> errors = new ArrayList<>();
             
             for (PackageInfo pkg : packages) {
+                // 只保留有桌面图标的 app（排除系统组件）
+                if (!launcherPackages.contains(pkg.packageName)) continue;
                 try {
                     // 获取应用标签
                     String label = pkg.applicationInfo.loadLabel(pm).toString();
