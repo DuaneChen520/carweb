@@ -82,6 +82,11 @@ export class DeviceAppParser {
 # Auto-generated script for running AppInfoFetcher
 # Do not edit - this script is managed by CarWeb
 
+# Debug output
+echo "SCRIPT START" >&2
+echo "ANDROID_DATA=\$ANDROID_DATA" >&2
+echo "CLASSPATH=${dexPath}" >&2
+
 # Set ANDROID_DATA (required by app_process)
 export ANDROID_DATA=/data/local/tmp
 
@@ -91,8 +96,13 @@ export CLASSPATH=${dexPath}
 # Create dalvik-cache directory if it doesn't exist
 mkdir -p /data/local/tmp/dalvik-cache
 
-# Run the AppInfoFetcher
-exec app_process /data/local/tmp com.carweb.appinfo.AppInfoFetcher
+# Check if DEX file exists
+ls -la ${dexPath} >&2
+
+# Run the AppInfoFetcher with stderr redirected to stdout
+echo "RUNNING APP_PROCESS..." >&2
+app_process /data/local/tmp com.carweb.appinfo.AppInfoFetcher 2>&1
+echo "APP_PROCESS EXIT CODE: \$?" >&2
 `;
   }
 
@@ -133,7 +143,13 @@ exec app_process /data/local/tmp com.carweb.appinfo.AppInfoFetcher
     let resultPromise: Promise<string>;
     if (adb.subprocess.shellProtocol) {
       resultPromise = adb.subprocess.shellProtocol.spawnWaitText(['sh', DeviceAppParser.SCRIPT_PATH])
-        .then((waitResult) => waitResult.stdout);
+        .then((waitResult) => {
+          // Combine stdout and stderr for debugging
+          const combined = waitResult.stdout + waitResult.stderr;
+          console.log(`[DeviceAppParser] stdout: ${waitResult.stdout.substring(0, 200)}`);
+          console.log(`[DeviceAppParser] stderr: ${waitResult.stderr.substring(0, 500)}`);
+          return combined;
+        });
     } else {
       resultPromise = adb.subprocess.noneProtocol.spawnWaitText(['sh', DeviceAppParser.SCRIPT_PATH]);
     }
