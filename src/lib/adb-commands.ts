@@ -73,6 +73,24 @@ export async function hideIme(adb: Adb): Promise<void> {
   }
 }
 
+// 已知的系统组件包名前缀/模式（无用户界面，不应出现在应用列表中）
+const SYSTEM_COMPONENT_PATTERNS = [
+  'com.android.providers.',    // ContentProvider (telephony, media, downloads, etc.)
+  'com.android.systemui',      // 状态栏/导航栏
+  'com.android.shell',         // Shell
+  'com.android.certinstaller', // 证书安装
+  'com.android.certinstaller',
+  'com.android.storagemanager',
+  'com.android.traceur',       // 系统跟踪
+  'com.android.vending',       // Google Play Services 后台
+  'com.google.android.gms',    // Google Play Services 后台
+  'com.google.android.gsf',    // Google Services Framework
+  'com.qualcomm.',             // 高通组件
+  'com.mediatek.',             // 联发科组件
+  'com.samsung.android.app.',  // 三星后台服务
+  'com.sec.android.',          // 三星后台组件
+];
+
 export async function getInstalledPackages(adb: Adb, includeSystem = false): Promise<string[]> {
   if (includeSystem) {
     const output = await runAdbCommand(adb, 'pm list packages');
@@ -84,30 +102,15 @@ export async function getInstalledPackages(adb: Adb, includeSystem = false): Pro
       .sort();
   }
 
-  // 查询所有有桌面图标的 app（包含电话/短信等有用系统 app，排除无 UI 的系统组件）
-  const output = await runAdbCommand(adb, 'pm query-activities -a android.intent.action.MAIN -c android.intent.category.LAUNCHER');
-  const packages = new Set<string>();
-  for (const line of output.split('\n')) {
-    const trimmed = line.trim();
-    // 格式: "package.name/com.activity.Name" 或包含 package: 前缀
-    if (trimmed.includes('/')) {
-      const pkg = trimmed.split('/')[0]?.replace(/^package:/, '').trim();
-      if (pkg && pkg.includes('.')) packages.add(pkg);
-    }
-  }
-
-  // Fallback: if query-activities returns nothing, use pm list packages -3
-  if (packages.size === 0) {
-    const fallback = await runAdbCommand(adb, 'pm list packages -3');
-    return fallback
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.startsWith('package:'))
-      .map((line) => line.slice(8))
-      .sort();
-  }
-
-  return [...packages].sort();
+  // 获取所有 app，过滤掉已知的系统组件
+  const output = await runAdbCommand(adb, 'pm list packages');
+  return output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('package:'))
+    .map((line) => line.slice(8))
+    .filter((pkg) => !SYSTEM_COMPONENT_PATTERNS.some((pattern) => pkg.startsWith(pattern)))
+    .sort();
 }
 
 export async function getAppLabel(adb: Adb, pkg: string): Promise<string> {
