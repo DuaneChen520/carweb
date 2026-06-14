@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Search, Grid, ArrowLeft, Home, Loader2, X, MonitorOff, Maximize2, Minimize2, ArrowLeftRight, Monitor, Power, Keyboard, ChevronDown } from 'lucide-react';
+import { Search, Grid, ArrowLeft, Home, Loader2, X, MonitorOff, Maximize2, Minimize2, ArrowLeftRight, Monitor, Power, Keyboard, ChevronDown, Settings, Trash2 } from 'lucide-react';
 import type { ResolutionPresetKey } from '../hooks/scrcpy';
 import { RESOLUTION_PRESETS } from '../hooks/scrcpy';
 import { useScrcpyContext } from '../contexts/ScrcpyContext';
+
+function formatCacheSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 const PRIORITY_PACKAGES = [
   'com.android.contacts',
@@ -69,7 +75,7 @@ function AppIcon({ pkg, name, getAppIcon, onLaunch, compact }: AppIconProps) {
       title={name}
     >
       {iconUrl ? (
-        <img src={iconUrl} alt={name} className="w-9 h-9 rounded-lg" />
+        <img src={iconUrl} alt={name} className="w-9 h-9 rounded-lg object-cover" />
       ) : (
         <div
           className="w-9 h-9 rounded-lg flex items-center justify-center text-white font-medium text-sm"
@@ -111,17 +117,20 @@ export function ControlSidebar({
   currentPreset, resolutionPreset, changeResolutionPreset, showResMenu, setShowResMenu,
 }: ControlSidebarProps) {
   const scrcpy = useScrcpyContext();
-  const { goBack, goHome, showRecentApps, startApp, getAppList, getAppIcon, getAppLabel, batchGetAppLabels, injectText, turnOffPhysicalScreen, turnOnPhysicalScreen } = scrcpy;
+  const { goBack, goHome, showRecentApps, startApp, getAppList, getAppIcon, batchGetAppLabels, parseAllApps, turnOffPhysicalScreen, turnOnPhysicalScreen } = scrcpy;
   const [panelMode, setPanelMode] = useState<'closed' | 'search' | 'apps'>('closed');
   const [searchText, setSearchText] = useState('');
   const [apps, setApps] = useState<string[] | null>(null);
   const [appLabels, setAppLabels] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(false);
-  const [showSystem, setShowSystem] = useState(false);
+
   const [floatingPanelPosition, setFloatingPanelPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [pinnedApps, setPinnedApps] = useState<string[]>([]);
   const [physicalScreenOn, setPhysicalScreenOn] = useState(true);
+  const [parseProgress, setParseProgress] = useState<{ total: number; parsed: number; skipped: number; current: string } | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [cacheInfo, setCacheInfo] = useState<{ count: number; size: number } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef({ x: 0, y: 0 });
@@ -165,20 +174,31 @@ export function ControlSidebar({
       })
     : [];
 
-  const loadApps = useCallback(async (includeSystem = false) => {
+  const loadApps = useCallback(async () => {
     setLoading(true);
-    setShowSystem(includeSystem);
     try {
-      const list = await getAppList(includeSystem);
+      const list = await getAppList(false);
       setApps(list);
       setPanelMode('apps');
-      batchGetAppLabels(list).then((labels) => {
-        setAppLabels(labels);
+
+      // 快速提取 → 立即从缓存读取（确保始终使用最新数据）
+      batchGetAppLabels(list).then(async () => {
+        const updated = await scrcpy.getCachedAppLabels(list);
+        setAppLabels(updated);
       });
+
+      // 后台全量解析（下载完整 APK 后用 app-info-parser，获得准确 label/icon）
+      parseAllApps(false, (p) => setParseProgress(p))
+        .then(async () => {
+          setParseProgress(null);
+          const updated = await scrcpy.getCachedAppLabels(list);
+          setAppLabels(updated);
+        })
+        .catch(() => setParseProgress(null));
     } finally {
       setLoading(false);
     }
-  }, [getAppList, batchGetAppLabels]);
+  }, [getAppList, batchGetAppLabels, parseAllApps, scrcpy]);
 
   const handleLaunchApp = useCallback(
     (pkg: string) => {
@@ -200,15 +220,20 @@ export function ControlSidebar({
     } else {
       setPanelMode(mode);
       setSearchText('');
-      if (mode === 'apps' && !apps) {
-        loadApps(false);
+      if (mode === 'apps') {
+        if (!apps) {
+          loadApps();
+        } else {
+          // Refresh labels from cache (fast) — parseAllApps may have finished
+          scrcpy.getCachedAppLabels(apps).then(setAppLabels).catch(() => {});
+        }
       }
       if (panelRef.current) {
         const rect = panelRef.current.getBoundingClientRect();
         setFloatingPanelPosition({ x: rect.left, y: rect.top });
       }
     }
-  }, [panelMode, apps, loadApps]);
+  }, [panelMode, apps, loadApps, scrcpy]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.target === panelRef.current || (e.target as HTMLElement).closest('.drag-handle')) {
@@ -379,6 +404,50 @@ export function ControlSidebar({
             <Power className="w-5 h-5" />
           </button>
         )}
+
+        <div className="w-8 h-px bg-white/10 my-1" />
+
+        <div className="relative">
+          <button
+            onClick={async () => {
+              if (!showSettings) {
+                const info = await scrcpy.getCacheInfo();
+                setCacheInfo(info);
+              }
+              setShowSettings(!showSettings);
+            }}
+            className="p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+            title="设置"
+          >
+            <Settings className="w-5 h-5" />
+          </button>
+
+          {showSettings && (
+            <div
+              className="absolute bottom-full left-full mb-1 ml-1 bg-black/95 backdrop-blur-md border border-white/10 rounded-lg overflow-hidden z-50 min-w-[160px] shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-3 py-2.5 text-xs text-white/70 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <span>缓存大小</span>
+                  <span className="text-white font-mono">{formatCacheSize(cacheInfo?.size ?? 0)}</span>
+                </div>
+                <button
+                  onClick={async () => {
+                    await scrcpy.clearAppInfoCache();
+                    const info = await scrcpy.getCacheInfo();
+                    setCacheInfo(info);
+                    setAppLabels(new Map());
+                  }}
+                  className="flex items-center gap-1.5 text-red-400 hover:text-red-300 transition-colors w-full"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>清除缓存</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {panelMode !== 'closed' && (
@@ -396,7 +465,7 @@ export function ControlSidebar({
         >
           <div className="drag-handle flex items-center justify-between px-4 pt-3 pb-2 cursor-move select-none bg-white/5 hover:bg-white/10 transition-colors">
             <span className="text-white/80 text-sm font-medium">
-              {panelMode === 'search' ? '搜索应用' : showSystem ? '所有应用' : '第三方应用'}
+              {panelMode === 'search' ? '搜索应用' : '全部应用'}
               {panelMode === 'apps' && apps && ` (${filteredAll.length})`}
             </span>
             <button
@@ -421,16 +490,23 @@ export function ControlSidebar({
             </div>
           </div>
 
-          {panelMode === 'apps' && (
-            <div className="px-4 pb-2 flex items-center gap-2">
-              <button
-                onClick={() => loadApps(!showSystem)}
-                disabled={loading}
-                className="text-[10px] text-white/30 hover:text-white/50 px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 transition-colors"
-              >
-                {showSystem ? '仅第三方' : '含系统'}
-              </button>
-              {loading && <Loader2 className="w-3 h-3 text-blue-400 animate-spin" />}
+          {panelMode === 'apps' && loading && (
+            <div className="px-4 pb-2">
+              <Loader2 className="w-3 h-3 text-blue-400 animate-spin" />
+            </div>
+          )}
+          {parseProgress && (
+            <div className="px-4 pb-2">
+              <div className="flex items-center justify-between text-[10px] text-white/40 mb-1">
+                <span>{parseProgress.current ? `解析 ${parseProgress.current}...` : '解析应用中...'}</span>
+                <span>{parseProgress.parsed}/{parseProgress.total}</span>
+              </div>
+              <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-blue-500/60 rounded-full transition-all duration-300"
+                  style={{ width: `${(parseProgress.parsed / Math.max(parseProgress.total, 1)) * 100}%` }}
+                />
+              </div>
             </div>
           )}
 
