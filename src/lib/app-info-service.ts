@@ -91,11 +91,11 @@ export class AppInfoService {
     }
   }
 
-  async syncWithDevice(adb: Adb, _signal?: AbortSignal): Promise<SyncResult> {
+  async syncWithDevice(adb: Adb, signal?: AbortSignal): Promise<SyncResult> {
     console.log('[AppInfoService] 开始同步设备应用列表...');
 
-    // 获取设备上的应用列表（快速）
-    const { apps: deviceApps } = await this.deviceParser.executeQuickDex(adb);
+    // 获取设备上的应用列表（快速，包含推送/清理逻辑）
+    const { apps: deviceApps } = await this.deviceParser.fetchQuickPackageList(adb, signal);
 
     // 对比缓存
     const toParse: string[] = [];

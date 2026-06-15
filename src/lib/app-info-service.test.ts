@@ -5,7 +5,7 @@ import type { QuickParseResult } from './device-app-parser';
 import type { AppInfo } from './app-info-cache';
 
 const mockCacheGet = vi.fn<(pkg: string) => Promise<AppInfo | null>>();
-const mockParserExecuteQuickDex = vi.fn<() => Promise<QuickParseResult>>();
+const mockParserFetchQuickPackageList = vi.fn<() => Promise<QuickParseResult>>();
 
 vi.mock('./app-info-cache', () => ({
   AppInfoCache: class MockAppInfoCache {
@@ -20,7 +20,7 @@ vi.mock('./app-info-cache', () => ({
 
 vi.mock('./device-app-parser', () => ({
   DeviceAppParser: class MockDeviceAppParser {
-    executeQuickDex = mockParserExecuteQuickDex;
+    fetchQuickPackageList = mockParserFetchQuickPackageList;
   },
 }));
 
@@ -42,7 +42,7 @@ describe('AppInfoService', () => {
         ],
       };
 
-      mockParserExecuteQuickDex.mockResolvedValue(mockResult);
+      mockParserFetchQuickPackageList.mockResolvedValue(mockResult);
       mockCacheGet.mockResolvedValue(null);
 
       const result = await service.syncWithDevice(mockAdb);
@@ -65,7 +65,7 @@ describe('AppInfoService', () => {
         ],
       };
 
-      mockParserExecuteQuickDex.mockResolvedValue(mockResult);
+      mockParserFetchQuickPackageList.mockResolvedValue(mockResult);
       mockCacheGet.mockImplementation(async (pkg: string) => {
         if (pkg === 'com.cached') {
           return {
@@ -98,7 +98,7 @@ describe('AppInfoService', () => {
         ],
       };
 
-      mockParserExecuteQuickDex.mockResolvedValue(mockResult);
+      mockParserFetchQuickPackageList.mockResolvedValue(mockResult);
       mockCacheGet.mockImplementation(async (pkg: string) => {
         if (pkg === 'com.updated') {
           return {
@@ -119,7 +119,7 @@ describe('AppInfoService', () => {
 
     it('should handle empty device app list', async () => {
       const mockAdb = {} as Adb;
-      mockParserExecuteQuickDex.mockResolvedValue({ apps: [] });
+      mockParserFetchQuickPackageList.mockResolvedValue({ apps: [] });
 
       const result = await service.syncWithDevice(mockAdb);
 
