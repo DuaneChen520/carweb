@@ -2,6 +2,13 @@ import type { Adb } from '@yume-chan/adb';
 import { AppInfoCache, type AppInfo } from './app-info-cache';
 import { DeviceAppParser } from './device-app-parser';
 
+export interface SyncResult {
+  /** 需要解析的应用包名列表 */
+  toParse: string[];
+  /** 设备上所有应用的包名+版本号 */
+  deviceApps: Map<string, number>;
+}
+
 export type ParseProgress = {
   total: number;
   parsed: number;
@@ -82,6 +89,29 @@ export class AppInfoService {
       this.parsing = false;
       this.abortController = null;
     }
+  }
+
+  async syncWithDevice(adb: Adb, _signal?: AbortSignal): Promise<SyncResult> {
+    console.log('[AppInfoService] 开始同步设备应用列表...');
+
+    // 获取设备上的应用列表（快速）
+    const { apps: deviceApps } = await this.deviceParser.executeQuickDex(adb);
+
+    // 对比缓存
+    const toParse: string[] = [];
+    for (const app of deviceApps) {
+      const cached = await this.cache.get(app.packageName);
+      if (!cached || cached.versionCode !== app.versionCode) {
+        toParse.push(app.packageName);
+      }
+    }
+
+    console.log(`[AppInfoService] 同步完成: 设备 ${deviceApps.length} 个应用, 需解析 ${toParse.length} 个`);
+
+    return {
+      toParse,
+      deviceApps: new Map(deviceApps.map(a => [a.packageName, a.versionCode])),
+    };
   }
 
   async getAppInfo(packageName: string): Promise<AppInfo | null> {
