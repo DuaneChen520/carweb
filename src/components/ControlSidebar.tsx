@@ -181,7 +181,17 @@ export function ControlSidebar({
     setLoading(true);
     setPanelMode('apps');
     try {
-      // DEX 全量解析（获得准确的 label/icon/packageList，写入缓存）
+      // 先尝试从缓存读取（后台自动解析可能已完成）
+      const cachedPackages = await scrcpy.getAllCachedPackages();
+      if (cachedPackages.length > 0) {
+        setApps(cachedPackages);
+        const labels = await scrcpy.getCachedAppLabels(cachedPackages);
+        setAppLabels(labels);
+        setLoading(false);
+        return;
+      }
+
+      // 缓存为空，触发 DEX 解析
       await parseAllApps(false, (p) => setParseProgress(p));
 
       // DEX 完成后从缓存读取最终结果
