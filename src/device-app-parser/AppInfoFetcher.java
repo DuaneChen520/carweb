@@ -7,10 +7,16 @@ import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
 import android.util.Base64;
 
+import android.app.usage.UsageStats;
+import android.app.usage.UsageStatsManager;
+
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public class AppInfoFetcher {
@@ -18,6 +24,31 @@ public class AppInfoFetcher {
         try {
             // 获取PackageManager实例
             PackageManager pm = getPackageManager();
+            
+            // 查询应用使用统计
+            Map<String, UsageStats> usageStatsMap = new HashMap<>();
+            try {
+                Object ctx = getSystemContext();
+                Object usm = ctx.getClass().getMethod("getSystemService", String.class)
+                    .invoke(ctx, "usagestats");
+                if (usm != null) {
+                    UsageStatsManager usmManager = (UsageStatsManager) usm;
+                    Calendar cal = Calendar.getInstance();
+                    cal.add(Calendar.MONTH, -1);
+                    long startTime = cal.getTimeInMillis();
+                    long endTime = System.currentTimeMillis();
+                    List<UsageStats> statsList = usmManager.queryUsageStats(
+                        UsageStatsManager.INTERVAL_MONTHLY, startTime, endTime);
+                    if (statsList != null) {
+                        for (UsageStats stat : statsList) {
+                            usageStatsMap.put(stat.getPackageName(), stat);
+                        }
+                    }
+                    System.err.println("[USAGE] loaded " + usageStatsMap.size() + " usage stats");
+                }
+            } catch (Exception e) {
+                System.err.println("[USAGE] Failed: " + e.getMessage());
+            }
             
             // 获取所有已安装应用
             List<PackageInfo> packages = pm.getInstalledPackages(0);
@@ -56,6 +87,8 @@ public class AppInfoFetcher {
                     appInfo.label = label;
                     appInfo.iconBase64 = iconBase64;
                     appInfo.versionCode = pkg.versionCode;
+                    UsageStats stats = usageStatsMap.get(pkg.packageName);
+                    appInfo.launchCount = stats != null ? stats.getTotalTimeInForeground() / 1000 : 0;
                     
                     apps.add(appInfo);
                 } catch (Exception e) {
@@ -78,7 +111,11 @@ public class AppInfoFetcher {
         }
     }
     
-    private static PackageManager getPackageManager() {
+    private static Object systemContext;
+
+    private static Object getSystemContext() {
+        if (systemContext != null) return systemContext;
+
         Throwable lastException = null;
 
         // 先初始化 Looper（app_process 的 main thread 没有 Looper）
@@ -100,11 +137,7 @@ public class AppInfoFetcher {
             Object ctx = atClass.getMethod("getSystemContext").invoke(at);
             System.err.println("[M1] ctx=" + (ctx != null));
 
-            if (ctx != null) {
-                Object pm = ctx.getClass().getMethod("getPackageManager").invoke(ctx);
-                System.err.println("[M1] pm=" + (pm != null));
-                if (pm != null) return (PackageManager) pm;
-            }
+            if (ctx != null) { systemContext = ctx; return ctx; }
         } catch (Throwable e) {
             lastException = e;
             System.err.println("[M1] FAIL: " + e.getClass().getSimpleName());
@@ -132,11 +165,7 @@ public class AppInfoFetcher {
             Object ctx = atClass.getMethod("getSystemContext").invoke(at);
             System.err.println("[M2] ctx=" + (ctx != null));
 
-            if (ctx != null) {
-                Object pm = ctx.getClass().getMethod("getPackageManager").invoke(ctx);
-                System.err.println("[M2] pm=" + (pm != null));
-                if (pm != null) return (PackageManager) pm;
-            }
+            if (ctx != null) { systemContext = ctx; return ctx; }
         } catch (Throwable e) {
             lastException = e;
             System.err.println("[M2] FAIL: " + e.getClass().getSimpleName());
@@ -162,11 +191,7 @@ public class AppInfoFetcher {
             Object ctx = createSystemContext.invoke(null, at);
             System.err.println("[M3] ctx=" + (ctx != null));
 
-            if (ctx != null) {
-                Object pm = ctx.getClass().getMethod("getPackageManager").invoke(ctx);
-                System.err.println("[M3] pm=" + (pm != null));
-                if (pm != null) return (PackageManager) pm;
-            }
+            if (ctx != null) { systemContext = ctx; return ctx; }
         } catch (Throwable e) {
             lastException = e;
             System.err.println("[M3] FAIL: " + e.getClass().getSimpleName());
@@ -180,7 +205,19 @@ public class AppInfoFetcher {
         // 所有方法都失败，抛出异常，打印完整原因链
         System.err.println("=== Full cause chain ===");
         printCauseChain(lastException);
-        throw new RuntimeException("Failed to get PackageManager - all initialization methods failed", lastException);
+        throw new RuntimeException("Failed to get system context - all initialization methods failed", lastException);
+    }
+
+    private static PackageManager getPackageManager() {
+        Object ctx = getSystemContext();
+        try {
+            Object pm = ctx.getClass().getMethod("getPackageManager").invoke(ctx);
+            System.err.println("[INIT] pm=" + (pm != null));
+            if (pm != null) return (PackageManager) pm;
+        } catch (Throwable e) {
+            System.err.println("[INIT] getPackageManager failed: " + e.getMessage());
+        }
+        throw new RuntimeException("Failed to get PackageManager");
     }
 
     private static void printCauseChain(Throwable t) {
@@ -238,7 +275,8 @@ public class AppInfoFetcher {
             sb.append("\"packageName\":\"").append(escapeJson(app.packageName)).append("\",");
             sb.append("\"label\":\"").append(escapeJson(app.label)).append("\",");
             sb.append("\"iconBase64\":").append(app.iconBase64 != null ? "\"" + app.iconBase64 + "\"" : "null").append(",");
-            sb.append("\"versionCode\":").append(app.versionCode);
+            sb.append("\"versionCode\":").append(app.versionCode).append(",");
+            sb.append("\"launchCount\":").append(app.launchCount);
             sb.append("}");
         }
         
@@ -272,6 +310,7 @@ public class AppInfoFetcher {
         public String label;
         public String iconBase64;
         public int versionCode;
+        public long launchCount;
     }
     
     static class AppError {
