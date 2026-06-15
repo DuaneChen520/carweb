@@ -55,7 +55,7 @@ export class UserPreferencesStore {
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
         const records = (request.result as PinnedRecord[]).sort(
-          (a, b) => a.order - b.order,
+          (a, b) => b.order - a.order,
         );
         resolve(records);
       };

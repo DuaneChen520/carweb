@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Grid, ArrowLeft, Home, Loader2, X, MonitorOff, Monitor, Maximize2, Minimize2, Power, Settings, Trash2, Search, Pin } from 'lucide-react';
+import { Grid, ArrowLeft, Home, Loader2, X, MonitorOff, Monitor, Maximize2, Minimize2, Power, Settings, Trash2, Search, Pin, RefreshCw } from 'lucide-react';
 import type { ResolutionPresetKey } from '../hooks/scrcpy';
 import { RESOLUTION_PRESETS } from '../hooks/scrcpy';
 import { useScrcpyContext } from '../contexts/ScrcpyContext';
-import { useAppPreferences } from '../hooks/useAppPreferences';
 import { CacheSettingsDialog } from './CacheSettingsDialog';
 
 function formatCacheSize(bytes: number): string {
@@ -20,13 +19,10 @@ interface AppIconProps {
   compact?: boolean;
   pinMode?: boolean;
   isPinned?: boolean;
-  draggable?: boolean;
-  onDragStart?: (pkg: string) => void;
-  onDragEnd?: () => void;
-  onDragOver?: (pkg: string) => void;
+  cacheVersion?: number;
 }
 
-function AppIcon({ pkg, name, getAppIcon, onLaunch, compact, pinMode, isPinned, draggable, onDragStart, onDragEnd, onDragOver }: AppIconProps) {
+function AppIcon({ pkg, name, getAppIcon, onLaunch, compact, pinMode, isPinned, cacheVersion }: AppIconProps) {
   const [iconUrl, setIconUrl] = useState<string | null>(null);
   const [isVisible, setIsVisible] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -50,11 +46,12 @@ function AppIcon({ pkg, name, getAppIcon, onLaunch, compact, pinMode, isPinned, 
   useEffect(() => {
     if (!isVisible) return;
     let cancelled = false;
+    setIconUrl(null);
     getAppIcon(pkg).then((url) => {
       if (!cancelled) setIconUrl(url);
     });
     return () => { cancelled = true; };
-  }, [pkg, getAppIcon, isVisible]);
+  }, [pkg, getAppIcon, isVisible, cacheVersion]);
 
   const displayName = name || pkg.split('.').pop() || pkg;
   const firstLetter = displayName.charAt(0).toUpperCase();
@@ -64,23 +61,7 @@ function AppIcon({ pkg, name, getAppIcon, onLaunch, compact, pinMode, isPinned, 
     <button
       ref={btnRef}
       onClick={() => onLaunch(pkg)}
-      draggable={draggable}
-      onDragStart={(e) => {
-        if (onDragStart) {
-          e.dataTransfer.effectAllowed = 'move';
-          onDragStart(pkg);
-        }
-      }}
-      onDragEnd={onDragEnd}
-      onDragOver={(e) => {
-        if (onDragOver) {
-          e.preventDefault();
-          onDragOver(pkg);
-        }
-      }}
-      className={`flex flex-col items-center gap-1 p-1.5 rounded-lg hover:bg-white/10 transition-colors group relative ${
-        draggable ? 'cursor-grab active:cursor-grabbing' : ''
-      }`}
+      className="flex flex-col items-center gap-1 p-1.5 rounded-lg hover:bg-white/10 transition-colors group relative"
       title={name}
     >
       {iconUrl ? (
@@ -130,8 +111,7 @@ export function ControlSidebar({
   currentPreset, resolutionPreset, changeResolutionPreset,
 }: ControlSidebarProps) {
   const scrcpy = useScrcpyContext();
-  const { goBack, goHome, startApp, getAppList, getAppIcon, getCachedAppLabels, parseAllApps, turnOffPhysicalScreen, turnOnPhysicalScreen } = scrcpy;
-  const appPrefs = useAppPreferences();
+  const { goBack, goHome, startApp, getAppIcon, getCachedAppLabels, parseAllApps, turnOffPhysicalScreen, turnOnPhysicalScreen, getAllDeviceApps, incrementLocalCount, togglePin, getPinnedApps, syncWithDevice } = scrcpy;
   const [panelMode, setPanelMode] = useState<'closed' | 'search' | 'apps'>('closed');
   const [searchText, setSearchText] = useState('');
   const [apps, setApps] = useState<string[] | null>(null);
@@ -143,13 +123,13 @@ export function ControlSidebar({
   const [floatingPanelPosition, setFloatingPanelPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [pinnedApps, setPinnedApps] = useState<string[]>([]);
+  const [sidebarApps, setSidebarApps] = useState<string[]>([]);
   const [physicalScreenOn, setPhysicalScreenOn] = useState(true);
-  const [draggingPkg, setDraggingPkg] = useState<string | null>(null);
-  const [dragOverPkg, setDragOverPkg] = useState<string | null>(null);
   const [parseProgress, setParseProgress] = useState<{ total: number; parsed: number; skipped: number; current: string } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [cacheInfo, setCacheInfo] = useState<{ count: number; size: number } | null>(null);
   const [showCacheSettings, setShowCacheSettings] = useState(false);
+  const [iconCacheVersion, setIconCacheVersion] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef({ x: 0, y: 0 });
@@ -162,24 +142,45 @@ export function ControlSidebar({
     }
   }, [panelMode]);
 
-  useEffect(() => {
-    const loadPinnedApps = async () => {
-      const list = await getAppList(true);
-      // Get pinned apps from user preferences
-      const pinnedFromPrefs = await appPrefs.getPinnedApps();
-      // Filter to only apps that exist on device
-      const pinnedOnDevice = pinnedFromPrefs.filter(pkg => list.includes(pkg));
-      setPinnedApps(pinnedOnDevice);
-      getCachedAppLabels(pinnedOnDevice).then((labels) => {
-        setAppLabels(prev => {
-          const newMap = new Map(prev);
-          labels.forEach((value, key) => newMap.set(key, value));
-          return newMap;
-        });
+  const refreshSidebarApps = useCallback(async () => {
+    let deviceApps = await getAllDeviceApps();
+
+    if (deviceApps.length === 0) {
+      const syncResult = await syncWithDevice();
+      if (syncResult.toParse.length > 0) {
+        parseAllApps().then(() => setIconCacheVersion(v => v + 1)).catch(() => {});
+      }
+      deviceApps = await getAllDeviceApps();
+    }
+
+    const pinned = deviceApps
+      .filter(a => a.pinned)
+      .sort((a, b) => b.pinOrder - a.pinOrder);
+    setPinnedApps(pinned.map(a => a.packageName));
+
+    const frequent = deviceApps
+      .filter(a => !a.pinned && a.localCount > 0)
+      .sort((a, b) => b.localCount - a.localCount);
+    const other = deviceApps
+      .filter(a => !a.pinned && a.localCount === 0)
+      .sort((a, b) => b.launchCount - a.launchCount);
+
+    const sorted = [...pinned, ...frequent, ...other];
+    const sidebarList = sorted.slice(0, 12).map(a => a.packageName);
+    setSidebarApps(sidebarList);
+
+    getCachedAppLabels(sidebarList).then((labels) => {
+      setAppLabels(prev => {
+        const newMap = new Map(prev);
+        labels.forEach((value, key) => newMap.set(key, value));
+        return newMap;
       });
-    };
-    loadPinnedApps();
-  }, [getAppList, getCachedAppLabels, appPrefs]);
+    });
+  }, [getAllDeviceApps, getCachedAppLabels, syncWithDevice, parseAllApps]);
+
+  useEffect(() => {
+    refreshSidebarApps();
+  }, [refreshSidebarApps]);
 
   const filteredPinned = pinnedApps.filter(
     (pkg) => !query || pkg.toLowerCase().includes(query) || (appLabels.get(pkg) || '').toLowerCase().includes(query),
@@ -200,41 +201,56 @@ export function ControlSidebar({
     setLoading(true);
     setPanelMode('apps');
     try {
-      // 先尝试从缓存读取（后台自动解析可能已完成）
-      const cachedPackages = await scrcpy.getAllCachedPackages();
-      if (cachedPackages.length > 0) {
-        // Sort apps using three-tier sorting
-        const sortedApps = await appPrefs.getSortedApps(cachedPackages);
-        setApps(sortedApps);
-        const labels = await scrcpy.getCachedAppLabels(sortedApps);
+      const deviceApps = await getAllDeviceApps();
+      if (deviceApps.length > 0) {
+        const pinned = deviceApps
+          .filter(a => a.pinned)
+          .sort((a, b) => b.pinOrder - a.pinOrder);
+        const frequent = deviceApps
+          .filter(a => !a.pinned && a.localCount > 0)
+          .sort((a, b) => b.localCount - a.localCount);
+        const other = deviceApps
+          .filter(a => !a.pinned && a.localCount === 0)
+          .sort((a, b) => b.launchCount - a.launchCount);
+
+        const sorted = [...pinned, ...frequent, ...other].map(a => a.packageName);
+        setApps(sorted);
+        const labels = await scrcpy.getCachedAppLabels(sorted);
         setAppLabels(labels);
         setLoading(false);
         return;
       }
 
-      // 缓存为空，触发 DEX 解析
       await parseAllApps((p) => setParseProgress(p));
 
-      // DEX 完成后从缓存读取最终结果
-      const allPackages = await scrcpy.getAllCachedPackages();
-      // Sort apps using three-tier sorting
-      const sortedApps = await appPrefs.getSortedApps(allPackages);
-      setApps(sortedApps);
-      const labels = await scrcpy.getCachedAppLabels(sortedApps);
+      const updatedApps = await getAllDeviceApps();
+      const pinned = updatedApps
+        .filter(a => a.pinned)
+        .sort((a, b) => b.pinOrder - a.pinOrder);
+      const frequent = updatedApps
+        .filter(a => !a.pinned && a.localCount > 0)
+        .sort((a, b) => b.localCount - a.localCount);
+      const other = updatedApps
+        .filter(a => !a.pinned && a.localCount === 0)
+        .sort((a, b) => b.launchCount - a.launchCount);
+
+      const sorted = [...pinned, ...frequent, ...other].map(a => a.packageName);
+      setApps(sorted);
+      const labels = await scrcpy.getCachedAppLabels(sorted);
       setAppLabels(labels);
       setParseProgress(null);
+      setIconCacheVersion(v => v + 1);
     } catch {
       setParseProgress(null);
     } finally {
       setLoading(false);
     }
-  }, [parseAllApps, scrcpy, appPrefs]);
+  }, [parseAllApps, scrcpy, getAllDeviceApps]);
 
   const handleLaunchApp = useCallback(
     (pkg: string) => {
       if (pinMode) {
-        // In pin mode, toggle pin status instead of launching
-        appPrefs.togglePin(pkg).then((isNowPinned) => {
+        togglePin(pkg).then((isNowPinned) => {
           setPinnedSet(prev => {
             const next = new Set(prev);
             if (isNowPinned) {
@@ -244,71 +260,30 @@ export function ControlSidebar({
             }
             return next;
           });
+          refreshSidebarApps();
         });
       } else {
         startApp(pkg);
-        // Increment launch count (fire and forget)
-        appPrefs.incrementLaunchCount(pkg).catch(() => {});
+        incrementLocalCount(pkg).then(() => {
+          refreshSidebarApps();
+        }).catch(() => {});
         setSearchText('');
         setPanelMode('closed');
       }
     },
-    [pinMode, appPrefs, startApp],
+    [pinMode, togglePin, startApp, incrementLocalCount, refreshSidebarApps],
   );
 
   const togglePinMode = useCallback(async () => {
     if (pinMode) {
-      // Exit pin mode
       setPinMode(false);
       setPinnedSet(new Set());
     } else {
-      // Enter pin mode, load current pinned list
-      const pinned = await appPrefs.getPinnedApps();
-      setPinnedSet(new Set(pinned));
+      const pinned = await getPinnedApps();
+      setPinnedSet(new Set(pinned.map(a => a.packageName)));
       setPinMode(true);
     }
-  }, [pinMode, appPrefs]);
-
-  const handleDragStart = useCallback((pkg: string) => {
-    setDraggingPkg(pkg);
-  }, []);
-
-  const handleDragEnd = useCallback(() => {
-    setDraggingPkg(null);
-    setDragOverPkg(null);
-  }, []);
-
-  const handleDragOver = useCallback((pkg: string) => {
-    if (draggingPkg && draggingPkg !== pkg) {
-      setDragOverPkg(pkg);
-    }
-  }, [draggingPkg]);
-
-  const handleDrop = useCallback(async () => {
-    if (draggingPkg && dragOverPkg && draggingPkg !== dragOverPkg) {
-      // Get current pinned apps in order
-      const currentPinned = await appPrefs.getPinnedApps();
-      
-      // Find indices of the dragged and target apps
-      const fromIndex = currentPinned.indexOf(draggingPkg);
-      const toIndex = currentPinned.indexOf(dragOverPkg);
-      
-      if (fromIndex !== -1 && toIndex !== -1) {
-        // Reorder the array
-        const newPinned = [...currentPinned];
-        const [removed] = newPinned.splice(fromIndex, 1);
-        newPinned.splice(toIndex, 0, removed);
-        
-        // Save the new order
-        await appPrefs.reorderPinned(newPinned);
-        
-        // Update the sidebar display
-        setPinnedApps(newPinned);
-      }
-    }
-    setDraggingPkg(null);
-    setDragOverPkg(null);
-  }, [draggingPkg, dragOverPkg, appPrefs]);
+  }, [pinMode, getPinnedApps]);
 
   const closePanel = useCallback(() => {
     setPanelMode('closed');
@@ -367,24 +342,12 @@ export function ControlSidebar({
           <Grid className="w-5 h-5" />
         </button>
 
-        <button
-          onClick={togglePinMode}
-          className={`p-2 rounded-lg transition-colors ${pinMode ? 'bg-blue-500/30 text-blue-400' : 'text-white/50 hover:text-white hover:bg-white/10'}`}
-          title={pinMode ? '退出置顶模式' : '置顶模式'}
-        >
-          <Pin className="w-5 h-5" />
-        </button>
-
         <div className="w-8 h-px bg-white/10 my-1" />
 
-        <div
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={handleDrop}
-          className="flex flex-col items-center gap-1"
-        >
+        <div className="flex flex-col items-center gap-1 overflow-y-auto max-h-[calc(100vh-280px)] scrollbar-none">
           {pinnedApps.map((pkg) => (
             <AppIcon
-              key={pkg}
+              key={`pinned-${pkg}`}
               pkg={pkg}
               name={appLabels.get(pkg) || pkg.split('.').pop() || pkg}
               getAppIcon={getAppIcon}
@@ -392,12 +355,27 @@ export function ControlSidebar({
               compact
               pinMode={pinMode}
               isPinned={pinnedSet.has(pkg)}
-              draggable={pinMode && pinnedSet.has(pkg)}
-              onDragStart={handleDragStart}
-              onDragEnd={handleDragEnd}
-              onDragOver={handleDragOver}
+              cacheVersion={iconCacheVersion}
             />
           ))}
+          {pinnedApps.length > 0 && sidebarApps.length > pinnedApps.length && (
+            <div className="w-6 h-px bg-white/20 my-0.5" />
+          )}
+          {sidebarApps
+            .filter(pkg => !pinnedApps.includes(pkg))
+            .map((pkg) => (
+              <AppIcon
+                key={`other-${pkg}`}
+                pkg={pkg}
+                name={appLabels.get(pkg) || pkg.split('.').pop() || pkg}
+                getAppIcon={getAppIcon}
+                onLaunch={handleLaunchApp}
+                compact
+                pinMode={pinMode}
+                isPinned={pinnedSet.has(pkg)}
+                cacheVersion={iconCacheVersion}
+              />
+            ))}
         </div>
 
         <div className="flex-1" />
@@ -545,12 +523,16 @@ export function ControlSidebar({
           open={showCacheSettings}
           onClose={() => setShowCacheSettings(false)}
           onClearAppCache={async () => {
-            await scrcpy.clearAppInfoCache();
+            await scrcpy.clearAll();
             const info = await scrcpy.getCacheInfo();
             setCacheInfo(info);
             setAppLabels(new Map());
+            refreshSidebarApps();
           }}
-          onClearUsageData={appPrefs.clearUsageData}
+          onClearUsageData={async () => {
+            await scrcpy.clearAll();
+            refreshSidebarApps();
+          }}
         />
       </div>
 
@@ -572,12 +554,58 @@ export function ControlSidebar({
               {panelMode === 'search' ? '搜索应用' : '全部应用'}
               {panelMode === 'apps' && apps && ` (${filteredAll.length})`}
             </span>
-            <button
-              onClick={closePanel}
-              className="p-1 text-white/40 hover:text-white rounded transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={togglePinMode}
+                className={`p-1 rounded transition-colors ${pinMode ? 'text-blue-400' : 'text-white/40 hover:text-white'}`}
+                title={pinMode ? '退出置顶模式' : '置顶模式'}
+              >
+                <Pin className="w-4 h-4" />
+              </button>
+              {panelMode === 'apps' && (
+                <button
+                  onClick={() => {
+                    if (loading) return;
+                    setLoading(true);
+                    parseAllApps((p) => setParseProgress(p)).then(async () => {
+                      const deviceApps = await getAllDeviceApps();
+                      const pinned = deviceApps
+                        .filter(a => a.pinned)
+                        .sort((a, b) => b.pinOrder - a.pinOrder);
+                      const frequent = deviceApps
+                        .filter(a => !a.pinned && a.localCount > 0)
+                        .sort((a, b) => b.localCount - a.localCount);
+                      const other = deviceApps
+                        .filter(a => !a.pinned && a.localCount === 0)
+                        .sort((a, b) => b.launchCount - a.launchCount);
+
+                      const sorted = [...pinned, ...frequent, ...other].map(a => a.packageName);
+                      setApps(sorted);
+                      const labels = await scrcpy.getCachedAppLabels(sorted);
+                      setAppLabels(labels);
+                      setParseProgress(null);
+                      setLoading(false);
+                      setIconCacheVersion(v => v + 1);
+                      refreshSidebarApps();
+                    }).catch(() => {
+                      setParseProgress(null);
+                      setLoading(false);
+                    });
+                  }}
+                  disabled={loading}
+                  className={`p-1 rounded transition-colors ${loading ? 'text-white/20' : 'text-white/40 hover:text-white'}`}
+                  title="更新应用列表"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                </button>
+              )}
+              <button
+                onClick={closePanel}
+                className="p-1 text-white/40 hover:text-white rounded transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
           <div className="px-3 pb-2">
@@ -631,6 +659,7 @@ export function ControlSidebar({
                         onLaunch={handleLaunchApp}
                         pinMode={pinMode}
                         isPinned={pinnedSet.has(pkg)}
+                        cacheVersion={iconCacheVersion}
                       />
                     ))}
                   </div>
@@ -652,6 +681,7 @@ export function ControlSidebar({
                       onLaunch={handleLaunchApp}
                       pinMode={pinMode}
                       isPinned={pinnedSet.has(pkg)}
+                      cacheVersion={iconCacheVersion}
                     />
                   ))}
                 </div>

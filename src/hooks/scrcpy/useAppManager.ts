@@ -98,8 +98,37 @@ export function useAppManager() {
     return serviceRef.current.getAllCachedPackages();
   }, []);
 
-  const syncWithDevice = useCallback(async (adb: Adb, signal?: AbortSignal): Promise<SyncResult> => {
+  const syncWithDevice = useCallback(async (signal?: AbortSignal): Promise<SyncResult> => {
+    const adb = adbRef.current;
+    if (!adb) {
+      return { toParse: [], deviceApps: new Map() };
+    }
     return serviceRef.current.syncWithDevice(adb, signal);
+  }, []);
+
+  const getAllDeviceApps = useCallback(async () => {
+    return serviceRef.current.getAllDeviceApps();
+  }, []);
+
+  const incrementLocalCount = useCallback(async (pkg: string): Promise<void> => {
+    await serviceRef.current.incrementLocalCount(pkg);
+  }, []);
+
+  const togglePin = useCallback(async (pkg: string): Promise<boolean> => {
+    return serviceRef.current.togglePin(pkg);
+  }, []);
+
+  const getPinnedApps = useCallback(async () => {
+    return serviceRef.current.getPinnedApps();
+  }, []);
+
+  const clearDeviceApps = useCallback(async (): Promise<void> => {
+    await serviceRef.current.clearDeviceApps();
+  }, []);
+
+  const clearAll = useCallback(async (): Promise<void> => {
+    await serviceRef.current.clearAll();
+    labelCacheRef.current.clear();
   }, []);
 
   return useMemo(() => ({
@@ -115,7 +144,13 @@ export function useAppManager() {
     clearAppInfoCache,
     getCacheInfo,
     syncWithDevice,
-  }), [setAdb, getAppList, getAppLabel, getAppIcon, batchGetAppLabels, parseAllApps, abortParseApps, getCachedAppLabels, getAllCachedPackages, clearAppInfoCache, getCacheInfo, syncWithDevice]);
+    getAllDeviceApps,
+    incrementLocalCount,
+    togglePin,
+    getPinnedApps,
+    clearDeviceApps,
+    clearAll,
+  }), [setAdb, getAppList, getAppLabel, getAppIcon, batchGetAppLabels, parseAllApps, abortParseApps, getCachedAppLabels, getAllCachedPackages, clearAppInfoCache, getCacheInfo, syncWithDevice, getAllDeviceApps, incrementLocalCount, togglePin, getPinnedApps, clearDeviceApps, clearAll]);
 }
 
 function formatPackageName(pkg: string): string {

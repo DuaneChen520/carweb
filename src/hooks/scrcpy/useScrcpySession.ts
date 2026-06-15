@@ -179,7 +179,7 @@ export function useScrcpySession() {
       }));
 
       // 后台自动同步应用列表
-      appManager.syncWithDevice(adb).then(async (syncResult) => {
+      appManager.syncWithDevice().then(async (syncResult) => {
         if (syncResult.toParse.length > 0) {
           console.log(`[ScrcpySession] 需要解析 ${syncResult.toParse.length} 个应用`);
           // 执行完整 dex 解析
@@ -393,5 +393,12 @@ export function useScrcpySession() {
     getForegroundApp,
     startAppOnDisplay: startAppOnDisplayFn,
     resumeAudio: audioDecoder.resume,
+    getAllDeviceApps: appManager.getAllDeviceApps,
+    incrementLocalCount: appManager.incrementLocalCount,
+    togglePin: appManager.togglePin,
+    getPinnedApps: appManager.getPinnedApps,
+    clearDeviceApps: appManager.clearDeviceApps,
+    clearAll: appManager.clearAll,
+    syncWithDevice: appManager.syncWithDevice,
   };
 }

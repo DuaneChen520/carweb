@@ -42,6 +42,13 @@ interface ScrcpyContextValue extends ScrcpyState {
   resizeDisplay: (width: number, height: number, dpi: number) => Promise<void>;
   getForegroundApp: () => Promise<string | null>;
   resumeAudio: () => void;
+  getAllDeviceApps: () => Promise<import('@/lib/device-apps-store').DeviceAppRecord[]>;
+  incrementLocalCount: (pkg: string) => Promise<void>;
+  togglePin: (pkg: string) => Promise<boolean>;
+  getPinnedApps: () => Promise<import('@/lib/device-apps-store').DeviceAppRecord[]>;
+  clearDeviceApps: () => Promise<void>;
+  clearAll: () => Promise<void>;
+  syncWithDevice: (signal?: AbortSignal) => Promise<import('@/lib/app-info-service').SyncResult>;
 }
 
 const ScrcpyContext = createContext<ScrcpyContextValue | null>(null);
@@ -85,6 +92,13 @@ export function ScrcpyProvider({ children }: { children: ReactNode }) {
     session.resizeDisplay,
     session.getForegroundApp,
     session.resumeAudio,
+    session.getAllDeviceApps,
+    session.incrementLocalCount,
+    session.togglePin,
+    session.getPinnedApps,
+    session.clearDeviceApps,
+    session.clearAll,
+    session.syncWithDevice,
   ]);
 
   return (

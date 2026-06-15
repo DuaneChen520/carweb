@@ -15,14 +15,6 @@ export function useAppPreferences() {
     return storeRef.current.togglePinned(pkg);
   }, []);
 
-  const reorderPinned = useCallback(async (orderedPkgs: string[]): Promise<void> => {
-    const records = orderedPkgs.map((pkg, index) => ({
-      packageName: pkg,
-      order: index,
-    }));
-    await storeRef.current.setPinned(records);
-  }, []);
-
   const incrementLaunchCount = useCallback(async (pkg: string): Promise<void> => {
     await storeRef.current.incrementLaunchCount(pkg);
   }, []);
@@ -58,7 +50,6 @@ export function useAppPreferences() {
   return useMemo(() => ({
     getPinnedApps,
     togglePin,
-    reorderPinned,
     incrementLaunchCount,
     getSortedApps,
     bulkSetDexBaseline,
@@ -66,7 +57,6 @@ export function useAppPreferences() {
   }), [
     getPinnedApps,
     togglePin,
-    reorderPinned,
     incrementLaunchCount,
     getSortedApps,
     bulkSetDexBaseline,

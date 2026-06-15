@@ -40,7 +40,7 @@ export function sortApps(
     seen.add(pkg);
   }
 
-  pinnedTier.sort((a, b) => a.order - b.order);
+  pinnedTier.sort((a, b) => b.order - a.order);
   frequentTier.sort((a, b) => b.count - a.count || a.index - b.index);
   otherTier.sort((a, b) => b.baseline - a.baseline || a.index - b.index);
 
