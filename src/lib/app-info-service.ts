@@ -22,6 +22,7 @@ export class AppInfoService {
   private cache = new AppInfoCache();
   private deviceParser = new DeviceAppParser();
   private parsing = false;
+  private syncing = false;
   private abortController: AbortController | null = null;
 
   abort(): void {
@@ -91,26 +92,37 @@ export class AppInfoService {
   }
 
   async syncWithDevice(adb: Adb, signal?: AbortSignal): Promise<SyncResult> {
-    console.log('[AppInfoService] 开始同步设备应用列表...');
-
-    // 获取设备上的应用列表（快速，包含推送/清理逻辑）
-    const { apps: deviceApps } = await this.deviceParser.fetchQuickPackageList(adb, signal);
-
-    // 对比缓存
-    const toParse: string[] = [];
-    for (const app of deviceApps) {
-      const cached = await this.cache.get(app.packageName);
-      if (!cached || cached.versionCode !== app.versionCode) {
-        toParse.push(app.packageName);
-      }
+    // 防重入：如果正在同步，直接返回空结果
+    if (this.syncing) {
+      console.log('[AppInfoService] 同步正在进行中，跳过重复调用');
+      return { toParse: [], deviceApps: new Map() };
     }
 
-    console.log(`[AppInfoService] 同步完成: 设备 ${deviceApps.length} 个应用, 需解析 ${toParse.length} 个`);
+    this.syncing = true;
+    console.log('[AppInfoService] 开始同步设备应用列表...');
 
-    return {
-      toParse,
-      deviceApps: new Map(deviceApps.map(a => [a.packageName, a.versionCode])),
-    };
+    try {
+      // 获取设备上的应用列表（快速，包含推送/清理逻辑）
+      const { apps: deviceApps } = await this.deviceParser.fetchQuickPackageList(adb, signal);
+
+      // 对比缓存
+      const toParse: string[] = [];
+      for (const app of deviceApps) {
+        const cached = await this.cache.get(app.packageName);
+        if (!cached || cached.versionCode !== app.versionCode) {
+          toParse.push(app.packageName);
+        }
+      }
+
+      console.log(`[AppInfoService] 同步完成: 设备 ${deviceApps.length} 个应用, 需解析 ${toParse.length} 个`);
+
+      return {
+        toParse,
+        deviceApps: new Map(deviceApps.map(a => [a.packageName, a.versionCode])),
+      };
+    } finally {
+      this.syncing = false;
+    }
   }
 
   async getAppInfo(packageName: string): Promise<AppInfo | null> {
