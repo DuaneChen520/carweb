@@ -204,51 +204,6 @@ export function ControlSidebar({
       })
     : [];
 
-  const loadApps = useCallback(async () => {
-    setLoading(true);
-    setPanelMode('apps');
-    try {
-      const sortApps = (apps: typeof deviceApps extends infer T ? T extends undefined ? never : T : never) => {
-        const pinned: typeof apps = [];
-        const frequent: typeof apps = [];
-        const other: typeof apps = [];
-        for (const app of apps) {
-          if (app.pinned) pinned.push(app);
-          else if (app.localCount > 0) frequent.push(app);
-          else other.push(app);
-        }
-        pinned.sort((a, b) => b.pinOrder - a.pinOrder);
-        frequent.sort((a, b) => b.localCount - a.localCount);
-        other.sort((a, b) => b.launchCount - a.launchCount);
-        return [...pinned, ...frequent, ...other].map(a => a.packageName);
-      };
-
-      let deviceApps = await getAllDeviceApps();
-      if (deviceApps.length > 0) {
-        const sorted = sortApps(deviceApps);
-        setApps(sorted);
-        const labels = await scrcpy.getCachedAppLabels(sorted);
-        setAppLabels(labels);
-        setLoading(false);
-        return;
-      }
-
-      await parseAllApps((p) => setParseProgress(p));
-
-      deviceApps = await getAllDeviceApps();
-      const sorted = sortApps(deviceApps);
-      setApps(sorted);
-      const labels = await scrcpy.getCachedAppLabels(sorted);
-      setAppLabels(labels);
-      setParseProgress(null);
-      setIconCacheVersion(v => v + 1);
-    } catch {
-      setParseProgress(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [parseAllApps, scrcpy, getAllDeviceApps]);
-
   const sortDeviceApps = useCallback(async () => {
     const deviceApps = await getAllDeviceApps();
     const pinned: typeof deviceApps = [];
@@ -264,6 +219,35 @@ export function ControlSidebar({
     other.sort((a, b) => b.launchCount - a.launchCount);
     return [...pinned, ...frequent, ...other].map(a => a.packageName);
   }, [getAllDeviceApps]);
+
+  const loadApps = useCallback(async () => {
+    setLoading(true);
+    setPanelMode('apps');
+    try {
+      let deviceApps = await getAllDeviceApps();
+      if (deviceApps.length > 0) {
+        const sorted = await sortDeviceApps();
+        setApps(sorted);
+        const labels = await scrcpy.getCachedAppLabels(sorted);
+        setAppLabels(labels);
+        setLoading(false);
+        return;
+      }
+
+      await parseAllApps((p) => setParseProgress(p));
+
+      const sorted = await sortDeviceApps();
+      setApps(sorted);
+      const labels = await scrcpy.getCachedAppLabels(sorted);
+      setAppLabels(labels);
+      setParseProgress(null);
+      setIconCacheVersion(v => v + 1);
+    } catch {
+      setParseProgress(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [parseAllApps, scrcpy, getAllDeviceApps, sortDeviceApps]);
 
   const handleLaunchApp = useCallback(
     (pkg: string) => {
@@ -374,6 +358,8 @@ export function ControlSidebar({
               getAppIcon={getAppIcon}
               onLaunch={handleLaunchApp}
               compact
+              pinMode={pinMode}
+              isPinned={pinnedSet.has(pkg)}
               cacheVersion={iconCacheVersion}
             />
           ))}
@@ -390,6 +376,8 @@ export function ControlSidebar({
                 getAppIcon={getAppIcon}
                 onLaunch={handleLaunchApp}
                 compact
+                pinMode={pinMode}
+                isPinned={pinnedSet.has(pkg)}
                 cacheVersion={iconCacheVersion}
               />
             ))}
@@ -584,7 +572,9 @@ export function ControlSidebar({
                   onClick={() => {
                     if (loading) return;
                     setLoading(true);
-                    refreshSidebarApps(true).then(() => {
+                    refreshSidebarApps(true).then(async () => {
+                      const sorted = await sortDeviceApps();
+                      setApps(sorted);
                       setIconCacheVersion(v => v + 1);
                       setLoading(false);
                     }).catch(() => {
