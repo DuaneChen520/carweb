@@ -1,6 +1,7 @@
 import type { Adb } from '@yume-chan/adb';
 import { AppInfoCache, type AppInfo } from './app-info-cache';
 import { DeviceAppParser } from './device-app-parser';
+import { UserPreferencesStore } from './user-preferences-store';
 
 export interface SyncResult {
   /** 需要解析的应用包名列表 */
@@ -72,6 +73,14 @@ export class AppInfoService {
         });
         results.set(app.packageName, appInfo);
       }
+
+      // Write dex baseline for three-tier sorting
+      const baselineEntries: [string, number][] = [];
+      for (const app of deviceResult.apps) {
+        baselineEntries.push([app.packageName, app.launchCount ?? 0]);
+      }
+      const prefsStore = new UserPreferencesStore();
+      await prefsStore.bulkSetDexBaseline(baselineEntries);
 
       // Log partial errors from device parser
       if (deviceResult.errors.length > 0) {

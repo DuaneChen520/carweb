@@ -6,6 +6,7 @@ export interface AppInfo {
   label: string | null;
   iconBase64: string | null;
   versionCode: number;
+  launchCount: number;
 }
 
 export interface AppError {
@@ -389,6 +390,7 @@ echo "APP_PROCESS EXIT CODE: $?" >&2
           label: (typeof app.label === 'string' ? app.label : null) as string | null,
           iconBase64: typeof app.iconBase64 === 'string' ? `data:image/png;base64,${app.iconBase64}` : null,
           versionCode: app.versionCode,
+          launchCount: typeof app.launchCount === 'number' ? app.launchCount : 0,
         });
       }
     }
