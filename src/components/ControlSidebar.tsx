@@ -142,7 +142,11 @@ export function ControlSidebar({
     }
   }, [panelMode]);
 
-  const refreshSidebarApps = useCallback(async () => {
+  const refreshSidebarApps = useCallback(async (forceRefresh = false) => {
+    if (forceRefresh) {
+      await parseAllApps();
+    }
+
     let deviceApps = await getAllDeviceApps();
 
     if (deviceApps.length === 0) {
@@ -245,10 +249,26 @@ export function ControlSidebar({
     }
   }, [parseAllApps, scrcpy, getAllDeviceApps]);
 
+  const sortDeviceApps = useCallback(async () => {
+    const deviceApps = await getAllDeviceApps();
+    const pinned: typeof deviceApps = [];
+    const frequent: typeof deviceApps = [];
+    const other: typeof deviceApps = [];
+    for (const app of deviceApps) {
+      if (app.pinned) pinned.push(app);
+      else if (app.localCount > 0) frequent.push(app);
+      else other.push(app);
+    }
+    pinned.sort((a, b) => b.pinOrder - a.pinOrder);
+    frequent.sort((a, b) => b.localCount - a.localCount);
+    other.sort((a, b) => b.launchCount - a.launchCount);
+    return [...pinned, ...frequent, ...other].map(a => a.packageName);
+  }, [getAllDeviceApps]);
+
   const handleLaunchApp = useCallback(
     (pkg: string) => {
-      if (pinMode) {
-        togglePin(pkg).then((isNowPinned) => {
+      if (pinMode && panelMode === 'apps') {
+        togglePin(pkg).then(async (isNowPinned) => {
           setPinnedSet(prev => {
             const next = new Set(prev);
             if (isNowPinned) {
@@ -258,7 +278,8 @@ export function ControlSidebar({
             }
             return next;
           });
-          refreshSidebarApps();
+          const sorted = await sortDeviceApps();
+          setApps(sorted);
         });
       } else {
         startApp(pkg);
@@ -269,7 +290,7 @@ export function ControlSidebar({
         setPanelMode('closed');
       }
     },
-    [pinMode, togglePin, startApp, incrementLocalCount, refreshSidebarApps],
+    [pinMode, panelMode, togglePin, startApp, incrementLocalCount, refreshSidebarApps, sortDeviceApps],
   );
 
   const togglePinMode = useCallback(async () => {
@@ -286,6 +307,8 @@ export function ControlSidebar({
   const closePanel = useCallback(() => {
     setPanelMode('closed');
     setSearchText('');
+    setPinMode(false);
+    setPinnedSet(new Set());
   }, []);
 
   const togglePanel = useCallback((mode: 'search' | 'apps') => {
@@ -351,8 +374,6 @@ export function ControlSidebar({
               getAppIcon={getAppIcon}
               onLaunch={handleLaunchApp}
               compact
-              pinMode={pinMode}
-              isPinned={pinnedSet.has(pkg)}
               cacheVersion={iconCacheVersion}
             />
           ))}
@@ -369,8 +390,6 @@ export function ControlSidebar({
                 getAppIcon={getAppIcon}
                 onLaunch={handleLaunchApp}
                 compact
-                pinMode={pinMode}
-                isPinned={pinnedSet.has(pkg)}
                 cacheVersion={iconCacheVersion}
               />
             ))}
@@ -525,11 +544,11 @@ export function ControlSidebar({
             const info = await scrcpy.getCacheInfo();
             setCacheInfo(info);
             setAppLabels(new Map());
-            refreshSidebarApps();
+            refreshSidebarApps(true);
           }}
           onClearUsageData={async () => {
             await scrcpy.clearAll();
-            refreshSidebarApps();
+            refreshSidebarApps(true);
           }}
         />
       </div>
@@ -565,30 +584,10 @@ export function ControlSidebar({
                   onClick={() => {
                     if (loading) return;
                     setLoading(true);
-                    parseAllApps((p) => setParseProgress(p)).then(async () => {
-                      const deviceApps = await getAllDeviceApps();
-                      const pinned: typeof deviceApps = [];
-                      const frequent: typeof deviceApps = [];
-                      const other: typeof deviceApps = [];
-                      for (const app of deviceApps) {
-                        if (app.pinned) pinned.push(app);
-                        else if (app.localCount > 0) frequent.push(app);
-                        else other.push(app);
-                      }
-                      pinned.sort((a, b) => b.pinOrder - a.pinOrder);
-                      frequent.sort((a, b) => b.localCount - a.localCount);
-                      other.sort((a, b) => b.launchCount - a.launchCount);
-
-                      const sorted = [...pinned, ...frequent, ...other].map(a => a.packageName);
-                      setApps(sorted);
-                      const labels = await scrcpy.getCachedAppLabels(sorted);
-                      setAppLabels(labels);
-                      setParseProgress(null);
-                      setLoading(false);
+                    refreshSidebarApps(true).then(() => {
                       setIconCacheVersion(v => v + 1);
-                      refreshSidebarApps();
+                      setLoading(false);
                     }).catch(() => {
-                      setParseProgress(null);
                       setLoading(false);
                     });
                   }}
@@ -622,11 +621,6 @@ export function ControlSidebar({
             </div>
           </div>
 
-          {panelMode === 'apps' && loading && (
-            <div className="px-4 pb-2">
-              <Loader2 className="w-3 h-3 text-blue-400 animate-spin" />
-            </div>
-          )}
           {parseProgress && (
             <div className="px-4 pb-2">
               <div className="flex items-center justify-between text-[10px] text-white/40 mb-1">
