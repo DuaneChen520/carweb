@@ -1,0 +1,2 @@
+D:\personalwork\carweb\src\device-app-parser\build\com\carweb\appinfo\AppInfoFetcherQuick.class
+D:\personalwork\carweb\src\device-app-parser\build\com\carweb\appinfo\AppInfoFetcherQuick$QuickAppInfo.class

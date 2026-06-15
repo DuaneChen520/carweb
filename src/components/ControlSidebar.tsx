@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Search, Grid, ArrowLeft, Home, Loader2, X, MonitorOff, Maximize2, Minimize2, ArrowLeftRight, Monitor, Power, Keyboard, ChevronDown, Settings, Trash2 } from 'lucide-react';
+import { Grid, ArrowLeft, Home, Loader2, X, MonitorOff, Monitor, Maximize2, Minimize2, Power, Settings, Trash2, Search, Pin } from 'lucide-react';
 import type { ResolutionPresetKey } from '../hooks/scrcpy';
 import { RESOLUTION_PRESETS } from '../hooks/scrcpy';
 import { useScrcpyContext } from '../contexts/ScrcpyContext';
+import { useAppPreferences } from '../hooks/useAppPreferences';
+import { CacheSettingsDialog } from './CacheSettingsDialog';
 
 function formatCacheSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -10,30 +12,21 @@ function formatCacheSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-const PRIORITY_PACKAGES = [
-  'com.android.contacts',
-  'com.android.dialer',
-  'com.android.phone',
-  'com.android.mms',
-  'com.android.messaging',
-  'com.tencent.mm',
-  'com.google.android.apps.maps',
-  'com.baidu.BaiduMap',
-  'com.autonavi.minimap',
-  'com.android.settings',
-  'com.android.chrome',
-  'com.android.documentsui',
-];
-
 interface AppIconProps {
   pkg: string;
   name: string;
   getAppIcon: (pkg: string) => Promise<string | null>;
   onLaunch: (pkg: string) => void;
   compact?: boolean;
+  pinMode?: boolean;
+  isPinned?: boolean;
+  draggable?: boolean;
+  onDragStart?: (pkg: string) => void;
+  onDragEnd?: () => void;
+  onDragOver?: (pkg: string) => void;
 }
 
-function AppIcon({ pkg, name, getAppIcon, onLaunch, compact }: AppIconProps) {
+function AppIcon({ pkg, name, getAppIcon, onLaunch, compact, pinMode, isPinned, draggable, onDragStart, onDragEnd, onDragOver }: AppIconProps) {
   const [iconUrl, setIconUrl] = useState<string | null>(null);
   const [isVisible, setIsVisible] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -71,7 +64,23 @@ function AppIcon({ pkg, name, getAppIcon, onLaunch, compact }: AppIconProps) {
     <button
       ref={btnRef}
       onClick={() => onLaunch(pkg)}
-      className="flex flex-col items-center gap-1 p-1.5 rounded-lg hover:bg-white/10 transition-colors group"
+      draggable={draggable}
+      onDragStart={(e) => {
+        if (onDragStart) {
+          e.dataTransfer.effectAllowed = 'move';
+          onDragStart(pkg);
+        }
+      }}
+      onDragEnd={onDragEnd}
+      onDragOver={(e) => {
+        if (onDragOver) {
+          e.preventDefault();
+          onDragOver(pkg);
+        }
+      }}
+      className={`flex flex-col items-center gap-1 p-1.5 rounded-lg hover:bg-white/10 transition-colors group relative ${
+        draggable ? 'cursor-grab active:cursor-grabbing' : ''
+      }`}
       title={name}
     >
       {iconUrl ? (
@@ -82,6 +91,13 @@ function AppIcon({ pkg, name, getAppIcon, onLaunch, compact }: AppIconProps) {
           style={{ backgroundColor: `hsl(${hue}, 45%, 35%)` }}
         >
           {firstLetter}
+        </div>
+      )}
+      {pinMode && (
+        <div className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${
+          isPinned ? 'bg-blue-500' : 'bg-white/20'
+        }`}>
+          <Pin className={`w-2.5 h-2.5 ${isPinned ? 'text-white fill-white' : 'text-white/60'}`} />
         </div>
       )}
       {!compact && (
@@ -100,40 +116,40 @@ interface ControlSidebarProps {
   isFullscreen?: boolean;
   toggleFullscreen?: () => void;
   toggleDisplayMode?: () => void;
-  handleApplyNewSize?: () => void;
   handleStop?: () => void;
-  toggleVirtualKeyboard?: () => void;
-  showVirtualKeyboard?: boolean;
   keyboardMode?: 'phone' | 'browser';
   setKeyboardMode?: (mode: 'phone' | 'browser') => void;
   currentPreset?: { key: string; label: string; scale: number };
   resolutionPreset?: ResolutionPresetKey;
   changeResolutionPreset?: (preset: ResolutionPresetKey) => void;
-  showResMenu?: boolean;
-  setShowResMenu?: (v: boolean) => void;
 }
 
 export function ControlSidebar({
-  isVirtualDisplay, isRunning, useMirrorMode, isFullscreen, toggleFullscreen, toggleDisplayMode, handleApplyNewSize, handleStop,
-  toggleVirtualKeyboard, showVirtualKeyboard,
+  isVirtualDisplay, isRunning, useMirrorMode, isFullscreen, toggleFullscreen, toggleDisplayMode, handleStop,
   keyboardMode, setKeyboardMode,
-  currentPreset, resolutionPreset, changeResolutionPreset, showResMenu, setShowResMenu,
+  currentPreset, resolutionPreset, changeResolutionPreset,
 }: ControlSidebarProps) {
   const scrcpy = useScrcpyContext();
-  const { goBack, goHome, showRecentApps, startApp, getAppList, getAppIcon, getCachedAppLabels, parseAllApps, turnOffPhysicalScreen, turnOnPhysicalScreen } = scrcpy;
+  const { goBack, goHome, startApp, getAppList, getAppIcon, getCachedAppLabels, parseAllApps, turnOffPhysicalScreen, turnOnPhysicalScreen } = scrcpy;
+  const appPrefs = useAppPreferences();
   const [panelMode, setPanelMode] = useState<'closed' | 'search' | 'apps'>('closed');
   const [searchText, setSearchText] = useState('');
   const [apps, setApps] = useState<string[] | null>(null);
   const [appLabels, setAppLabels] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(false);
+  const [pinMode, setPinMode] = useState(false);
+  const [pinnedSet, setPinnedSet] = useState<Set<string>>(new Set());
 
   const [floatingPanelPosition, setFloatingPanelPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [pinnedApps, setPinnedApps] = useState<string[]>([]);
   const [physicalScreenOn, setPhysicalScreenOn] = useState(true);
+  const [draggingPkg, setDraggingPkg] = useState<string | null>(null);
+  const [dragOverPkg, setDragOverPkg] = useState<string | null>(null);
   const [parseProgress, setParseProgress] = useState<{ total: number; parsed: number; skipped: number; current: string } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [cacheInfo, setCacheInfo] = useState<{ count: number; size: number } | null>(null);
+  const [showCacheSettings, setShowCacheSettings] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef({ x: 0, y: 0 });
@@ -149,9 +165,12 @@ export function ControlSidebar({
   useEffect(() => {
     const loadPinnedApps = async () => {
       const list = await getAppList(true);
-      const priorityApps = PRIORITY_PACKAGES.filter(pkg => list.includes(pkg));
-      setPinnedApps(priorityApps);
-      getCachedAppLabels(priorityApps).then((labels) => {
+      // Get pinned apps from user preferences
+      const pinnedFromPrefs = await appPrefs.getPinnedApps();
+      // Filter to only apps that exist on device
+      const pinnedOnDevice = pinnedFromPrefs.filter(pkg => list.includes(pkg));
+      setPinnedApps(pinnedOnDevice);
+      getCachedAppLabels(pinnedOnDevice).then((labels) => {
         setAppLabels(prev => {
           const newMap = new Map(prev);
           labels.forEach((value, key) => newMap.set(key, value));
@@ -160,7 +179,7 @@ export function ControlSidebar({
       });
     };
     loadPinnedApps();
-  }, [getAppList, getCachedAppLabels]);
+  }, [getAppList, getCachedAppLabels, appPrefs]);
 
   const filteredPinned = pinnedApps.filter(
     (pkg) => !query || pkg.toLowerCase().includes(query) || (appLabels.get(pkg) || '').toLowerCase().includes(query),
@@ -184,8 +203,10 @@ export function ControlSidebar({
       // 先尝试从缓存读取（后台自动解析可能已完成）
       const cachedPackages = await scrcpy.getAllCachedPackages();
       if (cachedPackages.length > 0) {
-        setApps(cachedPackages);
-        const labels = await scrcpy.getCachedAppLabels(cachedPackages);
+        // Sort apps using three-tier sorting
+        const sortedApps = await appPrefs.getSortedApps(cachedPackages);
+        setApps(sortedApps);
+        const labels = await scrcpy.getCachedAppLabels(sortedApps);
         setAppLabels(labels);
         setLoading(false);
         return;
@@ -196,8 +217,10 @@ export function ControlSidebar({
 
       // DEX 完成后从缓存读取最终结果
       const allPackages = await scrcpy.getAllCachedPackages();
-      setApps(allPackages);
-      const labels = await scrcpy.getCachedAppLabels(allPackages);
+      // Sort apps using three-tier sorting
+      const sortedApps = await appPrefs.getSortedApps(allPackages);
+      setApps(sortedApps);
+      const labels = await scrcpy.getCachedAppLabels(sortedApps);
       setAppLabels(labels);
       setParseProgress(null);
     } catch {
@@ -205,16 +228,87 @@ export function ControlSidebar({
     } finally {
       setLoading(false);
     }
-  }, [parseAllApps, scrcpy]);
+  }, [parseAllApps, scrcpy, appPrefs]);
 
   const handleLaunchApp = useCallback(
     (pkg: string) => {
-      startApp(pkg);
-      setSearchText('');
-      setPanelMode('closed');
+      if (pinMode) {
+        // In pin mode, toggle pin status instead of launching
+        appPrefs.togglePin(pkg).then((isNowPinned) => {
+          setPinnedSet(prev => {
+            const next = new Set(prev);
+            if (isNowPinned) {
+              next.add(pkg);
+            } else {
+              next.delete(pkg);
+            }
+            return next;
+          });
+        });
+      } else {
+        startApp(pkg);
+        // Increment launch count (fire and forget)
+        appPrefs.incrementLaunchCount(pkg).catch(() => {});
+        setSearchText('');
+        setPanelMode('closed');
+      }
     },
-    [startApp],
+    [pinMode, appPrefs, startApp],
   );
+
+  const togglePinMode = useCallback(async () => {
+    if (pinMode) {
+      // Exit pin mode
+      setPinMode(false);
+      setPinnedSet(new Set());
+    } else {
+      // Enter pin mode, load current pinned list
+      const pinned = await appPrefs.getPinnedApps();
+      setPinnedSet(new Set(pinned));
+      setPinMode(true);
+    }
+  }, [pinMode, appPrefs]);
+
+  const handleDragStart = useCallback((pkg: string) => {
+    setDraggingPkg(pkg);
+  }, []);
+
+  const handleDragEnd = useCallback(() => {
+    setDraggingPkg(null);
+    setDragOverPkg(null);
+  }, []);
+
+  const handleDragOver = useCallback((pkg: string) => {
+    if (draggingPkg && draggingPkg !== pkg) {
+      setDragOverPkg(pkg);
+    }
+  }, [draggingPkg]);
+
+  const handleDrop = useCallback(async () => {
+    if (draggingPkg && dragOverPkg && draggingPkg !== dragOverPkg) {
+      // Get current pinned apps in order
+      const currentPinned = await appPrefs.getPinnedApps();
+      
+      // Find indices of the dragged and target apps
+      const fromIndex = currentPinned.indexOf(draggingPkg);
+      const toIndex = currentPinned.indexOf(dragOverPkg);
+      
+      if (fromIndex !== -1 && toIndex !== -1) {
+        // Reorder the array
+        const newPinned = [...currentPinned];
+        const [removed] = newPinned.splice(fromIndex, 1);
+        newPinned.splice(toIndex, 0, removed);
+        
+        // Save the new order
+        await appPrefs.reorderPinned(newPinned);
+        
+        // Update the sidebar display
+        setPinnedApps(newPinned);
+      }
+    }
+    setDraggingPkg(null);
+    setDragOverPkg(null);
+  }, [draggingPkg, dragOverPkg, appPrefs]);
 
   const closePanel = useCallback(() => {
     setPanelMode('closed');
@@ -268,90 +362,45 @@ export function ControlSidebar({
         <button
           onClick={() => togglePanel('apps')}
           className={`p-2 rounded-lg transition-colors ${panelMode === 'apps' ? 'bg-blue-500/30 text-blue-400' : 'text-white/50 hover:text-white hover:bg-white/10'}`}
-          title="搜索引用"
-        >
-          <Search className="w-5 h-5" />
-        </button>
-
-        <button
-          onClick={() => togglePanel('apps')}
-          className={`p-2 rounded-lg transition-colors ${panelMode === 'apps' ? 'bg-blue-500/30 text-blue-400' : 'text-white/50 hover:text-white hover:bg-white/10'}`}
-          title="全部应用"
+          title="应用列表"
         >
           <Grid className="w-5 h-5" />
         </button>
 
+        <button
+          onClick={togglePinMode}
+          className={`p-2 rounded-lg transition-colors ${pinMode ? 'bg-blue-500/30 text-blue-400' : 'text-white/50 hover:text-white hover:bg-white/10'}`}
+          title={pinMode ? '退出置顶模式' : '置顶模式'}
+        >
+          <Pin className="w-5 h-5" />
+        </button>
+
         <div className="w-8 h-px bg-white/10 my-1" />
 
-        {pinnedApps.map((pkg) => (
-          <AppIcon
-            key={pkg}
-            pkg={pkg}
-            name={appLabels.get(pkg) || pkg.split('.').pop() || pkg}
-            getAppIcon={getAppIcon}
-            onLaunch={handleLaunchApp}
-            compact
-          />
-        ))}
+        <div
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={handleDrop}
+          className="flex flex-col items-center gap-1"
+        >
+          {pinnedApps.map((pkg) => (
+            <AppIcon
+              key={pkg}
+              pkg={pkg}
+              name={appLabels.get(pkg) || pkg.split('.').pop() || pkg}
+              getAppIcon={getAppIcon}
+              onLaunch={handleLaunchApp}
+              compact
+              pinMode={pinMode}
+              isPinned={pinnedSet.has(pkg)}
+              draggable={pinMode && pinnedSet.has(pkg)}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              onDragOver={handleDragOver}
+            />
+          ))}
+        </div>
 
         <div className="flex-1" />
-
-        {isRunning && toggleVirtualKeyboard && (
-          <button
-            onClick={toggleVirtualKeyboard}
-            className={`p-2 rounded-lg transition-colors ${showVirtualKeyboard ? 'bg-blue-500/30 text-blue-400' : 'text-white/50 hover:text-white hover:bg-white/10'}`}
-            title="虚拟键盘"
-          >
-            <Keyboard className="w-5 h-5" />
-          </button>
-        )}
-
-        {isRunning && currentPreset && setShowResMenu && (
-          <div className="relative">
-            <button
-              onClick={() => setShowResMenu(!showResMenu)}
-              className="p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
-              title={`画质: ${currentPreset.label}`}
-            >
-              <ChevronDown className="w-5 h-5" />
-            </button>
-            {showResMenu && changeResolutionPreset && (
-              <div className="absolute bottom-full left-full mb-0 ml-1 bg-black/95 backdrop-blur-md border border-white/10 rounded-lg overflow-hidden z-50 min-w-[90px] shadow-xl">
-                {RESOLUTION_PRESETS.map(p => (
-                  <button
-                    key={p.key}
-                    onClick={() => changeResolutionPreset(p.key)}
-                    className={`w-full px-3 py-1.5 text-xs text-left hover:bg-white/10 transition-colors ${
-                      p.key === resolutionPreset ? 'text-blue-400 bg-blue-500/20' : 'text-white/70'
-                    }`}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {isRunning && toggleDisplayMode && (
-          <button
-            onClick={toggleDisplayMode}
-            className="p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
-            title={useMirrorMode ? '切换到虚拟屏模式' : '切换到镜像模式'}
-          >
-            <ArrowLeftRight className="w-5 h-5" />
-          </button>
-        )}
-
-        {isRunning && handleApplyNewSize && (
-          <button
-            onClick={handleApplyNewSize}
-            className="p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
-            title="重新应用窗口尺寸"
-          >
-            <Monitor className="w-5 h-5" />
-          </button>
-        )}
 
         {toggleFullscreen && (
           <button
@@ -376,13 +425,6 @@ export function ControlSidebar({
           title="桌面"
         >
           <Home className="w-5 h-5" />
-        </button>
-        <button
-          onClick={showRecentApps}
-          className="p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
-          title="最近任务"
-        >
-          <Grid className="w-5 h-5" />
         </button>
 
         {isVirtualDisplay && turnOffPhysicalScreen && turnOnPhysicalScreen && (
@@ -455,22 +497,61 @@ export function ControlSidebar({
                     {keyboardMode === 'phone' ? '📱 手机' : '⌨️ 浏览器'}
                   </button>
                 </div>
+                {isRunning && toggleDisplayMode && (
+                  <div className="flex items-center justify-between gap-3">
+                    <span>显示模式</span>
+                    <button
+                      onClick={toggleDisplayMode}
+                      className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
+                        useMirrorMode ? 'bg-blue-500/30 text-blue-400' : 'bg-white/10 text-white/60'
+                      }`}
+                    >
+                      {useMirrorMode ? '镜像' : '虚拟屏'}
+                    </button>
+                  </div>
+                )}
+                {isRunning && currentPreset && changeResolutionPreset && (
+                  <div className="flex items-center justify-between gap-3">
+                    <span>画质</span>
+                    <div className="relative">
+                      <select
+                        value={resolutionPreset}
+                        onChange={(e) => changeResolutionPreset(e.target.value as ResolutionPresetKey)}
+                        className="px-2 py-0.5 rounded text-[10px] bg-white/10 text-white/60 border-none outline-none cursor-pointer"
+                      >
+                        {RESOLUTION_PRESETS.map(p => (
+                          <option key={p.key} value={p.key}>{p.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
                 <button
-                  onClick={async () => {
-                    await scrcpy.clearAppInfoCache();
-                    const info = await scrcpy.getCacheInfo();
-                    setCacheInfo(info);
-                    setAppLabels(new Map());
+                  onClick={() => {
+                    setShowSettings(false);
+                    setShowCacheSettings(true);
                   }}
-                  className="flex items-center gap-1.5 text-red-400 hover:text-red-300 transition-colors w-full"
+                  className="flex items-center gap-1.5 text-white/60 hover:text-white transition-colors w-full"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span>清除缓存</span>
+                  <span>缓存设置</span>
                 </button>
               </div>
             </div>
           )}
         </div>
+
+        <CacheSettingsDialog
+          open={showCacheSettings}
+          onClose={() => setShowCacheSettings(false)}
+          onClearAppCache={async () => {
+            await scrcpy.clearAppInfoCache();
+            const info = await scrcpy.getCacheInfo();
+            setCacheInfo(info);
+            setAppLabels(new Map());
+          }}
+          onClearUsageData={appPrefs.clearUsageData}
+        />
       </div>
 
       {panelMode !== 'closed' && (
@@ -548,6 +629,8 @@ export function ControlSidebar({
                         name={appLabels.get(pkg) || pkg.split('.').pop() || pkg}
                         getAppIcon={getAppIcon}
                         onLaunch={handleLaunchApp}
+                        pinMode={pinMode}
+                        isPinned={pinnedSet.has(pkg)}
                       />
                     ))}
                   </div>
@@ -567,6 +650,8 @@ export function ControlSidebar({
                       name={appLabels.get(pkg) || pkg.split('.').pop() || pkg}
                       getAppIcon={getAppIcon}
                       onLaunch={handleLaunchApp}
+                      pinMode={pinMode}
+                      isPinned={pinnedSet.has(pkg)}
                     />
                   ))}
                 </div>

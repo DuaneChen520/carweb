@@ -22,7 +22,7 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   const [useMirrorMode, setUseMirrorMode] = useState(false);
   const [resolutionPreset, setResolutionPreset] = useState<ResolutionPresetKey>('original');
   const [showResMenu, setShowResMenu] = useState(false);
-  const [showVirtualKeyboard, setShowVirtualKeyboard] = useState(false);
+  const [showVirtualKeyboard] = useState(false);
   const [keyboardMode, setKeyboardMode] = useState<'phone' | 'browser'>(() => {
     return (localStorage.getItem('carweb-keyboard-mode') as 'phone' | 'browser') || 'phone';
   });
@@ -33,7 +33,7 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   const initialStartDoneRef = useRef(false);
   const lastStartedDimensionsRef = useRef<{ width: number; height: number } | null>(null);
 
-  const { startScrcpy, stopScrcpy, clearFallback, injectTouch, injectText, showKeyboard, hideKeyboard, resumeAudio, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay, fallbackToMirror, getForegroundApp, startApp, startAppOnDisplay } = useScrcpyContext();
+  const { startScrcpy, stopScrcpy, clearFallback, injectTouch, injectText, resumeAudio, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay, fallbackToMirror, getForegroundApp, startAppOnDisplay } = useScrcpyContext();
   const store = useAdbStore();
 
   // 检测虚拟屏回退到镜像模式
@@ -240,20 +240,6 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
-  const handleApplyNewSize = useCallback(async () => {
-    if (isStarting || !store.adb) return;
-    console.log('[DEBUG-vscreen] handleApplyNewSize: 开始, 当前 displayConfig =', displayConfig ? `${displayConfig.width}x${displayConfig.height}@${displayConfig.dpi}dpi` : 'undefined',
-      ', useMirrorMode =', useMirrorMode, ', containerSize =', containerSize.width, 'x', containerSize.height);
-    const app = await getForegroundApp();
-    foregroundAppRef.current = app;
-    console.log('[DEBUG-restore] handleApplyNewSize: 获取前台应用 =', app);
-    await stopScrcpy();
-    hasStartedRef.current = true;
-    lastStartedDimensionsRef.current = null;
-    console.log('[DEBUG-vscreen] handleApplyNewSize: stopScrcpy 完成, 即将触发 restartCount++');
-    setRestartCount(c => c + 1);
-  }, [isStarting, store.adb, stopScrcpy, getForegroundApp, displayConfig, useMirrorMode, containerSize]);
-
   const toggleDisplayMode = useCallback(async () => {
     if (isStarting || !store.adb) return;
     const app = await getForegroundApp();
@@ -350,16 +336,6 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     onStop();
   }, [stopScrcpy, onStop]);
 
-  const toggleVirtualKeyboard = useCallback(async () => {
-    if (showVirtualKeyboard) {
-      await hideKeyboard();
-      setShowVirtualKeyboard(false);
-    } else {
-      await showKeyboard();
-      setShowVirtualKeyboard(true);
-    }
-  }, [showVirtualKeyboard, showKeyboard, hideKeyboard]);
-
   // Auto-focus browser input when keyboard mode is browser
   useEffect(() => {
     if (showVirtualKeyboard && keyboardMode === 'browser' && browserInputRef.current) {
@@ -378,17 +354,12 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
         isFullscreen={isFullscreen}
         toggleFullscreen={toggleFullscreen}
         toggleDisplayMode={toggleDisplayMode}
-        handleApplyNewSize={handleApplyNewSize}
         handleStop={handleStop}
-        toggleVirtualKeyboard={toggleVirtualKeyboard}
-        showVirtualKeyboard={showVirtualKeyboard}
         keyboardMode={keyboardMode}
         setKeyboardMode={setKeyboardMode}
         currentPreset={currentPreset}
         resolutionPreset={resolutionPreset}
         changeResolutionPreset={changeResolutionPreset}
-        showResMenu={showResMenu}
-        setShowResMenu={setShowResMenu}
       />
 
       <div
