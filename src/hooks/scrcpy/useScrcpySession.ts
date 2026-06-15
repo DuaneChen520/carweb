@@ -177,6 +177,19 @@ export function useScrcpySession() {
         videoHeight: height,
         isVirtualDisplay: useVirtualDisplay,
       }));
+
+      // 后台自动同步应用列表
+      appManager.syncWithDevice(adb).then(async (syncResult) => {
+        if (syncResult.toParse.length > 0) {
+          console.log(`[ScrcpySession] 需要解析 ${syncResult.toParse.length} 个应用`);
+          // 执行完整 dex 解析
+          await appManager.parseAllApps(false);
+        } else {
+          console.log('[ScrcpySession] 缓存完全命中，跳过 dex 解析');
+        }
+      }).catch((err) => {
+        console.warn('[ScrcpySession] 后台同步应用列表失败:', err);
+      });
     } catch (error) {
       if (!isRetry && displayConfig && error instanceof AdbScrcpyExitedError) {
         console.warn('虚拟屏创建失败，回退到镜像模式');

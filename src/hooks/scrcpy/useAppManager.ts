@@ -5,7 +5,7 @@ import {
   getAppLabel as fetchAppLabel,
   batchGetAppLabels as fetchBatchAppLabels,
 } from '@/lib/adb-commands';
-import { AppInfoService, type ParseProgress } from '@/lib/app-info-service';
+import { AppInfoService, type ParseProgress, type SyncResult } from '@/lib/app-info-service';
 
 export function useAppManager() {
   const adbRef = useRef<Adb | null>(null);
@@ -99,6 +99,10 @@ export function useAppManager() {
     return serviceRef.current.getAllCachedPackages();
   }, []);
 
+  const syncWithDevice = useCallback(async (adb: Adb, signal?: AbortSignal): Promise<SyncResult> => {
+    return serviceRef.current.syncWithDevice(adb, signal);
+  }, []);
+
   return useMemo(() => ({
     setAdb,
     getAppList,
@@ -111,7 +115,8 @@ export function useAppManager() {
     getAllCachedPackages,
     clearAppInfoCache,
     getCacheInfo,
-  }), [setAdb, getAppList, getAppLabel, getAppIcon, batchGetAppLabels, parseAllApps, abortParseApps, getCachedAppLabels, getAllCachedPackages, clearAppInfoCache, getCacheInfo]);
+    syncWithDevice,
+  }), [setAdb, getAppList, getAppLabel, getAppIcon, batchGetAppLabels, parseAllApps, abortParseApps, getCachedAppLabels, getAllCachedPackages, clearAppInfoCache, getCacheInfo, syncWithDevice]);
 }
 
 function formatPackageName(pkg: string): string {
