@@ -60,13 +60,12 @@ export function useAppManager() {
   }, []);
 
   const parseAllApps = useCallback(async (
-    includeSystem: boolean = false,
     onProgress?: (progress: ParseProgress) => void
   ): Promise<void> => {
     const adb = adbRef.current;
     if (!adb) return;
 
-    await serviceRef.current.parseAllApps(adb, includeSystem, onProgress);
+    await serviceRef.current.parseAllApps(adb, onProgress);
   }, []);
 
   const abortParseApps = useCallback(() => {

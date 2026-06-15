@@ -33,7 +33,6 @@ export class AppInfoService {
 
   async parseAllApps(
     adb: Adb,
-    includeSystem: boolean = false,
     onProgress?: ParseCallback
   ): Promise<Map<string, AppInfo>> {
     if (this.parsing) {

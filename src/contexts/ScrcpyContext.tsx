@@ -30,7 +30,7 @@ interface ScrcpyContextValue extends ScrcpyState {
   getAppIcon: (pkg: string) => Promise<string | null>;
   getAppLabel: (pkg: string) => Promise<string>;
   batchGetAppLabels: (packages: string[]) => Promise<Map<string, string>>;
-  parseAllApps: (includeSystem: boolean, onProgress?: (progress: ParseProgress) => void) => Promise<void>;
+  parseAllApps: (onProgress?: (progress: ParseProgress) => void) => Promise<void>;
   abortParseApps: () => void;
   getCachedAppLabels: (packages: string[]) => Promise<Map<string, string>>;
   getAllCachedPackages: () => Promise<string[]>;

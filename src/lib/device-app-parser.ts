@@ -187,14 +187,15 @@ echo "APP_PROCESS EXIT CODE: $?" >&2
 `;
   }
 
-  private async pushScript(adb: Adb, scriptContent: string): Promise<void> {
+  private async pushScript(adb: Adb, scriptContent: string, targetPath?: string): Promise<void> {
     const encoder = new TextEncoder();
     const scriptBytes = encoder.encode(scriptContent);
+    const scriptPath = targetPath || DeviceAppParser.SCRIPT_PATH;
 
-    console.log(`[DeviceAppParser] 推送脚本到设备: ${DeviceAppParser.SCRIPT_PATH}`);
+    console.log(`[DeviceAppParser] 推送脚本到设备: ${scriptPath}`);
     const sync = await adb.sync();
     await sync.write({
-      filename: DeviceAppParser.SCRIPT_PATH,
+      filename: scriptPath,
       file: new ReadableStream({
         start(controller) {
           controller.enqueue(scriptBytes);
@@ -204,7 +205,7 @@ echo "APP_PROCESS EXIT CODE: $?" >&2
     });
 
     // Make script executable
-    await adb.subprocess.noneProtocol.spawnWaitText(['chmod', '755', DeviceAppParser.SCRIPT_PATH]);
+    await adb.subprocess.noneProtocol.spawnWaitText(['chmod', '755', scriptPath]);
     console.log('[DeviceAppParser] 脚本推送完成');
   }
 
@@ -214,7 +215,7 @@ echo "APP_PROCESS EXIT CODE: $?" >&2
 
     // Generate and push script
     const scriptContent = this.generateScript(targetPath);
-    await this.pushScript(adb, scriptContent);
+    await this.pushScript(adb, scriptContent, DeviceAppParser.SCRIPT_PATH);
 
     console.log('[DeviceAppParser] 在设备上执行脚本...');
     console.log(`[DeviceAppParser] 脚本路径: ${DeviceAppParser.SCRIPT_PATH}`);
@@ -251,7 +252,7 @@ echo "APP_PROCESS EXIT CODE: $?" >&2
     validateTargetPath(targetPath);
 
     const scriptContent = this.generateQuickScript(targetPath);
-    await this.pushScript(adb, scriptContent);
+    await this.pushScript(adb, scriptContent, DeviceAppParser.QUICK_SCRIPT_PATH);
 
     console.log('[DeviceAppParser] 在设备上执行 Quick 脚本...');
     const startTime = Date.now();

@@ -192,7 +192,7 @@ export function ControlSidebar({
       }
 
       // 缓存为空，触发 DEX 解析
-      await parseAllApps(false, (p) => setParseProgress(p));
+      await parseAllApps((p) => setParseProgress(p));
 
       // DEX 完成后从缓存读取最终结果
       const allPackages = await scrcpy.getAllCachedPackages();

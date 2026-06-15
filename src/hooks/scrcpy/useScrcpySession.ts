@@ -183,7 +183,7 @@ export function useScrcpySession() {
         if (syncResult.toParse.length > 0) {
           console.log(`[ScrcpySession] 需要解析 ${syncResult.toParse.length} 个应用`);
           // 执行完整 dex 解析
-          await appManager.parseAllApps(false);
+          await appManager.parseAllApps();
         } else {
           console.log('[ScrcpySession] 缓存完全命中，跳过 dex 解析');
         }
