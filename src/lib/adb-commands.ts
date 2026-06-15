@@ -284,6 +284,22 @@ export async function forceStopPackage(adb: Adb, packageName: string): Promise<v
   }
 }
 
+export async function killScrcpyServer(adb: Adb, deleteJar = false): Promise<void> {
+  try {
+    // 杀掉设备上所有 scrcpy 进程
+    await runAdbCommand(adb, 'pkill -f scrcpy 2>/dev/null || true');
+  } catch {
+    // ignore
+  }
+  if (deleteJar) {
+    try {
+      await runAdbCommand(adb, 'rm -f /data/local/tmp/scrcpy-server.jar');
+    } catch {
+      // ignore
+    }
+  }
+}
+
 function formatPackageName(pkg: string): string {
   const segments = pkg.split('.');
   const last = segments[segments.length - 1];

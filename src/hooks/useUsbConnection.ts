@@ -3,6 +3,7 @@ import { Adb, AdbDaemonTransport } from '@yume-chan/adb';
 import { AdbDaemonWebUsbDeviceManager } from '@yume-chan/adb-daemon-webusb';
 import AdbWebCredentialStore from '@yume-chan/adb-credential-web';
 import { useAdbStore } from './useAdbStore';
+import { killScrcpyServer } from '@/lib/adb-commands';
 
 export function useUsbConnection() {
   const store = useAdbStore();
@@ -39,6 +40,9 @@ export function useUsbConnection() {
       });
 
       const adb = new Adb(transport);
+
+      // 清理设备上残留的 scrcpy 进程和 jar 文件（页面刷新/关闭后可能残留）
+      await killScrcpyServer(adb, true);
 
       store.setAdb(adb);
       store.setDeviceInfo(device.name || '未知设备', device.serial);

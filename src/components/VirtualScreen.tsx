@@ -29,21 +29,13 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
   const browserInputRef = useRef<HTMLInputElement>(null);
   const hasStartedRef = useRef(false);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const initialStartTimerRef = useRef<NodeJS.Timeout | null>(null);
   const foregroundAppRef = useRef<string | null>(null);
   const initialStartDoneRef = useRef(false);
   const lastStartedDimensionsRef = useRef<{ width: number; height: number } | null>(null);
 
-  const { startScrcpy, stopScrcpy, clearFallback, injectTouch, injectText, resumeAudio, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay, fallbackToMirror, getForegroundApp, startAppOnDisplay } = useScrcpyContext();
+  const { startScrcpy, stopScrcpy, injectTouch, injectText, resumeAudio, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay, getForegroundApp, startAppOnDisplay } = useScrcpyContext();
   const store = useAdbStore();
-
-  // 检测虚拟屏回退到镜像模式
-  useEffect(() => {
-    if (fallbackToMirror && isRunning && !useMirrorMode) {
-      console.warn('[DEBUG-vscreen] 检测到虚拟屏回退到镜像模式，同步 useMirrorMode');
-      setUseMirrorMode(true);
-      clearFallback();
-    }
-  }, [fallbackToMirror, isRunning, useMirrorMode, clearFallback]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -77,30 +69,46 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
     };
   }, [containerSize.width, containerSize.height, useMirrorMode, currentPreset, dpr]);
 
-  // 启动/重启 scrcpy：仅在 restartCount 变化时触发
+  // 启动/重启 scrcpy
   useEffect(() => {
     const canvas = canvasRef.current;
     const adb = store.adb;
     if (!canvas || !adb) return;
 
-    // 首次启动
-    if (!isRunning && !isStarting && !hasStartedRef.current) {
-      hasStartedRef.current = true;
+    // 虚拟屏模式下，必须等容器尺寸测量完成才能启动
+    if (!useMirrorMode && (containerSize.width === 0 || containerSize.height === 0)) return;
 
-      if (useMirrorMode || containerSize.width === 0 || containerSize.height === 0) {
-        startScrcpy(adb, canvas);
-        lastStartedDimensionsRef.current = null;
-      } else {
-        startScrcpy(adb, canvas, displayConfig);
-        lastStartedDimensionsRef.current = displayConfig ? { width: displayConfig.width, height: displayConfig.height } : null;
-      }
-      initialStartDoneRef.current = true;
-      return;
+    // 首次启动：等布局稳定后再启动，避免侧边栏渲染等导致的尺寸微调触发不必要的重启
+    if (!isRunning && !isStarting && !hasStartedRef.current) {
+      if (initialStartTimerRef.current) clearTimeout(initialStartTimerRef.current);
+
+      initialStartTimerRef.current = setTimeout(() => {
+        if (hasStartedRef.current) return;
+        hasStartedRef.current = true;
+        console.log('[VirtualScreen] 首次启动 scrcpy');
+
+        if (useMirrorMode) {
+          startScrcpy(adb, canvas);
+          lastStartedDimensionsRef.current = null;
+        } else {
+          startScrcpy(adb, canvas, displayConfig);
+          lastStartedDimensionsRef.current = displayConfig ? { width: displayConfig.width, height: displayConfig.height } : null;
+        }
+        initialStartDoneRef.current = true;
+      }, 200);
+
+      return () => {
+        if (initialStartTimerRef.current) {
+          clearTimeout(initialStartTimerRef.current);
+          initialStartTimerRef.current = null;
+        }
+      };
     }
 
     // 重启场景：isRunning=false 且 isStarting=false 且已经启动过
     if (!isRunning && !isStarting && hasStartedRef.current && initialStartDoneRef.current) {
-      if (useMirrorMode || containerSize.width === 0 || containerSize.height === 0) {
+      console.log('[VirtualScreen] 重启 scrcpy (isRunning=false, isStarting=false)');
+      if (useMirrorMode) {
         startScrcpy(adb, canvas);
         lastStartedDimensionsRef.current = null;
       } else {
@@ -108,7 +116,7 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
         lastStartedDimensionsRef.current = displayConfig ? { width: displayConfig.width, height: displayConfig.height } : null;
       }
     }
-  }, [store.adb, isRunning, isStarting, restartCount, useMirrorMode, startScrcpy]);
+  }, [store.adb, isRunning, isStarting, restartCount, useMirrorMode, containerSize.width, containerSize.height, displayConfig, startScrcpy]);
 
   // 窗口尺寸变化时：防抖 500ms → 获取前台应用 → 停止 scrcpy → 通过 restartCount 触发重启
   useEffect(() => {
@@ -396,20 +404,6 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
                     尝试切换到镜像模式
                   </button>
                 )}
-              </div>
-            </div>
-          )}
-
-          {fallbackToMirror && isRunning && (
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30">
-              <div className="bg-amber-500/90 backdrop-blur-md text-white px-4 py-2 rounded-lg shadow-xl flex items-center gap-2 text-sm">
-                <span>虚拟屏创建失败，已回退到镜像模式</span>
-                <button
-                  onClick={() => clearFallback()}
-                  className="text-white/70 hover:text-white ml-2"
-                >
-                  ✕
-                </button>
               </div>
             </div>
           )}

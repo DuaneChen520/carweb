@@ -4,9 +4,8 @@ import type { Adb } from '@yume-chan/adb';
 import type { ParseProgress } from '@/lib/app-info-service';
 
 interface ScrcpyContextValue extends ScrcpyState {
-  startScrcpy: (adb: Adb, canvas: HTMLCanvasElement, displayConfig?: DisplayConfig, isRetry?: boolean) => Promise<void>;
+  startScrcpy: (adb: Adb, canvas: HTMLCanvasElement, displayConfig?: DisplayConfig) => Promise<void>;
   stopScrcpy: () => Promise<void>;
-  clearFallback: () => void;
   injectTouch: (message: {
     action: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
     pointerId: bigint;
@@ -63,10 +62,8 @@ export function ScrcpyProvider({ children }: { children: ReactNode }) {
     session.videoWidth,
     session.videoHeight,
     session.isVirtualDisplay,
-    session.fallbackToMirror,
     session.startScrcpy,
     session.stopScrcpy,
-    session.clearFallback,
     session.injectTouch,
     session.injectText,
     session.showKeyboard,

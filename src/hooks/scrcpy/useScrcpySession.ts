@@ -9,6 +9,7 @@ import { useAudioDecoder } from './useAudioDecoder';
 import { useInputInjector } from './useInputInjector';
 import { useAppManager } from './useAppManager';
 import {
+  runAdbCommand,
   getRotationState,
   setRotationLocked,
   restoreRotation,
@@ -23,6 +24,7 @@ import {
   startAppOnDisplay,
   getDefaultHomePackage,
   forceStopPackage,
+  killScrcpyServer,
 } from '@/lib/adb-commands';
 import type { RotationState } from '@/lib/adb-commands';
 
@@ -55,7 +57,6 @@ export interface ScrcpyState {
   videoWidth: number;
   videoHeight: number;
   isVirtualDisplay: boolean;
-  fallbackToMirror: boolean;
 }
 
 export function useScrcpySession() {
@@ -66,7 +67,6 @@ export function useScrcpySession() {
     videoWidth: 0,
     videoHeight: 0,
     isVirtualDisplay: false,
-    fallbackToMirror: false,
   });
 
   const clientRef = useRef<AdbScrcpyClient<AdbScrcpyOptionsLatest<true>> | null>(null);
@@ -74,13 +74,23 @@ export function useScrcpySession() {
   const adbRef = useRef<Adb | null>(null);
   const rotationStateRef = useRef<RotationState | null>(null);
   const displayIdRef = useRef<number | null>(null);
+  const startingLockRef = useRef<boolean>(false);
 
   const videoDecoder = useVideoDecoder();
   const audioDecoder = useAudioDecoder();
   const inputInjector = useInputInjector(controllerRef);
   const appManager = useAppManager();
 
-  const startScrcpy = useCallback(async (adb: Adb, canvas: HTMLCanvasElement, displayConfig?: DisplayConfig, isRetry?: boolean) => {
+  const startScrcpy = useCallback(async (adb: Adb, canvas: HTMLCanvasElement, displayConfig?: DisplayConfig) => {
+    // 防止并行调用
+    if (startingLockRef.current) {
+      console.warn('[Scrcpy] startScrcpy 被跳过：已有启动正在进行中');
+      return;
+    }
+    startingLockRef.current = true;
+
+    const startTime = Date.now();
+    console.log(`[Scrcpy] startScrcpy 开始, displayConfig:`, displayConfig ? `${displayConfig.width}x${displayConfig.height}` : 'mirror');
     try {
       displayIdRef.current = null;
       setState(prev => ({ ...prev, isStarting: true, error: null, videoWidth: 0, videoHeight: 0 }));
@@ -89,26 +99,33 @@ export function useScrcpySession() {
       const { ReadableStream } = await import('@yume-chan/stream-extra');
 
       const serverPath = '/data/local/tmp/scrcpy-server.jar';
-      try {
-        const response = await fetch(import.meta.env.BASE_URL + 'scrcpy-server.jar');
-        if (response.ok) {
-          const arrayBuffer = await response.arrayBuffer();
-          if (arrayBuffer.byteLength > 0) {
-            await AdbScrcpyClient.pushServer(
-              adb,
-              new ReadableStream({
-                start(controller) {
-                  controller.enqueue(new Uint8Array(arrayBuffer));
-                  controller.close();
-                },
-              }),
-              serverPath,
-            );
-          }
-        }
-      } catch (pushError) {
-        console.warn('推送 scrcpy-server.jar 失败，尝试使用设备上已有的文件:', pushError);
+      console.log(`[Scrcpy] ${Date.now() - startTime}ms - 开始获取 scrcpy-server.jar`);
+      const response = await fetch(import.meta.env.BASE_URL + 'scrcpy-server.jar');
+      if (!response.ok) {
+        throw new Error(`获取 scrcpy-server.jar 失败: HTTP ${response.status}`);
       }
+      const arrayBuffer = await response.arrayBuffer();
+      if (arrayBuffer.byteLength === 0) {
+        throw new Error('scrcpy-server.jar 文件为空');
+      }
+      console.log(`[Scrcpy] ${Date.now() - startTime}ms - 开始推送 scrcpy-server.jar (${arrayBuffer.byteLength} bytes)`);
+      await AdbScrcpyClient.pushServer(
+        adb,
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array(arrayBuffer));
+            controller.close();
+          },
+        }),
+        serverPath,
+      );
+      console.log(`[Scrcpy] ${Date.now() - startTime}ms - 推送完成，开始验证`);
+      // 验证文件已推送到设备
+      const verifyOutput = await runAdbCommand(adb, `ls -la ${serverPath} 2>&1`);
+      if (verifyOutput.includes('No such file') || verifyOutput.includes('not found')) {
+        throw new Error('scrcpy-server.jar 推送验证失败：设备上未找到文件');
+      }
+      console.log(`[Scrcpy] ${Date.now() - startTime}ms - 验证通过: ${verifyOutput}`);
 
       const useVirtualDisplay = !!displayConfig;
       const options = new AdbScrcpyOptionsLatest({
@@ -129,7 +146,9 @@ export function useScrcpySession() {
           : { displayId: 0 }
         ),
       });
+      console.log(`[Scrcpy] ${Date.now() - startTime}ms - 开始 AdbScrcpyClient.start()`);
       const client = await AdbScrcpyClient.start(adb, serverPath, options);
+      console.log(`[Scrcpy] ${Date.now() - startTime}ms - AdbScrcpyClient.start() 成功`);
       clientRef.current = client;
       adbRef.current = adb;
       appManager.setAdb(adb);
@@ -191,25 +210,21 @@ export function useScrcpySession() {
         console.warn('[ScrcpySession] 后台同步应用列表失败:', err);
       });
     } catch (error) {
-      if (!isRetry && displayConfig && error instanceof AdbScrcpyExitedError) {
-        console.warn('虚拟屏创建失败，回退到镜像模式');
-        // 设置 fallbackToMirror 标志，让 VirtualScreen 知道发生了回退
-        // 递归调用 startScrcpy 时，...prev 会保留 fallbackToMirror: true
-        setState(prev => ({ ...prev, isStarting: true, error: null, fallbackToMirror: true }));
-        return startScrcpy(adb, canvas, undefined, true);
-      }
-
+      console.error(`[Scrcpy] ${Date.now() - startTime}ms - 启动失败:`, error);
       let message = '启动屏幕镜像失败';
       if (error instanceof AdbScrcpyExitedError) {
         message = 'scrcpy server exited prematurely';
         if (error.output.length > 0) {
           message += ': ' + error.output.join('; ');
         }
+        console.error(`[Scrcpy] server 输出:`, error.output);
       } else if (error instanceof Error) {
         message = error.message;
       }
       setState(prev => ({ ...prev, isStarting: false, error: message }));
       console.error('Scrcpy 启动错误:', error);
+    } finally {
+      startingLockRef.current = false;
     }
   }, [videoDecoder, audioDecoder, appManager]);
 
@@ -238,6 +253,11 @@ export function useScrcpySession() {
         clientRef.current = null;
       }
 
+      // 确保设备上的 scrcpy server 进程被杀掉，并清理 jar 文件
+      if (adb) {
+        await killScrcpyServer(adb, true).catch(() => {});
+      }
+
       displayIdRef.current = null;
 
       // 立即更新状态，不等待虚拟屏销毁
@@ -248,12 +268,11 @@ export function useScrcpySession() {
         videoWidth: 0,
         videoHeight: 0,
         isVirtualDisplay: false,
-        fallbackToMirror: false,
       });
     } catch (error) {
       console.error('停止 Scrcpy 错误:', error);
     }
-  }, [videoDecoder, audioDecoder]);
+  }, [videoDecoder, audioDecoder, rotationStateRef]);
 
   const showKeyboard = useCallback(async () => {
     const adb = adbRef.current;
@@ -359,15 +378,10 @@ export function useScrcpySession() {
     }
   }, [ensureDisplayId]);
 
-  const clearFallback = useCallback(() => {
-    setState(prev => ({ ...prev, fallbackToMirror: false }));
-  }, []);
-
   return {
     ...state,
     startScrcpy,
     stopScrcpy,
-    clearFallback,
     injectTouch: inputInjector.injectTouch,
     injectText: inputInjector.injectText,
     showKeyboard,
