@@ -66,6 +66,9 @@ describe('DeviceAppParser', () => {
 
   it('should execute DEX file on device', async () => {
     const mockAdb = {
+      sync: vi.fn().mockResolvedValue({
+        write: vi.fn().mockResolvedValue(undefined),
+      }),
       subprocess: {
         noneProtocol: {
           spawnWaitText: vi.fn().mockResolvedValue('{"apps":[],"errors":[]}'),
@@ -122,23 +125,24 @@ describe('DeviceAppParser', () => {
 
     const result = await parser.cleanupDex(mockAdb, '/data/local/tmp/test.dex');
     expect(result).toBe(true);
-    expect(mockSpawn).toHaveBeenCalledWith("rm -f '/data/local/tmp/test.dex'");
+    expect(mockSpawn).toHaveBeenCalledWith("rm -f '/data/local/tmp/test.dex' '/data/local/tmp/run-app-info.sh'");
   });
 
   it('should parse all apps end-to-end', async () => {
+    const jsonPayload = JSON.stringify({
+      apps: [{ packageName: 'com.example', label: 'Example', iconBase64: null, versionCode: 1 }],
+      errors: [],
+    });
     const mockAdb = {
       sync: vi.fn().mockResolvedValue({
         write: vi.fn().mockResolvedValue(undefined),
       }),
       subprocess: {
         noneProtocol: {
-          spawnWaitText: vi.fn().mockResolvedValue(JSON.stringify({
-            apps: [{ packageName: 'com.example', label: 'Example', iconBase64: null, versionCode: 1 }],
-            errors: [],
-          })),
+          spawnWaitText: vi.fn().mockResolvedValue(jsonPayload),
         },
         shellProtocol: {
-          spawnWaitText: vi.fn().mockResolvedValue(''),
+          spawnWaitText: vi.fn().mockResolvedValue({ stdout: jsonPayload, stderr: '' }),
         },
       },
     } as any;
@@ -164,5 +168,115 @@ describe('DeviceAppParser', () => {
     } as any;
 
     await expect(parser.parseAllApps(mockAdb)).rejects.toThrow('execute failed');
+  });
+
+  describe('Quick DEX', () => {
+    it('should push Quick DEX file to device', async () => {
+      const mockWrite = vi.fn().mockResolvedValue(undefined);
+      const mockAdb = {
+        sync: vi.fn().mockResolvedValue({
+          write: mockWrite,
+        }),
+      } as any;
+
+      const result = await parser.pushQuickDexToDevice(mockAdb, '/data/local/tmp/test-quick.dex');
+      expect(result).toBe(true);
+      expect(mockWrite).toHaveBeenCalled();
+    });
+
+    it('should reject invalid quick dex target paths', async () => {
+      const mockAdb = {
+        sync: vi.fn().mockResolvedValue({ write: vi.fn() }),
+      } as any;
+
+      await expect(parser.pushQuickDexToDevice(mockAdb, '/etc/passwd')).rejects.toThrow('Invalid target path');
+      await expect(parser.pushQuickDexToDevice(mockAdb, 'relative/path.dex')).rejects.toThrow('Invalid target path');
+    });
+
+    it('should execute Quick DEX on device', async () => {
+      const mockAdb = {
+        sync: vi.fn().mockResolvedValue({
+          write: vi.fn().mockResolvedValue(undefined),
+        }),
+        subprocess: {
+          noneProtocol: {
+            spawnWaitText: vi.fn().mockResolvedValue('{"apps":[{"packageName":"com.test","versionCode":1}]}'),
+          },
+          shellProtocol: {
+            spawnWaitText: vi.fn().mockResolvedValue({ stdout: '{"apps":[{"packageName":"com.test","versionCode":1}]}', stderr: '' }),
+          },
+        },
+      } as any;
+
+      const result = await parser.executeQuickDex(mockAdb, '/data/local/tmp/test-quick.dex');
+      expect(result.apps).toHaveLength(1);
+      expect(result.apps[0].packageName).toBe('com.test');
+      expect(result.apps[0].versionCode).toBe(1);
+    });
+
+    it('should parse Quick JSON result correctly', () => {
+      const jsonResult = '{"apps":[{"packageName":"com.example","versionCode":42}]}';
+      const result = parser.parseQuickJsonResult(jsonResult);
+      expect(result.apps).toHaveLength(1);
+      expect(result.apps[0].packageName).toBe('com.example');
+      expect(result.apps[0].versionCode).toBe(42);
+    });
+
+    it('should throw on Quick DEX error response', () => {
+      expect(() => parser.parseQuickJsonResult('Error: something failed')).toThrow('Quick DEX execution failed');
+      expect(() => parser.parseQuickJsonResult('Exception: crash')).toThrow('Quick DEX execution failed');
+    });
+
+    it('should handle missing apps array in Quick JSON', () => {
+      expect(() => parser.parseQuickJsonResult('{"errors":[]}')).toThrow('Invalid quick result structure');
+    });
+
+    it('should filter invalid entries in Quick JSON', () => {
+      const jsonResult = JSON.stringify({
+        apps: [
+          { packageName: 'com.good', versionCode: 1 },
+          { packageName: null, versionCode: 1 },
+          { packageName: 'com.noversion' },
+          'invalid-string',
+        ],
+      });
+      const result = parser.parseQuickJsonResult(jsonResult);
+      expect(result.apps).toHaveLength(1);
+      expect(result.apps[0].packageName).toBe('com.good');
+    });
+
+    it('should cleanup Quick DEX from device', async () => {
+      const mockSpawn = vi.fn().mockResolvedValue('');
+      const mockAdb = {
+        subprocess: {
+          shellProtocol: {
+            spawnWaitText: mockSpawn,
+          },
+        },
+      } as any;
+
+      const result = await parser.cleanupQuickDex(mockAdb, '/data/local/tmp/test-quick.dex');
+      expect(result).toBe(true);
+      expect(mockSpawn).toHaveBeenCalledWith("rm -f '/data/local/tmp/test-quick.dex' '/data/local/tmp/run-app-info-quick.sh'");
+    });
+
+    it('should fetch quick package list end-to-end', async () => {
+      const mockWrite = vi.fn().mockResolvedValue(undefined);
+      const mockAdb = {
+        sync: vi.fn().mockResolvedValue({ write: mockWrite }),
+        subprocess: {
+          noneProtocol: {
+            spawnWaitText: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+          },
+          shellProtocol: {
+            spawnWaitText: vi.fn().mockResolvedValue({ stdout: '{"apps":[{"packageName":"com.example","versionCode":1}]}', stderr: '' }),
+          },
+        },
+      } as any;
+
+      const result = await parser.fetchQuickPackageList(mockAdb);
+      expect(result.apps).toHaveLength(1);
+      expect(result.apps[0].packageName).toBe('com.example');
+    });
   });
 });

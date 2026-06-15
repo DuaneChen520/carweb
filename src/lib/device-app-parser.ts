@@ -18,6 +18,15 @@ export interface ParseResult {
   errors: AppError[];
 }
 
+export interface QuickAppInfo {
+  packageName: string;
+  versionCode: number;
+}
+
+export interface QuickParseResult {
+  apps: QuickAppInfo[];
+}
+
 const SAFE_PATH_PATTERN = /^\/data\/local\/tmp\/[\w.-]+\.dex$/;
 
 function validateTargetPath(path: string): void {
@@ -30,9 +39,13 @@ function validateTargetPath(path: string): void {
 
 export class DeviceAppParser {
   private static readonly DEX_URL = import.meta.env.BASE_URL + 'app-info-fetcher.dex';
+  private static readonly QUICK_DEX_URL = import.meta.env.BASE_URL + 'app-info-fetcher-quick.dex';
   private static readonly DEFAULT_DEX_PATH = '/data/local/tmp/app-info-fetcher.dex';
+  private static readonly QUICK_DEX_PATH = '/data/local/tmp/app-info-fetcher-quick.dex';
   private static readonly SCRIPT_PATH = '/data/local/tmp/run-app-info.sh';
+  private static readonly QUICK_SCRIPT_PATH = '/data/local/tmp/run-app-info-quick.sh';
   private cachedDexData: ArrayBuffer | null = null;
+  private cachedQuickDexData: ArrayBuffer | null = null;
 
   private async fetchDexData(): Promise<ArrayBuffer> {
     if (this.cachedDexData) {
@@ -56,6 +69,28 @@ export class DeviceAppParser {
     return arrayBuffer;
   }
 
+  private async fetchQuickDexData(): Promise<ArrayBuffer> {
+    if (this.cachedQuickDexData) {
+      console.log('[DeviceAppParser] 使用缓存的 Quick DEX 数据');
+      return this.cachedQuickDexData;
+    }
+
+    console.log('[DeviceAppParser] 从服务器下载 Quick DEX 文件...');
+    const response = await fetch(DeviceAppParser.QUICK_DEX_URL);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch Quick DEX file: ${response.statusText}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    if (arrayBuffer.byteLength === 0) {
+      throw new Error('Quick DEX file is empty');
+    }
+
+    console.log(`[DeviceAppParser] Quick DEX 下载完成: ${arrayBuffer.byteLength} bytes`);
+    this.cachedQuickDexData = arrayBuffer;
+    return arrayBuffer;
+  }
+
   async pushDexToDevice(adb: Adb, dexPath?: string): Promise<boolean> {
     const targetPath = dexPath || DeviceAppParser.DEFAULT_DEX_PATH;
     validateTargetPath(targetPath);
@@ -74,6 +109,27 @@ export class DeviceAppParser {
     });
 
     console.log('[DeviceAppParser] DEX 推送完成');
+    return true;
+  }
+
+  async pushQuickDexToDevice(adb: Adb, dexPath?: string): Promise<boolean> {
+    const targetPath = dexPath || DeviceAppParser.QUICK_DEX_PATH;
+    validateTargetPath(targetPath);
+
+    const arrayBuffer = await this.fetchQuickDexData();
+    console.log(`[DeviceAppParser] 推送 Quick DEX 到设备: ${targetPath}`);
+    const sync = await adb.sync();
+    await sync.write({
+      filename: targetPath,
+      file: new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array(arrayBuffer));
+          controller.close();
+        },
+      }),
+    });
+
+    console.log('[DeviceAppParser] Quick DEX 推送完成');
     return true;
   }
 
@@ -106,6 +162,27 @@ ls -la ${dexPath} >&2
 # Run the AppInfoFetcher - stderr stays on stderr (diagnostic), stdout is JSON
 echo "RUNNING APP_PROCESS..." >&2
 app_process /system/bin com.carweb.appinfo.AppInfoFetcher
+echo "APP_PROCESS EXIT CODE: $?" >&2
+`;
+  }
+
+  private generateQuickScript(dexPath: string): string {
+    return `#!/system/bin/sh
+# Auto-generated script for running AppInfoFetcherQuick
+# Do not edit - this script is managed by CarWeb
+
+echo "QUICK SCRIPT START" >&2
+
+export ANDROID_DATA=/data
+export ANDROID_ROOT=/system
+export CLASSPATH=${dexPath}
+
+mkdir -p /data/dalvik-cache
+
+ls -la ${dexPath} >&2
+
+echo "RUNNING QUICK APP_PROCESS..." >&2
+app_process /system/bin com.carweb.appinfo.AppInfoFetcherQuick
 echo "APP_PROCESS EXIT CODE: $?" >&2
 `;
   }
@@ -167,6 +244,111 @@ echo "APP_PROCESS EXIT CODE: $?" >&2
     console.log(`[DeviceAppParser] 脚本执行完成, 耗时: ${elapsed}ms`);
     console.log(`[DeviceAppParser] 原始响应前500字符: ${result.substring(0, 500)}`);
     return this.parseJsonResult(result);
+  }
+
+  async executeQuickDex(adb: Adb, dexPath?: string): Promise<QuickParseResult> {
+    const targetPath = dexPath || DeviceAppParser.QUICK_DEX_PATH;
+    validateTargetPath(targetPath);
+
+    const scriptContent = this.generateQuickScript(targetPath);
+    await this.pushScript(adb, scriptContent);
+
+    console.log('[DeviceAppParser] 在设备上执行 Quick 脚本...');
+    const startTime = Date.now();
+    const DEX_TIMEOUT_MS = 15_000;
+
+    let resultPromise: Promise<string>;
+    if (adb.subprocess.shellProtocol) {
+      resultPromise = adb.subprocess.shellProtocol.spawnWaitText(['sh', DeviceAppParser.QUICK_SCRIPT_PATH])
+        .then((waitResult) => {
+          const combined = waitResult.stdout + waitResult.stderr;
+          console.log(`[DeviceAppParser] Quick stdout: ${waitResult.stdout.substring(0, 200)}`);
+          console.log(`[DeviceAppParser] Quick stderr: ${waitResult.stderr.substring(0, 500)}`);
+          return combined;
+        });
+    } else {
+      resultPromise = adb.subprocess.noneProtocol.spawnWaitText(['sh', DeviceAppParser.QUICK_SCRIPT_PATH]);
+    }
+
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Quick DEX execution timed out')), DEX_TIMEOUT_MS)
+    );
+
+    const result = await Promise.race([resultPromise, timeoutPromise]);
+    const elapsed = Date.now() - startTime;
+    console.log(`[DeviceAppParser] Quick 脚本执行完成, 耗时: ${elapsed}ms`);
+    return this.parseQuickJsonResult(result);
+  }
+
+  parseQuickJsonResult(jsonString: string): QuickParseResult {
+    console.log(`[DeviceAppParser] Quick 响应: ${jsonString.length} bytes`);
+
+    if (jsonString.startsWith('Error:') || jsonString.startsWith('Exception:')) {
+      throw new Error(`Quick DEX execution failed: ${jsonString}`);
+    }
+
+    const jsonEnd = jsonString.lastIndexOf('}');
+    if (jsonEnd > 0) {
+      jsonString = jsonString.substring(0, jsonEnd + 1);
+    }
+
+    const result = JSON.parse(jsonString) as Record<string, unknown>;
+
+    if (!result.apps || !Array.isArray(result.apps)) {
+      throw new Error('Invalid quick result structure: missing apps array');
+    }
+
+    const validApps: QuickAppInfo[] = [];
+    for (const raw of result.apps) {
+      if (raw == null || typeof raw !== 'object') continue;
+      const app = raw as Record<string, unknown>;
+      if (typeof app.packageName === 'string' && typeof app.versionCode === 'number') {
+        validApps.push({
+          packageName: app.packageName,
+          versionCode: app.versionCode,
+        });
+      }
+    }
+
+    console.log(`[DeviceAppParser] Quick 解析完成: ${validApps.length} 个应用`);
+    return { apps: validApps };
+  }
+
+  async fetchQuickPackageList(adb: Adb, signal?: AbortSignal): Promise<QuickParseResult> {
+    const targetPath = DeviceAppParser.QUICK_DEX_PATH;
+    const startTime = Date.now();
+
+    console.log('[DeviceAppParser] ===== 开始快速获取应用列表 =====');
+    signal?.throwIfAborted();
+
+    await this.pushQuickDexToDevice(adb, targetPath);
+
+    try {
+      signal?.throwIfAborted();
+      const result = await this.executeQuickDex(adb, targetPath);
+      const totalElapsed = Date.now() - startTime;
+      console.log(`[DeviceAppParser] ===== 快速获取完成: ${result.apps.length} 个应用, 总耗时: ${totalElapsed}ms =====`);
+      return result;
+    } finally {
+      await this.cleanupQuickDex(adb, targetPath).catch(() => {});
+    }
+  }
+
+  async cleanupQuickDex(adb: Adb, dexPath?: string): Promise<boolean> {
+    const targetPath = dexPath || DeviceAppParser.QUICK_DEX_PATH;
+    validateTargetPath(targetPath);
+
+    console.log(`[DeviceAppParser] 清理 Quick 文件: ${targetPath}, ${DeviceAppParser.QUICK_SCRIPT_PATH}`);
+    const command = `rm -f '${targetPath}' '${DeviceAppParser.QUICK_SCRIPT_PATH}'`;
+
+    if (adb.subprocess.shellProtocol) {
+      await adb.subprocess.shellProtocol.spawnWaitText(command);
+    } else {
+      await adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', command]);
+    }
+
+    console.log('[DeviceAppParser] Quick 清理完成');
+    return true;
   }
 
   parseJsonResult(jsonString: string): ParseResult {
