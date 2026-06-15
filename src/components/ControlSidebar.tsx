@@ -153,17 +153,20 @@ export function ControlSidebar({
       deviceApps = await getAllDeviceApps();
     }
 
-    const pinned = deviceApps
-      .filter(a => a.pinned)
-      .sort((a, b) => b.pinOrder - a.pinOrder);
-    setPinnedApps(pinned.map(a => a.packageName));
+    const pinned: typeof deviceApps = [];
+    const frequent: typeof deviceApps = [];
+    const other: typeof deviceApps = [];
+    for (const app of deviceApps) {
+      if (app.pinned) pinned.push(app);
+      else if (app.localCount > 0) frequent.push(app);
+      else other.push(app);
+    }
 
-    const frequent = deviceApps
-      .filter(a => !a.pinned && a.localCount > 0)
-      .sort((a, b) => b.localCount - a.localCount);
-    const other = deviceApps
-      .filter(a => !a.pinned && a.localCount === 0)
-      .sort((a, b) => b.launchCount - a.launchCount);
+    pinned.sort((a, b) => b.pinOrder - a.pinOrder);
+    frequent.sort((a, b) => b.localCount - a.localCount);
+    other.sort((a, b) => b.launchCount - a.launchCount);
+
+    setPinnedApps(pinned.map(a => a.packageName));
 
     const sorted = [...pinned, ...frequent, ...other];
     const sidebarList = sorted.slice(0, 12).map(a => a.packageName);
@@ -201,19 +204,24 @@ export function ControlSidebar({
     setLoading(true);
     setPanelMode('apps');
     try {
-      const deviceApps = await getAllDeviceApps();
-      if (deviceApps.length > 0) {
-        const pinned = deviceApps
-          .filter(a => a.pinned)
-          .sort((a, b) => b.pinOrder - a.pinOrder);
-        const frequent = deviceApps
-          .filter(a => !a.pinned && a.localCount > 0)
-          .sort((a, b) => b.localCount - a.localCount);
-        const other = deviceApps
-          .filter(a => !a.pinned && a.localCount === 0)
-          .sort((a, b) => b.launchCount - a.launchCount);
+      const sortApps = (apps: typeof deviceApps extends infer T ? T extends undefined ? never : T : never) => {
+        const pinned: typeof apps = [];
+        const frequent: typeof apps = [];
+        const other: typeof apps = [];
+        for (const app of apps) {
+          if (app.pinned) pinned.push(app);
+          else if (app.localCount > 0) frequent.push(app);
+          else other.push(app);
+        }
+        pinned.sort((a, b) => b.pinOrder - a.pinOrder);
+        frequent.sort((a, b) => b.localCount - a.localCount);
+        other.sort((a, b) => b.launchCount - a.launchCount);
+        return [...pinned, ...frequent, ...other].map(a => a.packageName);
+      };
 
-        const sorted = [...pinned, ...frequent, ...other].map(a => a.packageName);
+      let deviceApps = await getAllDeviceApps();
+      if (deviceApps.length > 0) {
+        const sorted = sortApps(deviceApps);
         setApps(sorted);
         const labels = await scrcpy.getCachedAppLabels(sorted);
         setAppLabels(labels);
@@ -223,18 +231,8 @@ export function ControlSidebar({
 
       await parseAllApps((p) => setParseProgress(p));
 
-      const updatedApps = await getAllDeviceApps();
-      const pinned = updatedApps
-        .filter(a => a.pinned)
-        .sort((a, b) => b.pinOrder - a.pinOrder);
-      const frequent = updatedApps
-        .filter(a => !a.pinned && a.localCount > 0)
-        .sort((a, b) => b.localCount - a.localCount);
-      const other = updatedApps
-        .filter(a => !a.pinned && a.localCount === 0)
-        .sort((a, b) => b.launchCount - a.launchCount);
-
-      const sorted = [...pinned, ...frequent, ...other].map(a => a.packageName);
+      deviceApps = await getAllDeviceApps();
+      const sorted = sortApps(deviceApps);
       setApps(sorted);
       const labels = await scrcpy.getCachedAppLabels(sorted);
       setAppLabels(labels);
@@ -569,15 +567,17 @@ export function ControlSidebar({
                     setLoading(true);
                     parseAllApps((p) => setParseProgress(p)).then(async () => {
                       const deviceApps = await getAllDeviceApps();
-                      const pinned = deviceApps
-                        .filter(a => a.pinned)
-                        .sort((a, b) => b.pinOrder - a.pinOrder);
-                      const frequent = deviceApps
-                        .filter(a => !a.pinned && a.localCount > 0)
-                        .sort((a, b) => b.localCount - a.localCount);
-                      const other = deviceApps
-                        .filter(a => !a.pinned && a.localCount === 0)
-                        .sort((a, b) => b.launchCount - a.launchCount);
+                      const pinned: typeof deviceApps = [];
+                      const frequent: typeof deviceApps = [];
+                      const other: typeof deviceApps = [];
+                      for (const app of deviceApps) {
+                        if (app.pinned) pinned.push(app);
+                        else if (app.localCount > 0) frequent.push(app);
+                        else other.push(app);
+                      }
+                      pinned.sort((a, b) => b.pinOrder - a.pinOrder);
+                      frequent.sort((a, b) => b.localCount - a.localCount);
+                      other.sort((a, b) => b.launchCount - a.launchCount);
 
                       const sorted = [...pinned, ...frequent, ...other].map(a => a.packageName);
                       setApps(sorted);

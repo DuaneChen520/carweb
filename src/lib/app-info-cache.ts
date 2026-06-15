@@ -64,6 +64,22 @@ export class AppInfoCache {
     });
   }
 
+  async setAll(infos: AppInfo[]): Promise<void> {
+    const db = await this.openDB();
+
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(this.storeName, 'readwrite');
+      const store = transaction.objectStore(this.storeName);
+
+      for (const info of infos) {
+        store.put(info);
+      }
+
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
+
   async invalidate(packageName: string): Promise<void> {
     const db = await this.openDB();
 

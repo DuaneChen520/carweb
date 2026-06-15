@@ -54,25 +54,13 @@ export class DeviceAppsStore {
     return new Promise((resolve, reject) => {
       const transaction = db.transaction(this.storeName, 'readwrite');
       const store = transaction.objectStore(this.storeName);
-      const clearReq = store.clear();
 
-      clearReq.onerror = () => reject(clearReq.error);
-      clearReq.onsuccess = () => {
-        let pending = records.length;
-        if (pending === 0) {
-          resolve();
-          return;
-        }
+      for (const record of records) {
+        store.put(record);
+      }
 
-        for (const record of records) {
-          const putReq = store.put(record);
-          putReq.onerror = () => reject(putReq.error);
-          putReq.onsuccess = () => {
-            pending -= 1;
-            if (pending === 0) resolve();
-          };
-        }
-      };
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
     });
   }
 

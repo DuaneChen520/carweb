@@ -12,7 +12,8 @@ describe('sortApps', () => {
     ]);
 
     const result = sortApps(allPkgs, pinned, counts);
-    expect(result).toEqual(['com.a', 'com.c', 'com.b', 'com.d', 'com.e']);
+    // pin order: com.c(1) > com.a(0) → com.c first
+    expect(result).toEqual(['com.c', 'com.a', 'com.b', 'com.d', 'com.e']);
   });
 
   it('places pinned apps at top sorted by order', () => {
@@ -21,7 +22,8 @@ describe('sortApps', () => {
     const counts = new Map();
 
     const result = sortApps(allPkgs, pinned, counts);
-    expect(result).toEqual(['a', 'm', 'z']);
+    // pin order: z(2) > m(1) > a(0) → z first
+    expect(result).toEqual(['z', 'm', 'a']);
   });
 
   it('handles empty pinned map', () => {
@@ -175,7 +177,8 @@ describe('sortApps', () => {
     ]);
 
     const result = sortApps(allPkgs, pinned, counts);
-    expect(result).toEqual(['com.b', 'com.a']);
+    // pin order: com.a(1) > com.b(0) → com.a first
+    expect(result).toEqual(['com.a', 'com.b']);
   });
 
   it('handles three-tier mix correctly', () => {

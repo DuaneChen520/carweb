@@ -51,6 +51,7 @@ export class AppInfoService {
       const deviceResult = await this.deviceParser.parseAllApps(adb, signal);
 
       const results = new Map<string, AppInfo>();
+      const toCache: AppInfo[] = [];
       for (const app of deviceResult.apps) {
         const cached = await this.cache.get(app.packageName);
         if (cached && cached.versionCode === app.versionCode) {
@@ -65,10 +66,14 @@ export class AppInfoService {
           versionCode: app.versionCode,
           lastParsed: Date.now(),
         };
-        this.cache.set(app.packageName, appInfo).catch((err) => {
-          console.warn(`[AppInfoService] 缓存写入失败 (${app.packageName}):`, err);
-        });
+        toCache.push(appInfo);
         results.set(app.packageName, appInfo);
+      }
+
+      if (toCache.length > 0) {
+        this.cache.setAll(toCache).catch((err) => {
+          console.warn(`[AppInfoService] 缓存批量写入失败:`, err);
+        });
       }
 
       const existingRecords = await this.deviceAppsStore.getAll();

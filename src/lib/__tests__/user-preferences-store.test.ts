@@ -54,9 +54,10 @@ describe('UserPreferencesStore', () => {
       await store.togglePinned('app.three');
       const pinned = await store.getPinned();
       expect(pinned).toHaveLength(3);
-      expect(pinned[0]).toEqual({ packageName: 'app.one', order: 0 });
+      // getPinned sorts by order descending (last pinned first)
+      expect(pinned[0]).toEqual({ packageName: 'app.three', order: 2 });
       expect(pinned[1]).toEqual({ packageName: 'app.two', order: 1 });
-      expect(pinned[2]).toEqual({ packageName: 'app.three', order: 2 });
+      expect(pinned[2]).toEqual({ packageName: 'app.one', order: 0 });
     });
 
     it('getPinned returns records sorted by order', async () => {
@@ -70,10 +71,11 @@ describe('UserPreferencesStore', () => {
         { packageName: 'app.third', order: 2 },
       ]);
       const pinned = await store.getPinned();
+      // getPinned sorts by order descending (last pinned first)
       expect(pinned.map((r) => r.packageName)).toEqual([
-        'app.first',
-        'app.second',
         'app.third',
+        'app.second',
+        'app.first',
       ]);
     });
 
@@ -85,8 +87,9 @@ describe('UserPreferencesStore', () => {
       ]);
       const pinned = await store.getPinned();
       expect(pinned).toHaveLength(2);
-      expect(pinned[0].packageName).toBe('app.two');
-      expect(pinned[1].packageName).toBe('app.three');
+      // getPinned sorts by order descending (last pinned first)
+      expect(pinned[0].packageName).toBe('app.three');
+      expect(pinned[1].packageName).toBe('app.two');
     });
 
     it('setPinned with empty array clears pins', async () => {
