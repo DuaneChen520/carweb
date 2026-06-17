@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Grid, ArrowLeft, Home, Loader2, X, MonitorOff, Monitor, Maximize2, Minimize2, Power, Settings, Trash2, Search, Pin, RefreshCw } from 'lucide-react';
+import { Grid, ArrowLeft, Home, Loader2, X, MonitorOff, Monitor, Maximize2, Minimize2, Power, Settings, Trash2, Search, Pin, RefreshCw, Volume2, VolumeX } from 'lucide-react';
 import type { ResolutionPresetKey } from '../hooks/scrcpy';
 import { RESOLUTION_PRESETS } from '../hooks/scrcpy';
 import { useScrcpyContext } from '../contexts/ScrcpyContext';
@@ -111,7 +111,7 @@ export function ControlSidebar({
   currentPreset, resolutionPreset, changeResolutionPreset,
 }: ControlSidebarProps) {
   const scrcpy = useScrcpyContext();
-  const { goBack, goHome, startApp, getAppIcon, getCachedAppLabels, parseAllApps, turnOffPhysicalScreen, turnOnPhysicalScreen, getAllDeviceApps, incrementLocalCount, togglePin, getPinnedApps, syncWithDevice } = scrcpy;
+  const { goBack, goHome, startApp, getAppIcon, getCachedAppLabels, parseAllApps, turnOffPhysicalScreen, turnOnPhysicalScreen, getAllDeviceApps, incrementLocalCount, togglePin, getPinnedApps, syncWithDevice, audioStatus, isMuted, setMuted, audioRoute, setAudioRoute } = scrcpy;
   const [panelMode, setPanelMode] = useState<'closed' | 'search' | 'apps'>('closed');
   const [searchText, setSearchText] = useState('');
   const [apps, setApps] = useState<string[] | null>(null);
@@ -427,6 +427,26 @@ export function ControlSidebar({
           </button>
         )}
 
+        {audioStatus !== 'idle' && (
+          <button
+            onClick={() => setMuted(!isMuted)}
+            className={`p-2 rounded-lg transition-colors ${
+              audioStatus === 'disabled' || audioStatus === 'errored'
+                ? 'text-white/20 cursor-not-allowed'
+                : isMuted
+                  ? 'text-red-400/80 hover:text-red-400 hover:bg-red-500/20'
+                  : 'text-white/50 hover:text-white hover:bg-white/10'
+            }`}
+            title={
+              audioStatus === 'disabled' ? '音频不可用（设备不支持）'
+              : audioStatus === 'errored' ? '音频错误'
+              : isMuted ? '取消静音' : '静音'
+            }
+          >
+            {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+          </button>
+        )}
+
         {handleStop && (
           <button
             onClick={handleStop}
@@ -478,6 +498,17 @@ export function ControlSidebar({
                     }`}
                   >
                     {keyboardMode === 'phone' ? '📱 手机' : '⌨️ 浏览器'}
+                  </button>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span>音频输出</span>
+                  <button
+                    onClick={() => setAudioRoute(audioRoute === 'browser' ? 'phone' : 'browser')}
+                    className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
+                      audioRoute === 'browser' ? 'bg-blue-500/30 text-blue-400' : 'bg-white/10 text-white/60'
+                    }`}
+                  >
+                    {audioRoute === 'browser' ? '🔊 浏览器' : '📱 手机'}
                   </button>
                 </div>
                 {isRunning && toggleDisplayMode && (
