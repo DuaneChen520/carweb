@@ -1,5 +1,6 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import { useScrcpySession, type ScrcpyState, type DisplayConfig } from '@/hooks/scrcpy';
+import type { AudioState } from '@/hooks/scrcpy/audio/types';
 import type { Adb } from '@yume-chan/adb';
 import type { ParseProgress } from '@/lib/app-info-service';
 
@@ -41,6 +42,11 @@ interface ScrcpyContextValue extends ScrcpyState {
   resizeDisplay: (width: number, height: number, dpi: number) => Promise<void>;
   getForegroundApp: () => Promise<string | null>;
   resumeAudio: () => void;
+  audioRoute: 'browser' | 'phone';
+  setAudioRoute: (route: 'browser' | 'phone') => void;
+  isMuted: boolean;
+  setMuted: (muted: boolean) => void;
+  audioStatus: AudioState['status'];
   getAllDeviceApps: () => Promise<import('@/lib/device-apps-store').DeviceAppRecord[]>;
   incrementLocalCount: (pkg: string) => Promise<void>;
   togglePin: (pkg: string) => Promise<boolean>;
@@ -89,6 +95,11 @@ export function ScrcpyProvider({ children }: { children: ReactNode }) {
     session.resizeDisplay,
     session.getForegroundApp,
     session.resumeAudio,
+    session.audioRoute,
+    session.setAudioRoute,
+    session.isMuted,
+    session.setMuted,
+    session.audioStatus,
     session.getAllDeviceApps,
     session.incrementLocalCount,
     session.togglePin,

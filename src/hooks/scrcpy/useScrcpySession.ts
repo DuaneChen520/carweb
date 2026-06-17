@@ -6,6 +6,7 @@ import { ScrcpyNewDisplay, ScrcpyCaptureOrientation } from '@yume-chan/scrcpy';
 import type { Adb } from '@yume-chan/adb';
 import { useVideoDecoder } from './useVideoDecoder';
 import { useAudioDecoder } from './useAudioDecoder';
+import type { AudioState } from './audio/types';
 import { useInputInjector } from './useInputInjector';
 import { useAppManager } from './useAppManager';
 import {
@@ -67,6 +68,10 @@ export function useScrcpySession() {
     videoWidth: 0,
     videoHeight: 0,
     isVirtualDisplay: false,
+  });
+
+  const [audioState, setAudioState] = useState<AudioState>({
+    status: 'idle', route: 'browser', muted: false
   });
 
   const clientRef = useRef<AdbScrcpyClient<AdbScrcpyOptionsLatest<true>> | null>(null);
@@ -172,7 +177,7 @@ export function useScrcpySession() {
         setState(prev => ({ ...prev, videoWidth: w, videoHeight: h }));
       });
 
-      audioDecoder.setupAudioStream(client);
+      audioDecoder.setupAudioStream(client, setAudioState);
 
       if (useVirtualDisplay) {
         const vid = await getVirtualDisplayId(adb);
@@ -407,6 +412,11 @@ export function useScrcpySession() {
     getForegroundApp,
     startAppOnDisplay: startAppOnDisplayFn,
     resumeAudio: audioDecoder.resume,
+    audioRoute: audioState.route,
+    setAudioRoute: audioDecoder.setRoute,
+    isMuted: audioState.muted,
+    setMuted: audioDecoder.setMuted,
+    audioStatus: audioState.status,
     getAllDeviceApps: appManager.getAllDeviceApps,
     incrementLocalCount: appManager.incrementLocalCount,
     togglePin: appManager.togglePin,
