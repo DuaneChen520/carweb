@@ -224,7 +224,7 @@ export function ControlSidebar({
     setLoading(true);
     setPanelMode('apps');
     try {
-      let deviceApps = await getAllDeviceApps();
+      const deviceApps = await getAllDeviceApps();
       if (deviceApps.length > 0) {
         const sorted = await sortDeviceApps();
         setApps(sorted);

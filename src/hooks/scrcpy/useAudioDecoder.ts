@@ -9,6 +9,7 @@ export function useAudioDecoder() {
   const routeRef = useRef<'browser' | 'phone'>('browser');
   const mutedRef = useRef(false);
   const disposeRef = useRef(false);
+  const readerRef = useRef<ReadableStreamDefaultReader<any> | null>(null);
 
   const setupAudioStream = useCallback(async (
     client: AdbScrcpyClient<AdbScrcpyOptionsLatest<true>>,
@@ -36,7 +37,7 @@ export function useAudioDecoder() {
 
       // 2. Load AudioWorklet
       await audioCtx.audioWorklet.addModule(
-        new URL('./audio/renderer-worklet.ts', import.meta.url).href
+        new URL('./audio/renderer-worklet.js', import.meta.url).href
       );
 
       if (disposeRef.current) {
@@ -88,6 +89,7 @@ export function useAudioDecoder() {
       // 5. Connect scrcpy audio stream
       const { codec, stream: audioStream } = audioMeta;
       const reader = audioStream.getReader();
+      readerRef.current = reader;
 
       const pump = async () => {
         try {
@@ -103,16 +105,17 @@ export function useAudioDecoder() {
                 desc ? [desc.buffer] : []
               );
             } else {
+              const dataBuf = value.data.slice(0).buffer;
               worker.postMessage(
                 {
                   type: 'data',
                   chunk: {
-                    type: value.keyframe ? 'key' : 'delta' as const,
-                    data: value.data.slice(0).buffer,
+                    type: 'key' as const,
+                    data: dataBuf,
                     timestamp: value.pts != null ? Number(value.pts) : 0,
                   },
                 },
-                [value.data.slice(0).buffer]
+                [dataBuf]
               );
             }
           }
@@ -142,9 +145,6 @@ export function useAudioDecoder() {
   const setMuted = useCallback((muted: boolean) => {
     mutedRef.current = muted;
     console.log('[audio] 静音切换:', muted);
-    if (workletNodeRef.current) {
-      workletNodeRef.current.port.postMessage({ type: 'mute', value: muted });
-    }
   }, []);
 
   const resume = useCallback(() => {
@@ -159,6 +159,10 @@ export function useAudioDecoder() {
   const dispose = useCallback(() => {
     disposeRef.current = true;
 
+    if (readerRef.current) {
+      readerRef.current.cancel().catch(() => {});
+      readerRef.current = null;
+    }
     if (workerRef.current) {
       workerRef.current.terminate();
       workerRef.current = null;

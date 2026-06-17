@@ -2,7 +2,7 @@
 export interface ConfigureMessage {
   type: 'configure';
   codec: string;
-  description?: ArrayBuffer;
+  description?: Uint8Array;
 }
 
 export interface DataMessage {

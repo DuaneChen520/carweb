@@ -1,28 +1,3 @@
-declare var AudioWorkletProcessor: {
-  prototype: AudioWorkletProcessor;
-  new (options?: AudioWorkletNodeOptions): AudioWorkletProcessor;
-};
-declare var registerProcessor: (
-  name: string,
-  processorCtor: new (options?: AudioWorkletNodeOptions) => AudioWorkletProcessor
-) => void;
-declare class AudioWorkletProcessor {
-  readonly port: MessagePort;
-  constructor(options?: AudioWorkletNodeOptions);
-  process(
-    inputs: Float32Array[][],
-    outputs: Float32Array[][],
-    parameters: Record<string, Float32Array>
-  ): boolean;
-}
-interface AudioWorkletNodeOptions {
-  numberOfInputs?: number;
-  numberOfOutputs?: number;
-  outputChannelCount?: number[];
-  parameterData?: Record<string, number>;
-  processorOptions?: Record<string, unknown>;
-}
-
 const STARTING_THRESHOLD = 0.1;
 const SPEED_UP_THRESHOLD = 0.25;
 const RECOVER_THRESHOLD = 0.15;
@@ -42,26 +17,22 @@ for (let i = 0; i < WINDOW_SIZE / 2; i++) {
 }
 
 class Float32SourceProcessor extends AudioWorkletProcessor {
-  private channelCount: number;
-  private chunks: Float32Array[] = [];
-  private chunkSampleCounts: number[] = [];
-  private totalSampleCount = 0;
-
-  private mode: 'starting' | 'normal' | 'speedUp' = 'starting';
-  private readOffset = 0;
-  private inputOffset = 0;
-  private outputOffset = 0;
-  private readBuffer: Float32Array;
-
-  constructor(options: AudioWorkletNodeOptions) {
+  constructor(options) {
     super();
     this.channelCount = options.outputChannelCount?.[0] ?? 2;
     this.readBuffer = new Float32Array(this.channelCount);
+    this.chunks = [];
+    this.chunkSampleCounts = [];
+    this.totalSampleCount = 0;
+    this.mode = 'starting';
+    this.readOffset = 0;
+    this.inputOffset = 0;
+    this.outputOffset = 0;
 
     this.port.onmessage = this.handleMessage.bind(this);
   }
 
-  private handleMessage(event: MessageEvent) {
+  handleMessage(event) {
     const data = event.data;
 
     if (data.type === 'pcm') {
@@ -77,7 +48,6 @@ class Float32SourceProcessor extends AudioWorkletProcessor {
       this.chunks.push(float32);
       this.chunkSampleCounts.push(sampleCount);
       this.totalSampleCount += sampleCount;
-    } else if (data.type === 'mute') {
     } else if (data.type === 'reset') {
       this.chunks = [];
       this.chunkSampleCounts = [];
@@ -89,7 +59,7 @@ class Float32SourceProcessor extends AudioWorkletProcessor {
     }
   }
 
-  process(_inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
+  process(_inputs, outputs) {
     const output = outputs[0];
     if (!output || output.length === 0) return true;
 
@@ -107,6 +77,7 @@ class Float32SourceProcessor extends AudioWorkletProcessor {
 
     if (this.mode === 'speedUp' && this.totalSampleCount < RECOVER_THRESHOLD * SAMPLE_RATE) {
       this.mode = 'normal';
+      this.advanceInputOffset();
       this.readOffset = 0;
       this.inputOffset = 0;
       this.outputOffset = 0;
@@ -128,7 +99,7 @@ class Float32SourceProcessor extends AudioWorkletProcessor {
     return true;
   }
 
-  private processNormal(output: Float32Array[], outputLength: number) {
+  processNormal(output, outputLength) {
     let outputIndex = 0;
 
     while (this.chunks.length > 0 && outputIndex < outputLength) {
@@ -163,7 +134,7 @@ class Float32SourceProcessor extends AudioWorkletProcessor {
     }
   }
 
-  private processSpeedUp(output: Float32Array[], outputLength: number) {
+  processSpeedUp(output, outputLength) {
     for (let i = 0; i < outputLength; i++) {
       let totalWeight = 0;
 
@@ -216,7 +187,22 @@ class Float32SourceProcessor extends AudioWorkletProcessor {
     }
   }
 
-  private readSample(offset: number) {
+  advanceInputOffset() {
+    let remaining = this.inputOffset;
+    while (this.chunks.length > 0 && remaining >= this.chunkSampleCounts[0]) {
+      remaining -= this.chunkSampleCounts[0];
+      this.totalSampleCount -= this.chunkSampleCounts[0];
+      this.chunks.shift();
+      this.chunkSampleCounts.shift();
+    }
+    if (this.chunks.length > 0 && remaining > 0) {
+      this.chunks[0] = this.chunks[0].subarray(remaining * this.channelCount);
+      this.chunkSampleCounts[0] -= remaining;
+      this.totalSampleCount -= remaining;
+    }
+  }
+
+  readSample(offset) {
     let remaining = offset;
     for (let i = 0; i < this.chunks.length; i++) {
       const count = this.chunkSampleCounts[i];

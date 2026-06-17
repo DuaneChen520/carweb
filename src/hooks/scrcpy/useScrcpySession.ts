@@ -138,7 +138,7 @@ export function useScrcpySession() {
         videoCodec: 'h264',
         videoBitRate: displayConfig?.bitRate ?? 8000000,
         maxFps: 60,
-        audio: false,
+        audio: true,
         control: true,
         stayAwake: true,
         showTouches: false,
