@@ -264,6 +264,7 @@ export function ControlSidebar({
           });
           const sorted = await sortDeviceApps();
           setApps(sorted);
+          refreshSidebarApps();
         });
       } else {
         startApp(pkg);
