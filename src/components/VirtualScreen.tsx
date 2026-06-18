@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
-import { RotateCcw } from 'lucide-react';
+import { RotateCcw, Monitor } from 'lucide-react';
 import { AndroidMotionEventAction } from '@yume-chan/scrcpy';
 import { RESOLUTION_PRESETS } from '../hooks/scrcpy';
 import type { ResolutionPresetKey } from '../hooks/scrcpy';
@@ -10,16 +10,22 @@ import { ControlSidebar } from './ControlSidebar';
 import { runAdbCommand } from '../lib/adb-commands';
 
 interface VirtualScreenProps {
+  active?: boolean;
+  displayMode?: 'virtual' | 'mirror';
   onStop: () => void;
 }
 
-export function VirtualScreen({ onStop }: VirtualScreenProps) {
+export function VirtualScreen({ active = false, displayMode = 'virtual', onStop }: VirtualScreenProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [restartCount, setRestartCount] = useState(0);
-  const [useMirrorMode, setUseMirrorMode] = useState(false);
+  const [useMirrorMode, setUseMirrorMode] = useState(displayMode === 'mirror');
+
+  useEffect(() => {
+    setUseMirrorMode(displayMode === 'mirror');
+  }, [displayMode]);
   const [resolutionPreset, setResolutionPreset] = useState<ResolutionPresetKey>('original');
   const [showResMenu, setShowResMenu] = useState(false);
   const [showVirtualKeyboard] = useState(false);
@@ -71,6 +77,8 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
 
   // 启动/重启 scrcpy
   useEffect(() => {
+    if (!active) return;
+
     const canvas = canvasRef.current;
     const adb = store.adb;
     if (!canvas || !adb) return;
@@ -116,7 +124,7 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
         lastStartedDimensionsRef.current = displayConfig ? { width: displayConfig.width, height: displayConfig.height } : null;
       }
     }
-  }, [store.adb, isRunning, isStarting, restartCount, useMirrorMode, containerSize.width, containerSize.height, displayConfig, startScrcpy]);
+  }, [active, store.adb, isRunning, isStarting, restartCount, useMirrorMode, containerSize.width, containerSize.height, displayConfig, startScrcpy]);
 
   // 窗口尺寸变化时：防抖 500ms → 获取前台应用 → 停止 scrcpy → 通过 restartCount 触发重启
   useEffect(() => {
@@ -404,6 +412,16 @@ export function VirtualScreen({ onStop }: VirtualScreenProps) {
                     尝试切换到镜像模式
                   </button>
                 )}
+              </div>
+            </div>
+          )}
+
+          {!active && !isStarting && !error && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="text-center text-slate-700">
+                <Monitor className="w-16 h-16 mx-auto mb-4 opacity-30" />
+                <p className="text-lg font-medium">车机虚拟屏</p>
+                <p className="text-sm mt-1">连接设备后启动</p>
               </div>
             </div>
           )}

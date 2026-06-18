@@ -4,6 +4,9 @@ import type { ResolutionPresetKey } from '../hooks/scrcpy';
 import { RESOLUTION_PRESETS } from '../hooks/scrcpy';
 import { useScrcpyContext } from '../contexts/ScrcpyContext';
 import { CacheSettingsDialog } from './CacheSettingsDialog';
+import { PinDialog } from './PinDialog';
+import { useAdbStore } from '../hooks/useAdbStore';
+import { useDevicePin } from '../hooks/useDevicePin';
 
 function formatCacheSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -112,6 +115,8 @@ export function ControlSidebar({
 }: ControlSidebarProps) {
   const scrcpy = useScrcpyContext();
   const { goBack, goHome, startApp, getAppIcon, getCachedAppLabels, parseAllApps, turnOffPhysicalScreen, turnOnPhysicalScreen, getAllDeviceApps, incrementLocalCount, togglePin, getPinnedApps, syncWithDevice, audioStatus, isMuted, setMuted, audioRoute, setAudioRoute } = scrcpy;
+  const adbStore = useAdbStore();
+  const { hasPin } = useDevicePin();
   const [panelMode, setPanelMode] = useState<'closed' | 'search' | 'apps'>('closed');
   const [searchText, setSearchText] = useState('');
   const [apps, setApps] = useState<string[] | null>(null);
@@ -129,6 +134,7 @@ export function ControlSidebar({
   const [showSettings, setShowSettings] = useState(false);
   const [cacheInfo, setCacheInfo] = useState<{ count: number; size: number } | null>(null);
   const [showCacheSettings, setShowCacheSettings] = useState(false);
+  const [showPinSetup, setShowPinSetup] = useState(false);
   const [iconCacheVersion, setIconCacheVersion] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -502,6 +508,29 @@ export function ControlSidebar({
                   </button>
                 </div>
                 <div className="flex items-center justify-between gap-3">
+                  <span>启动 PIN</span>
+                  <button
+                    onClick={() => {
+                      if (!adbStore.deviceSerial) return;
+                      setShowSettings(false);
+                      setShowPinSetup(true);
+                    }}
+                    className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
+                      adbStore.deviceSerial && hasPin(adbStore.deviceSerial)
+                        ? 'bg-blue-500/30 text-blue-400'
+                        : adbStore.deviceSerial
+                          ? 'bg-white/10 text-white/60'
+                          : 'bg-white/5 text-white/30 cursor-not-allowed'
+                    }`}
+                  >
+                    {!adbStore.deviceSerial
+                      ? '需连接设备'
+                      : hasPin(adbStore.deviceSerial)
+                        ? '已启用 · 更改'
+                        : '设置'}
+                  </button>
+                </div>
+                <div className="flex items-center justify-between gap-3">
                   <span>音频输出</span>
                   <button
                     onClick={() => setAudioRoute(audioRoute === 'browser' ? 'phone' : 'browser')}
@@ -556,6 +585,18 @@ export function ControlSidebar({
           )}
         </div>
 
+        {showPinSetup && adbStore.deviceSerial && (
+          <PinDialog
+            mode="setup"
+            deviceId={adbStore.deviceSerial}
+            deviceName={adbStore.deviceName || '未知设备'}
+            hasExistingPin={hasPin(adbStore.deviceSerial)}
+            onSuccess={() => {
+              setShowPinSetup(false);
+            }}
+            onCancel={() => setShowPinSetup(false)}
+          />
+        )}
         <CacheSettingsDialog
           open={showCacheSettings}
           onClose={() => setShowCacheSettings(false)}
