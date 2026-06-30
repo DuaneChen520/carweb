@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Grid, ArrowLeft, Home, Loader2, X, MonitorOff, Monitor, Maximize2, Minimize2, Power, Settings, Trash2, Search, Pin, RefreshCw, Volume2, VolumeX } from 'lucide-react';
+import { ArrowLeft, Home, Loader2, X, MonitorOff, Monitor, Maximize2, Minimize2, Power, Settings, Trash2, Search, Pin, RefreshCw, Volume2, VolumeX } from 'lucide-react';
+import { AppGridIcon } from './AppGridIcon';
+import { NeumorphicButton, ICON_SIZE } from './NeumorphicButton';
 import type { ResolutionPresetKey } from '../hooks/scrcpy';
 import { RESOLUTION_PRESETS } from '../hooks/scrcpy';
 import { useScrcpyContext } from '../contexts/ScrcpyContext';
@@ -64,7 +66,7 @@ function AppIcon({ pkg, name, getAppIcon, onLaunch, compact, pinMode, isPinned, 
     <button
       ref={btnRef}
       onClick={() => onLaunch(pkg)}
-      className="flex flex-col items-center gap-1 p-1.5 rounded-lg hover:bg-white/10 transition-colors group relative"
+      className="flex flex-col items-center gap-1 p-1.5 rounded-lg hover:bg-black/10 transition-colors group relative"
       title={name}
     >
       {iconUrl ? (
@@ -85,7 +87,7 @@ function AppIcon({ pkg, name, getAppIcon, onLaunch, compact, pinMode, isPinned, 
         </div>
       )}
       {!compact && (
-        <span className="text-[10px] text-white/50 truncate w-full text-center group-hover:text-white/80 transition-colors">
+        <span className="text-[10px] text-black/50 truncate w-full text-center group-hover:text-black/80 transition-colors">
           {displayName}
         </span>
       )}
@@ -345,16 +347,16 @@ export function ControlSidebar({
 
   return (
     <>
-      <div className="w-13 flex flex-col items-center py-2 gap-1 bg-black/60 border-r border-white/10">
+      <div className="w-13 flex flex-col items-center py-2 gap-1 bg-white border-r border-black/10">
         <button
           onClick={() => togglePanel('apps')}
-          className={`p-2 rounded-lg transition-colors ${panelMode === 'apps' ? 'bg-blue-500/30 text-blue-400' : 'text-white/50 hover:text-white hover:bg-white/10'}`}
+          className="flex items-center justify-center w-13 h-[52px]"
           title="应用列表"
         >
-          <Grid className="w-5 h-5" />
+          <AppGridIcon />
         </button>
 
-        <div className="w-8 h-px bg-white/10 my-1" />
+        <div className="w-8 h-px bg-black/10 my-1" />
 
         <div className="flex flex-col items-center gap-1 overflow-y-auto max-h-[calc(100vh-280px)] scrollbar-none">
           {pinnedApps.map((pkg) => (
@@ -371,7 +373,7 @@ export function ControlSidebar({
             />
           ))}
           {pinnedApps.length > 0 && sidebarApps.length > pinnedApps.length && (
-            <div className="w-6 h-px bg-white/20 my-0.5" />
+            <div className="w-6 h-px bg-black/10 my-0.5" />
           )}
           {sidebarApps
             .filter(pkg => !pinnedApps.includes(pkg))
@@ -392,33 +394,27 @@ export function ControlSidebar({
 
         <div className="flex-1" />
 
+        <div className="flex flex-col items-center" style={{ gap: '12px' }}>
+
         {toggleFullscreen && (
-          <button
+          <NeumorphicButton
             onClick={toggleFullscreen}
-            className="p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+            toggled={!!isFullscreen}
             title={isFullscreen ? '退出全屏' : '全屏'}
           >
-            {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
-          </button>
+            {isFullscreen ? <Minimize2 size={ICON_SIZE} /> : <Maximize2 size={ICON_SIZE} />}
+          </NeumorphicButton>
         )}
 
-        <button
-          onClick={goBack}
-          className="p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
-          title="返回"
-        >
-          <ArrowLeft className="w-5 h-5" />
-        </button>
-        <button
-          onClick={goHome}
-          className="p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
-          title="桌面"
-        >
-          <Home className="w-5 h-5" />
-        </button>
+        <NeumorphicButton onClick={goBack} title="返回">
+          <ArrowLeft size={ICON_SIZE} />
+        </NeumorphicButton>
+        <NeumorphicButton onClick={goHome} title="桌面">
+          <Home size={ICON_SIZE} />
+        </NeumorphicButton>
 
         {isVirtualDisplay && turnOffPhysicalScreen && turnOnPhysicalScreen && (
-          <button
+          <NeumorphicButton
             onClick={async () => {
               if (physicalScreenOn) {
                 await turnOffPhysicalScreen();
@@ -427,47 +423,37 @@ export function ControlSidebar({
               }
               setPhysicalScreenOn(!physicalScreenOn);
             }}
-            className="p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
             title={physicalScreenOn ? '关闭物理屏幕' : '开启物理屏幕'}
           >
-            {physicalScreenOn ? <MonitorOff className="w-5 h-5" /> : <Monitor className="w-5 h-5" />}
-          </button>
+            {physicalScreenOn ? <MonitorOff size={ICON_SIZE} /> : <Monitor size={ICON_SIZE} />}
+          </NeumorphicButton>
         )}
 
         {audioStatus !== 'idle' && (
-          <button
+          <NeumorphicButton
             onClick={() => setMuted(!isMuted)}
-            className={`p-2 rounded-lg transition-colors ${
-              audioStatus === 'disabled' || audioStatus === 'errored'
-                ? 'text-white/20 cursor-not-allowed'
-                : isMuted
-                  ? 'text-red-400/80 hover:text-red-400 hover:bg-red-500/20'
-                  : 'text-white/50 hover:text-white hover:bg-white/10'
-            }`}
+            toggled={!!isMuted}
+            disabled={audioStatus === 'disabled' || audioStatus === 'errored'}
             title={
               audioStatus === 'disabled' ? '音频不可用（设备不支持）'
               : audioStatus === 'errored' ? '音频错误'
               : isMuted ? '取消静音' : '静音'
             }
           >
-            {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
-          </button>
+            {isMuted ? <VolumeX size={ICON_SIZE} /> : <Volume2 size={ICON_SIZE} />}
+          </NeumorphicButton>
         )}
 
         {handleStop && (
-          <button
-            onClick={handleStop}
-            className="p-2 text-red-400/80 hover:text-red-400 hover:bg-red-500/20 rounded-lg transition-colors"
-            title="断开连接"
-          >
-            <Power className="w-5 h-5" />
-          </button>
+          <NeumorphicButton onClick={handleStop} title="断开连接" color="#EF4444" toggledColor="#EF4444">
+            <Power size={ICON_SIZE} />
+          </NeumorphicButton>
         )}
 
-        <div className="w-8 h-px bg-white/10 my-1" />
+        <div className="w-8 h-px bg-black/10 my-1" />
 
         <div className="relative">
-          <button
+          <NeumorphicButton
             onClick={async () => {
               if (!showSettings) {
                 const info = await scrcpy.getCacheInfo();
@@ -475,11 +461,10 @@ export function ControlSidebar({
               }
               setShowSettings(!showSettings);
             }}
-            className="p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
             title="设置"
           >
-            <Settings className="w-5 h-5" />
-          </button>
+            <Settings size={ICON_SIZE} />
+          </NeumorphicButton>
 
           {showSettings && (
             <div
@@ -612,6 +597,7 @@ export function ControlSidebar({
             refreshSidebarApps(true);
           }}
         />
+      </div>
       </div>
 
       {panelMode !== 'closed' && (
