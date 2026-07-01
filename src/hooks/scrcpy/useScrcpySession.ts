@@ -1,8 +1,9 @@
 import { useCallback, useRef, useState } from 'react';
-import type { AdbScrcpyClient, AdbScrcpyOptionsLatest } from '@yume-chan/adb-scrcpy';
+import type { AdbScrcpyClient } from '@yume-chan/adb-scrcpy';
 import { AdbScrcpyExitedError } from '@yume-chan/adb-scrcpy';
 import type { ScrcpyControlMessageWriter } from '@yume-chan/scrcpy';
 import { ScrcpyNewDisplay, ScrcpyCaptureOrientation } from '@yume-chan/scrcpy';
+import { AdbScrcpyOptions4_0 } from '@/lib/scrcpy4';
 import type { Adb } from '@yume-chan/adb';
 import { useVideoDecoder } from './useVideoDecoder';
 import { useAudioDecoder } from './useAudioDecoder';
@@ -74,7 +75,7 @@ export function useScrcpySession() {
     status: 'idle', route: 'browser', muted: false
   });
 
-  const clientRef = useRef<AdbScrcpyClient<AdbScrcpyOptionsLatest<true>> | null>(null);
+  const clientRef = useRef<AdbScrcpyClient<AdbScrcpyOptions4_0<true>> | null>(null);
   const controllerRef = useRef<ScrcpyControlMessageWriter | null>(null);
   const adbRef = useRef<Adb | null>(null);
   const rotationStateRef = useRef<RotationState | null>(null);
@@ -100,7 +101,8 @@ export function useScrcpySession() {
       displayIdRef.current = null;
       setState(prev => ({ ...prev, isStarting: true, error: null, videoWidth: 0, videoHeight: 0 }));
 
-      const { AdbScrcpyClient, AdbScrcpyOptionsLatest } = await import('@yume-chan/adb-scrcpy');
+      const { AdbScrcpyClient } = await import('@yume-chan/adb-scrcpy');
+      const { AdbScrcpyOptions4_0 } = await import('@/lib/scrcpy4');
       const { ReadableStream } = await import('@yume-chan/stream-extra');
 
       const serverPath = '/data/local/tmp/scrcpy-server.jar';
@@ -133,7 +135,7 @@ export function useScrcpySession() {
       console.log(`[Scrcpy] ${Date.now() - startTime}ms - 验证通过: ${verifyOutput}`);
 
       const useVirtualDisplay = !!displayConfig;
-      const options = new AdbScrcpyOptionsLatest({
+      const options = new AdbScrcpyOptions4_0({
         video: true,
         videoCodec: 'h264',
         videoBitRate: displayConfig?.bitRate ?? 8000000,
@@ -147,6 +149,8 @@ export function useScrcpySession() {
               newDisplay: new ScrcpyNewDisplay(displayConfig.width, displayConfig.height, displayConfig.dpi ?? 320),
               captureOrientation: ScrcpyCaptureOrientation.Unlocked,
               displayImePolicy: 'local' as const,
+              // M2 阶段暂不开 flex，M3 接入
+              flexDisplay: false,
             }
           : { displayId: 0 }
         ),

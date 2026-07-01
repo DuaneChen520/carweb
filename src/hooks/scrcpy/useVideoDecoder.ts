@@ -1,5 +1,6 @@
 import { useRef, useCallback, useMemo } from 'react';
-import type { AdbScrcpyClient, AdbScrcpyOptionsLatest } from '@yume-chan/adb-scrcpy';
+import type { AdbScrcpyClient } from '@yume-chan/adb-scrcpy';
+import type { AdbScrcpyOptions4_0 } from '@/lib/scrcpy4';
 import type { WebCodecsVideoDecoder } from '@yume-chan/scrcpy-decoder-webcodecs';
 
 export interface VideoDecoderState {
@@ -12,7 +13,7 @@ export function useVideoDecoder() {
   const cleanupRef = useRef<(() => Promise<void>) | null>(null);
 
   const setupVideoStream = useCallback(async (
-    client: AdbScrcpyClient<AdbScrcpyOptionsLatest<true>>,
+    client: AdbScrcpyClient<AdbScrcpyOptions4_0<true>>,
     canvas: HTMLCanvasElement,
     onSizeChanged: (width: number, height: number) => void,
   ) => {

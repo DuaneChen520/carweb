@@ -1,5 +1,6 @@
 import { useRef, useCallback, useMemo } from 'react';
-import type { AdbScrcpyClient, AdbScrcpyOptionsLatest } from '@yume-chan/adb-scrcpy';
+import type { AdbScrcpyClient } from '@yume-chan/adb-scrcpy';
+import type { AdbScrcpyOptions4_0 } from '@/lib/scrcpy4';
 import type { AudioState } from './audio/types';
 
 export function useAudioDecoder() {
@@ -12,7 +13,7 @@ export function useAudioDecoder() {
   const readerRef = useRef<ReadableStreamDefaultReader<any> | null>(null);
 
   const setupAudioStream = useCallback(async (
-    client: AdbScrcpyClient<AdbScrcpyOptionsLatest<true>>,
+    client: AdbScrcpyClient<AdbScrcpyOptions4_0<true>>,
     onStateChange?: (state: AudioState) => void,
   ) => {
     const audioMeta = await client.audioStream;
