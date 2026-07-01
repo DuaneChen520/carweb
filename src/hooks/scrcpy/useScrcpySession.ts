@@ -3,7 +3,7 @@ import type { AdbScrcpyClient } from '@yume-chan/adb-scrcpy';
 import { AdbScrcpyExitedError } from '@yume-chan/adb-scrcpy';
 import type { ScrcpyControlMessageWriter } from '@yume-chan/scrcpy';
 import { ScrcpyNewDisplay, ScrcpyCaptureOrientation } from '@yume-chan/scrcpy';
-import { AdbScrcpyOptions4_0 } from '@/lib/scrcpy4';
+import { AdbScrcpyOptions4_0, FlexDisplayClient, serializeResizeDisplay, RESIZE_DISPLAY_TYPE } from '@/lib/scrcpy4';
 import type { Adb } from '@yume-chan/adb';
 import { useVideoDecoder } from './useVideoDecoder';
 import { useAudioDecoder } from './useAudioDecoder';
@@ -81,13 +81,14 @@ export function useScrcpySession() {
   const rotationStateRef = useRef<RotationState | null>(null);
   const displayIdRef = useRef<number | null>(null);
   const startingLockRef = useRef<boolean>(false);
+  const flexClientRef = useRef<FlexDisplayClient | null>(null);
 
   const videoDecoder = useVideoDecoder();
   const audioDecoder = useAudioDecoder();
   const inputInjector = useInputInjector(controllerRef);
   const appManager = useAppManager();
 
-  const startScrcpy = useCallback(async (adb: Adb, canvas: HTMLCanvasElement, displayConfig?: DisplayConfig) => {
+  const startScrcpy = useCallback(async (adb: Adb, canvas: HTMLCanvasElement, displayConfig?: DisplayConfig, setCanvasSize?: (w: number, h: number) => void) => {
     // 防止并行调用
     if (startingLockRef.current) {
       console.warn('[Scrcpy] startScrcpy 被跳过：已有启动正在进行中');
@@ -149,8 +150,8 @@ export function useScrcpySession() {
               newDisplay: new ScrcpyNewDisplay(displayConfig.width, displayConfig.height, displayConfig.dpi ?? 320),
               captureOrientation: ScrcpyCaptureOrientation.Unlocked,
               displayImePolicy: 'local' as const,
-              // M2 阶段暂不开 flex，M3 接入
-              flexDisplay: false,
+              flexDisplay: true,
+              keepActive: true,
             }
           : { displayId: 0 }
         ),
@@ -177,9 +178,35 @@ export function useScrcpySession() {
         controllerRef.current = controller;
       }
 
-      const { width, height } = await videoDecoder.setupVideoStream(client, canvas, (w, h) => {
-        setState(prev => ({ ...prev, videoWidth: w, videoHeight: h }));
-      });
+      // 计算 RESIZE_DISPLAY 的 type 字节值
+      const resizeTypeByte = options.controlMessageTypes.indexOf(RESIZE_DISPLAY_TYPE);
+
+      const flexClient = useVirtualDisplay ? new FlexDisplayClient({
+        sendResize: async (w, h) => {
+          const ctrl = controllerRef.current;
+          if (!ctrl) return;
+          await ctrl.write(serializeResizeDisplay(resizeTypeByte, w, h));
+        },
+        setCanvasSize: setCanvasSize ?? ((w, h) => { canvas.width = w; canvas.height = h; }),
+      }) : null;
+      flexClientRef.current = flexClient;
+
+      const { width, height } = await videoDecoder.setupVideoStream(
+        client,
+        canvas,
+        // videoStream.sizeChanged（从 configuration 包解析尺寸）：
+        // 既更新 state（供 CSS letterbox），也通知 flex-client 更新 canvas backing store
+        (w, h) => {
+          setState(prev => ({ ...prev, videoWidth: w, videoHeight: h }));
+          flexClient?.onDecoderSizeChanged(w, h);
+        },
+        // 4.0 session 包回调（反抖动状态机）
+        flexClient ? (w, h, clientResized) => flexClient.onSessionPacket(w, h, clientResized) : undefined,
+      );
+
+      if (flexClient && displayConfig) {
+        flexClient.setInitialDisplaySize(displayConfig.width, displayConfig.height);
+      }
 
       audioDecoder.setupAudioStream(client, setAudioState);
 
@@ -251,6 +278,11 @@ export function useScrcpySession() {
 
       videoDecoder.dispose();
       audioDecoder.dispose();
+
+      if (flexClientRef.current) {
+        flexClientRef.current.dispose();
+        flexClientRef.current = null;
+      }
 
       if (controllerRef.current) {
         controllerRef.current.close();
@@ -391,6 +423,7 @@ export function useScrcpySession() {
     ...state,
     startScrcpy,
     stopScrcpy,
+    flexClient: flexClientRef.current,
     injectTouch: inputInjector.injectTouch,
     injectText: inputInjector.injectText,
     showKeyboard,
