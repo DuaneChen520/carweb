@@ -47,14 +47,20 @@ export function useVideoDecoder() {
           const { done, value } = await reader.read();
           if (done) break;
 
-          // 4.0 session 包：不写解码器，通知 flex-client
           const packet = value as Scrcpy4MediaPacket;
+          // [DIAG] 泵浦循环收到包类型
+          if (packet.type !== 'data') {
+            console.log(`[Pump] packet type=${packet.type}`, packet.type === 'configuration' ? `data.length=${packet.data.byteLength}` : '');
+          }
+
+          // 4.0 session 包：不写解码器，通知 flex-client
           if (packet.type === 'session' && 'width' in packet && onSessionPacket) {
             onSessionPacket(packet.width, packet.height, packet.clientResized);
             continue;
           }
 
           // configuration / data 包原样写解码器
+          console.log(`[Pump] writing type=${(value as Scrcpy4MediaPacket).type} to decoder`);
           const writer = decoder.writable.getWriter();
           try {
             await writer.write(value);
