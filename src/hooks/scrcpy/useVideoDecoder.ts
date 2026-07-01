@@ -54,6 +54,9 @@ export function useVideoDecoder() {
             continue;
           }
 
+          // 诊断：记录收到的包类型
+          console.log(`[video] packet: type=${packet.type}`, packet.type === 'data' ? { keyframe: (packet as any).keyframe, dataLen: (packet as any).data?.byteLength } : {});
+
           // configuration / data 包写解码器
           const writer = decoder.writable.getWriter();
           try {
