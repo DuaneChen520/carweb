@@ -25,6 +25,18 @@ describe('FlexDisplayClient', () => {
     expect(sendResize).not.toHaveBeenCalled();
   });
 
+  it('防抖期内回到原尺寸时清除旧定时器，不发陈旧请求', () => {
+    client.setInitialDisplaySize(1920, 1080);
+    // 1) resize 到不同尺寸 → 启动 150ms 防抖
+    client.onContainerResize(1280, 720, 1.0, 1);
+    // 2) 100ms 后回到原始尺寸 → 应清除旧定时器并跳过
+    vi.advanceTimersByTime(100);
+    client.onContainerResize(1920, 1080, 1.0, 1);
+    // 3) 再等 200ms → 旧定时器已被清除，不应发送任何请求
+    vi.advanceTimersByTime(200);
+    expect(sendResize).not.toHaveBeenCalled();
+  });
+
   it('尺寸变化时防抖后发送 RESIZE_DISPLAY', () => {
     client.setInitialDisplaySize(1920, 1080);
     client.onContainerResize(1280, 720, 1.0, 1);

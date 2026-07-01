@@ -38,6 +38,12 @@ export class FlexDisplayClient {
 
   /** ResizeObserver 回调（CSS 尺寸变化）。 */
   onContainerResize(cssW: number, cssH: number, scale: number, dpr: number): void {
+    // 总是先清除旧定时器，防止提前返回时遗漏导致陈旧的防抖回调误发
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+
     const target = {
       w: Math.round(cssW * scale * dpr),
       h: Math.round(cssH * scale * dpr),
@@ -51,8 +57,6 @@ export class FlexDisplayClient {
     ) {
       return;
     }
-
-    if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null;
       this.requestResize(target);
