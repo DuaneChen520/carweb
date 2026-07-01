@@ -1,7 +1,8 @@
 // src/lib/scrcpy4/options.ts
 import { AdbScrcpyOptions3_3_3, type AdbScrcpyClientOptions } from '@yume-chan/adb-scrcpy';
 import type { ScrcpyControlMessageType, ScrcpyMediaStreamPacket } from '@yume-chan/scrcpy';
-import { TransformStream } from '@yume-chan/stream-extra';
+import type { TransformStream } from '@yume-chan/stream-extra';
+import { createScrcpy4Demuxer } from './video/demuxer';
 
 /**
  * scrcpy 4.0 新增的 RESIZE_DISPLAY 控制消息类型。
@@ -42,10 +43,9 @@ export class AdbScrcpyOptions4_0<TVideo extends boolean> extends AdbScrcpyOption
   }
 
   override createMediaStreamTransformer(): TransformStream<Uint8Array, ScrcpyMediaStreamPacket> {
-    // 恒等 TransformStream：直接将原始字节透传（不做解析），
-    // 避免自定义 transformer 在 pipeThrough 中数据丢失。
-    // 解析工作由 useVideoDecoder 的 pump 循环用 parseChunk 手动完成。
-    return new TransformStream<Uint8Array, ScrcpyMediaStreamPacket>();
+    // 4.0 demuxer：解析会话包（MSB=1）+ 媒体包（3.x PTS 位域兼容），
+    // 输出 Scrcpy4MediaPacket（含 session 类型）。
+    return createScrcpy4Demuxer() as unknown as TransformStream<Uint8Array, ScrcpyMediaStreamPacket>;
   }
 }
 

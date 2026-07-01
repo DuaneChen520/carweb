@@ -1,7 +1,6 @@
 import { useRef, useCallback, useMemo } from 'react';
 import type { AdbScrcpyClient } from '@yume-chan/adb-scrcpy';
-import type { AdbScrcpyOptions4_0 } from '@/lib/scrcpy4';
-import { parseChunk, type Scrcpy4MediaPacket } from '@/lib/scrcpy4/video/demuxer';
+import type { AdbScrcpyOptions4_0, Scrcpy4MediaPacket } from '@/lib/scrcpy4';
 import type { WebCodecsVideoDecoder } from '@yume-chan/scrcpy-decoder-webcodecs';
 
 export interface VideoDecoderState {
@@ -35,39 +34,32 @@ export function useVideoDecoder() {
 
     decoderRef.current = decoder;
 
-    // 使用初始元数据中的尺寸
-    if (videoStream.width > 0 && videoStream.height > 0) {
-      onSizeChanged(videoStream.width, videoStream.height);
-    }
+    const sizeUnsubscribe = videoStream.sizeChanged((size) => {
+      onSizeChanged(size.width, size.height);
+    });
 
     const stream = videoStream.stream;
     const reader = stream.getReader();
 
     const pump = async () => {
-      let buffer = new Uint8Array(0);
       try {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
-          // 使用 parseChunk 手动解析原始字节流
-          const result = parseChunk(buffer, value as unknown as Uint8Array);
-          buffer = result.remaining;
+          // 4.0 session 包：不写解码器，通知 flex-client
+          const packet = value as Scrcpy4MediaPacket;
+          if (packet.type === 'session') {
+            onSessionPacket?.(packet.width, packet.height, packet.clientResized);
+            continue;
+          }
 
-          for (const packet of result.packets) {
-            // 4.0 session 包：不写解码器，通知 flex-client
-            if (packet.type === 'session') {
-              onSessionPacket?.(packet.width, packet.height, packet.clientResized);
-              continue;
-            }
-
-            // configuration / data 包写解码器
-            const writer = decoder.writable.getWriter();
-            try {
-              await writer.write(packet);
-            } finally {
-              writer.releaseLock();
-            }
+          // configuration / data 包写解码器
+          const writer = decoder.writable.getWriter();
+          try {
+            await writer.write(value);
+          } finally {
+            writer.releaseLock();
           }
         }
       } catch (error) {
@@ -78,12 +70,13 @@ export function useVideoDecoder() {
     pump();
 
     cleanupRef.current = async () => {
+      sizeUnsubscribe();
       await reader.cancel();
     };
 
     return {
-      width: videoStream.width || videoStream.metadata.width || 0,
-      height: videoStream.height || videoStream.metadata.height || 0,
+      width: videoStream.width,
+      height: videoStream.height,
     };
   }, []);
 
