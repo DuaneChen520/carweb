@@ -20,6 +20,8 @@ export interface FlexDisplayClientOptions {
 export class FlexDisplayClient {
   private currentDisplaySize: { w: number; h: number } | null = null;
   private pendingResize: { w: number; h: number } | null = null;
+  private lastRetryTime = 0;
+  private readonly retryInterval = 500; // clientResized=false 重试间隔
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly debounceMs: number;
   private readonly sendResize: (w: number, h: number) => Promise<void>;
@@ -87,8 +89,9 @@ export class FlexDisplayClient {
         this.pendingResize = null;
       }
     } else {
-      // 独立变化（如 App 自旋转），不清除 pending；若 pending 仍在，重发以校正
-      if (this.pendingResize !== null) {
+      // 独立变化（如 App 自旋转），不清除 pending；若 pending 仍在，重发以校正（带节流）
+      if (this.pendingResize !== null && Date.now() - this.lastRetryTime > this.retryInterval) {
+        this.lastRetryTime = Date.now();
         this.sendResize(this.pendingResize.w, this.pendingResize.h).catch((e) => {
           console.warn('[FlexClient] RESIZE_DISPLAY 重发失败:', e);
         });

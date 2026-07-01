@@ -13,7 +13,6 @@
  */
 
 /** 4.0 PTS 位域常量（3.x 分别是 1n<<63 / 1n<<62 / 62-bit PTS）。 */
-const PTS_SESSION = 1n << 63n;   // MSB，会话包标志
 const PTS_CONFIG = 1n << 62n;    // configuration 包（SPS/PPS）
 const PTS_KEYFRAME = 1n << 61n;  // keyframe 标志
 const PTS_MASK = (1n << 61n) - 1n; // 61-bit PTS 掩码

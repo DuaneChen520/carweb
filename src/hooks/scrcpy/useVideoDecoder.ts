@@ -49,8 +49,8 @@ export function useVideoDecoder() {
 
           // 4.0 session 包：不写解码器，通知 flex-client
           const packet = value as Scrcpy4MediaPacket;
-          if (packet.type === 'session') {
-            onSessionPacket?.(packet.width, packet.height, packet.clientResized);
+          if (packet.type === 'session' && 'width' in packet && onSessionPacket) {
+            onSessionPacket(packet.width, packet.height, packet.clientResized);
             continue;
           }
 
