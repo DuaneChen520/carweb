@@ -1,6 +1,6 @@
 import { useRef, useCallback, useMemo } from 'react';
 import type { AdbScrcpyClient } from '@yume-chan/adb-scrcpy';
-import type { AdbScrcpyOptions4_0 } from '@/lib/scrcpy4';
+import type { AdbScrcpyOptions4_0, Scrcpy4MediaPacket } from '@/lib/scrcpy4';
 import type { WebCodecsVideoDecoder } from '@yume-chan/scrcpy-decoder-webcodecs';
 
 export interface VideoDecoderState {
@@ -16,6 +16,7 @@ export function useVideoDecoder() {
     client: AdbScrcpyClient<AdbScrcpyOptions4_0<true>>,
     canvas: HTMLCanvasElement,
     onSizeChanged: (width: number, height: number) => void,
+    onSessionPacket?: (width: number, height: number, clientResized: boolean) => void,
   ) => {
     const { WebCodecsVideoDecoder } = await import('@yume-chan/scrcpy-decoder-webcodecs');
     const { WebGLVideoFrameRenderer } = await import('@yume-chan/scrcpy-decoder-webcodecs/esm/video/render/webgl.js');
@@ -46,6 +47,14 @@ export function useVideoDecoder() {
           const { done, value } = await reader.read();
           if (done) break;
 
+          // 4.0 session 包：不写解码器，通知 flex-client
+          const packet = value as Scrcpy4MediaPacket;
+          if (packet.type === 'session') {
+            onSessionPacket?.(packet.width, packet.height, packet.clientResized);
+            continue;
+          }
+
+          // configuration / data 包原样写解码器
           const writer = decoder.writable.getWriter();
           try {
             await writer.write(value);
