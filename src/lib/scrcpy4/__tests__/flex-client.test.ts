@@ -11,7 +11,11 @@ describe('FlexDisplayClient', () => {
     timers = vi.useFakeTimers();
     sendResize = vi.fn().mockResolvedValue(undefined);
     setCanvasSize = vi.fn();
-    client = new FlexDisplayClient({ sendResize, setCanvasSize, debounceMs: 150 });
+    client = new FlexDisplayClient({
+      sendResize: sendResize as unknown as (width: number, height: number) => Promise<void>,
+      setCanvasSize: setCanvasSize as unknown as (width: number, height: number) => void,
+      debounceMs: 150,
+    });
   });
 
   afterEach(() => {

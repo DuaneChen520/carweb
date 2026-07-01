@@ -3,9 +3,10 @@ import { useScrcpySession, type ScrcpyState, type DisplayConfig } from '@/hooks/
 import type { AudioState } from '@/hooks/scrcpy/audio/types';
 import type { Adb } from '@yume-chan/adb';
 import type { ParseProgress } from '@/lib/app-info-service';
+import type { FlexDisplayClient } from '@/lib/scrcpy4';
 
 interface ScrcpyContextValue extends ScrcpyState {
-  startScrcpy: (adb: Adb, canvas: HTMLCanvasElement, displayConfig?: DisplayConfig) => Promise<void>;
+  startScrcpy: (adb: Adb, canvas: HTMLCanvasElement, displayConfig?: DisplayConfig, setCanvasSize?: (w: number, h: number) => void) => Promise<void>;
   stopScrcpy: () => Promise<void>;
   injectTouch: (message: {
     action: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
@@ -54,6 +55,7 @@ interface ScrcpyContextValue extends ScrcpyState {
   clearDeviceApps: () => Promise<void>;
   clearAll: () => Promise<void>;
   syncWithDevice: (signal?: AbortSignal) => Promise<import('@/lib/app-info-service').SyncResult>;
+  flexClient: FlexDisplayClient | null;
 }
 
 const ScrcpyContext = createContext<ScrcpyContextValue | null>(null);
@@ -107,6 +109,7 @@ export function ScrcpyProvider({ children }: { children: ReactNode }) {
     session.clearDeviceApps,
     session.clearAll,
     session.syncWithDevice,
+    session.flexClient,
   ]);
 
   return (
