@@ -87,7 +87,7 @@ npm run build
 ```
 carweb/
 ├── public/
-│   └── scrcpy-server.jar    # scrcpy 服务端（v3.3.3）
+│   └── scrcpy-server.jar    # scrcpy 服务端（v4.0）
 ├── src/
 │   ├── components/
 │   │   ├── ConnectionPanel.tsx   # 连接面板 UI
@@ -119,7 +119,7 @@ carweb/
 
 1. **HTTPS 要求**：WebUSB API 要求页面必须在 HTTPS 或 localhost 环境下运行。生产部署请配置 SSL 证书。
 
-2. **scrcpy-server 版本**：`public/scrcpy-server.jar` 必须与 `@yume-chan/adb-scrcpy` 客户端库版本匹配。当前使用 v3.3.3。
+2. **scrcpy-server 版本**：`public/scrcpy-server.jar` 必须与 `@yume-chan/adb-scrcpy` 客户端库版本匹配。当前使用 v4.0。
 
 3. **WiFi 连接限制**：无线连接功能目前需要预先通过 USB 开启 ADB over WiFi。纯无线首次连接需要先执行 `adb tcpip 5555`。
 
