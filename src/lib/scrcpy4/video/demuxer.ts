@@ -31,10 +31,18 @@ export function createScrcpy4Demuxer(): TransformStream<Uint8Array, Scrcpy4Media
   let readableController!: ReadableStreamDefaultController<Scrcpy4MediaPacket>;
 
   const flush = (controller: ReadableStreamDefaultController<Scrcpy4MediaPacket>): void => {
+    let packetCount = 0;
     while (buffer.byteLength >= 12) {
+      packetCount++;
       const dv = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
       const firstByte = dv.getUint8(0);
       const isSession = (firstByte & 0x80) !== 0;
+
+      // [DIAG] 输出前 3 个包的原始头字节
+      if (packetCount <= 3) {
+        const hex = Array.from(buffer.slice(0, 12)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+        console.log(`[Demuxer] packet#${packetCount}: MSB=${(firstByte & 0x80) >> 7} isSession=${isSession} raw(12)=[${hex}]`);
+      }
 
       if (isSession) {
         // 会话包：固定 12 字节
@@ -54,7 +62,17 @@ export function createScrcpy4Demuxer(): TransformStream<Uint8Array, Scrcpy4Media
 
       const data = buffer.slice(12, totalLen);
 
-      if ((pts & PTS_CONFIG) !== 0n) {
+      const configFlag = (pts & PTS_CONFIG) !== 0n;
+      const keyframeFlag = (pts & PTS_KEYFRAME) !== 0n;
+      const configFlagBit63 = (pts & (1n << 63n)) !== 0n; // [DIAG] 对比 3.x 位域
+      const realPts = pts & PTS_MASK;
+
+      // [DIAG] 输出前 3 个 media 包的 PTS 标志位
+      if (packetCount <= 3) {
+        console.log(`[Demuxer] media#${packetCount}: pts=0x${pts.toString(16)} bit63(config-3x)=${configFlagBit63} bit62(config-4x)=${configFlag} bit61(keyframe)=${keyframeFlag} size=${size} type=${configFlag ? 'configuration' : 'data'}`);
+      }
+
+      if (configFlag) {
         controller.enqueue({ type: 'configuration', data });
       } else {
         const keyframe = (pts & PTS_KEYFRAME) !== 0n;
