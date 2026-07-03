@@ -231,15 +231,11 @@ export function VirtualScreen({ active = false, displayMode = 'virtual', onStop 
 
   const handlePointerEvent = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
-    console.log('[VirtualScreen] pointer event:', e.type, 'videoSize:', videoWidth, videoHeight, 'coords:', e.clientX, e.clientY);
 
     resumeAudio();
 
     const coords = screenToVideoCoords(e.clientX, e.clientY);
-    if (!coords || !videoWidth || !videoHeight) {
-      console.warn('[VirtualScreen] 跳过触控: coords or videoSize invalid', { coords, videoWidth, videoHeight });
-      return;
-    }
+    if (!coords || !videoWidth || !videoHeight) return;
 
     let action: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
     switch (e.type) {

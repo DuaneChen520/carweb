@@ -197,7 +197,6 @@ export function useScrcpySession() {
         // videoStream.sizeChanged（从 configuration 包解析尺寸）：
         // 既更新 state（供 CSS letterbox），也通知 flex-client 更新 canvas backing store
         (w, h) => {
-          console.log('[ScrcpySession] sizeChanged:', w, h);
           setState(prev => ({ ...prev, videoWidth: w, videoHeight: h }));
           flexClient?.onDecoderSizeChanged(w, h);
         },

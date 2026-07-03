@@ -15,13 +15,9 @@ export function useInputInjector(controllerRef: React.RefObject<ScrcpyControlMes
     buttons: number;
   }) => {
     const controller = controllerRef.current;
-    if (!controller) {
-      console.warn('[touch] controllerRef 为空，跳过触控');
-      return;
-    }
+    if (!controller) return;
 
     try {
-      console.log('[touch] 发送触控:', message.action, message.pointerX, message.pointerY);
       await controller.injectTouch(message);
     } catch (error) {
       console.error('[touch] 触摸事件转发错误:', error);
