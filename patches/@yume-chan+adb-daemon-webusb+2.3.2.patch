@@ -1,0 +1,30 @@
+diff --git a/node_modules/@yume-chan/adb-daemon-webusb/esm/device.js b/node_modules/@yume-chan/adb-daemon-webusb/esm/device.js
+index d5512c6..899c341 100644
+--- a/node_modules/@yume-chan/adb-daemon-webusb/esm/device.js
++++ b/node_modules/@yume-chan/adb-daemon-webusb/esm/device.js
+@@ -135,7 +135,9 @@ export class AdbDaemonWebUsbConnection {
+             // even before the `disconnect` event is fired.
+             // Wait a little while and check if the device is still connected.
+             // https://github.com/WICG/webusb/issues/219
+-            if (isErrorName(e, "NetworkError")) {
++            // Also handle AbortError: transferIn can be aborted when raw.reset() is called
++            // during reconnection, or when device is disconnected.
++            if (isErrorName(e, "NetworkError") || isErrorName(e, "AbortError")) {
+                 await new Promise((resolve) => {
+                     setTimeout(() => {
+                         resolve();
+diff --git a/node_modules/@yume-chan/adb-daemon-webusb/src/device.ts b/node_modules/@yume-chan/adb-daemon-webusb/src/device.ts
+index a63409f..f21172f 100644
+--- a/node_modules/@yume-chan/adb-daemon-webusb/src/device.ts
++++ b/node_modules/@yume-chan/adb-daemon-webusb/src/device.ts
+@@ -214,7 +214,9 @@ export class AdbDaemonWebUsbConnection
+             // even before the `disconnect` event is fired.
+             // Wait a little while and check if the device is still connected.
+             // https://github.com/WICG/webusb/issues/219
+-            if (isErrorName(e, "NetworkError")) {
++            // Also handle AbortError: transferIn can be aborted when raw.reset() is called
++            // during reconnection, or when device is disconnected.
++            if (isErrorName(e, "NetworkError") || isErrorName(e, "AbortError")) {
+                 await new Promise<void>((resolve) => {
+                     setTimeout(() => {
+                         resolve();

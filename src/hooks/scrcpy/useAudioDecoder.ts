@@ -163,20 +163,18 @@ export function useAudioDecoder() {
 
       pump();
 
-      if (audioCtx.state === 'suspended') {
-        await audioCtx.resume();
-      }
-
+      // AudioContext 初始为 suspended 状态，不在这里 resume（没有用户手势会触发浏览器警告）
+      // 延迟到用户首次触摸时由 resume() 回调处理
       onStateChange?.({ status: 'playing', route: 'browser', muted: false });
-} catch (e) {
-        console.error('[audio] 启动失败:', e);
-        // 确保 AudioContext 在出错时被关闭，避免泄漏
-        if (audioCtxRef.current) {
-          audioCtxRef.current.close().catch(() => {});
-          audioCtxRef.current = null;
-        }
-        onStateChange?.({ status: 'errored', route: 'browser', muted: false });
+    } catch (e) {
+      console.error('[audio] 启动失败:', e);
+      // 确保 AudioContext 在出错时被关闭，避免泄漏
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close().catch(() => {});
+        audioCtxRef.current = null;
       }
+      onStateChange?.({ status: 'errored', route: 'browser', muted: false });
+    }
   }, []);
 
   const setRoute = useCallback((route: 'browser' | 'phone') => {
@@ -191,9 +189,13 @@ export function useAudioDecoder() {
 
   const resume = useCallback(() => {
     const ctx = audioCtxRef.current;
-    if (ctx && ctx.state === 'suspended') {
-      ctx.resume().catch((e: unknown) => {
-        console.warn('[audio] AudioContext resume 失败:', e);
+    if (!ctx) return;
+    // AudioContext 已在运行 → 无需操作（后续触摸事件不会再刷警告）
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {
+        // 静默处理：浏览器自行打印的警告无法抑制，
+        // 但 resume 只在首次触摸（有用户手势）时才会真正执行，
+        // 后续触摸因 state 已变为 'running' 而不会进入此处。
       });
     }
   }, []);

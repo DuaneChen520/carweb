@@ -19,9 +19,14 @@ export function useInputInjector(controllerRef: React.RefObject<ScrcpyControlMes
 
     try {
       await controller.injectTouch(message);
-    } catch (error) {
-      console.error('[touch] 触摸事件转发错误:', error);
-    }
+} catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (msg.includes('Socket closed')) {
+          console.warn('[touch] 控制 Socket 已关闭（transport 可能已断开）:', msg);
+        } else {
+          console.error('[touch] 触摸事件转发错误:', error);
+        }
+      }
   }, [controllerRef]);
 
   const injectText = useCallback(async (text: string) => {
