@@ -225,14 +225,14 @@ export function useScrcpySession() {
         displayIdRef.current = 0;
       }
 
-      setState(prev => ({
-        ...prev,
-        isStarting: false,
-        isRunning: true,
-        videoWidth: width,
-        videoHeight: height,
-        isVirtualDisplay: useVirtualDisplay,
-      }));
+setState(prev => ({
+	        ...prev,
+	        isStarting: false,
+	        isRunning: true,
+	        // videoWidth/videoHeight 已由 sizeChanged 回调维护，
+	        // 这里不覆盖，避免被 setupVideoStream 返回的初始 0 冲掉
+	        isVirtualDisplay: useVirtualDisplay,
+	      }));
 
       // 后台自动同步应用列表
       appManager.syncWithDevice().then(async (syncResult) => {
