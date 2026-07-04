@@ -461,5 +461,9 @@ setState(prev => ({
     clearDeviceApps: appManager.clearDeviceApps,
     clearAll: appManager.clearAll,
     syncWithDevice: appManager.syncWithDevice,
+    clearDeviceAppCache: appManager.clearDeviceAppCache,
+    clearDevicePreferences: appManager.clearDevicePreferences,
+    getDeviceCacheInfo: appManager.getDeviceCacheInfo,
+    getAllDeviceSerials: appManager.getAllDeviceSerials,
   };
 }

@@ -5,10 +5,11 @@ import { NeumorphicButton, ICON_SIZE } from './NeumorphicButton';
 import type { ResolutionPresetKey } from '../hooks/scrcpy';
 import { RESOLUTION_PRESETS } from '../hooks/scrcpy';
 import { useScrcpyContext } from '../contexts/ScrcpyContext';
-import { CacheSettingsDialog } from './CacheSettingsDialog';
+import { CacheSettingsDialog, type DeviceCacheInfo } from './CacheSettingsDialog';
 import { PinDialog } from './PinDialog';
 import { useAdbStore } from '../hooks/useAdbStore';
 import { useDevicePin } from '../hooks/useDevicePin';
+import { useRememberedDevices } from '../hooks/useRememberedDevices';
 
 function formatCacheSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -119,6 +120,7 @@ export function ControlSidebar({
   const { goBack, goHome, startApp, getAppIcon, getCachedAppLabels, parseAllApps, turnOffPhysicalScreen, turnOnPhysicalScreen, getAllDeviceApps, incrementLocalCount, togglePin, getPinnedApps, syncWithDevice, audioStatus, isMuted, setMuted, audioRoute, setAudioRoute } = scrcpy;
   const adbStore = useAdbStore();
   const { hasPin } = useDevicePin();
+  const rememberedDevices = useRememberedDevices();
   const [panelMode, setPanelMode] = useState<'closed' | 'search' | 'apps'>('closed');
   const [searchText, setSearchText] = useState('');
   const [apps, setApps] = useState<string[] | null>(null);
@@ -136,6 +138,7 @@ export function ControlSidebar({
   const [showSettings, setShowSettings] = useState(false);
   const [cacheInfo, setCacheInfo] = useState<{ count: number; size: number } | null>(null);
   const [showCacheSettings, setShowCacheSettings] = useState(false);
+  const [cacheDevices, setCacheDevices] = useState<DeviceCacheInfo[]>([]);
   const [showPinSetup, setShowPinSetup] = useState(false);
   const [iconCacheVersion, setIconCacheVersion] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -556,8 +559,22 @@ export function ControlSidebar({
                   </div>
                 )}
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     setShowSettings(false);
+                    try {
+                      const serials = await scrcpy.getAllDeviceSerials();
+                      const deviceInfos: DeviceCacheInfo[] = await Promise.all(
+                        serials.map(async (serial) => {
+                          const deviceName = rememberedDevices.devices.find(d => d.id === serial)?.name ?? serial.slice(0, 8);
+                          const info = await scrcpy.getDeviceCacheInfo(serial);
+                          return { deviceSerial: serial, deviceName, ...info };
+                        })
+                      );
+                      setCacheDevices(deviceInfos);
+                    } catch (e) {
+                      console.warn('获取设备缓存信息失败:', e);
+                      setCacheDevices([]);
+                    }
                     setShowCacheSettings(true);
                   }}
                   className="flex items-center gap-1.5 text-white/60 hover:text-white transition-colors w-full"
@@ -585,15 +602,14 @@ export function ControlSidebar({
         <CacheSettingsDialog
           open={showCacheSettings}
           onClose={() => setShowCacheSettings(false)}
-          onClearAppCache={async () => {
+          devices={cacheDevices}
+          onClearDeviceAppCache={scrcpy.clearDeviceAppCache}
+          onClearDevicePreferences={scrcpy.clearDevicePreferences}
+          onClearAll={async () => {
             await scrcpy.clearAll();
-            const info = await scrcpy.getCacheInfo();
-            setCacheInfo(info);
+            setCacheDevices([]);
+            setCacheInfo(null);
             setAppLabels(new Map());
-            refreshSidebarApps(true);
-          }}
-          onClearUsageData={async () => {
-            await scrcpy.clearAll();
             refreshSidebarApps(true);
           }}
         />
