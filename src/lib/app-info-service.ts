@@ -2,6 +2,7 @@ import type { Adb } from '@yume-chan/adb';
 import { AppInfoCache, type AppInfo } from './app-info-cache';
 import { DeviceAppParser } from './device-app-parser';
 import { DeviceAppsStore, type DeviceAppRecord } from './device-apps-store';
+import { UserPreferencesStore } from './user-preferences-store';
 
 export interface SyncResult {
   /** 需要解析的应用包名列表 */
@@ -22,6 +23,7 @@ export type ParseCallback = (progress: ParseProgress) => void;
 export class AppInfoService {
   private cache = new AppInfoCache();
   private deviceAppsStore = new DeviceAppsStore();
+  private prefsStore = new UserPreferencesStore();
   private deviceParser = new DeviceAppParser();
   private parsing = false;
   private syncing = false;
@@ -171,7 +173,10 @@ export class AppInfoService {
   }
 
   async clearDevicePreferences(deviceSerial: string): Promise<void> {
-    await this.deviceAppsStore.clearForDevice(deviceSerial);
+    await Promise.all([
+      this.deviceAppsStore.clearForDevice(deviceSerial),
+      this.prefsStore.clearAll(deviceSerial),
+    ]);
   }
 
   async getDeviceCacheInfo(deviceSerial: string): Promise<{
@@ -246,6 +251,7 @@ export class AppInfoService {
     await Promise.all([
       this.cache.clearAll(),
       this.deviceAppsStore.clearAll(),
+      this.prefsStore.clearAllDevices(),
     ]);
   }
 }

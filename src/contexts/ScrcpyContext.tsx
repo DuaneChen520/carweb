@@ -53,7 +53,7 @@ interface ScrcpyContextValue extends ScrcpyState {
   togglePin: (pkg: string) => Promise<boolean>;
   getPinnedApps: () => Promise<import('@/lib/device-apps-store').DeviceAppRecord[]>;
   clearDeviceApps: () => Promise<void>;
-clearAll: () => Promise<void>;
+  clearAll: () => Promise<void>;
   syncWithDevice: (signal?: AbortSignal) => Promise<import('@/lib/app-info-service').SyncResult>;
   clearDeviceAppCache: (serial: string) => Promise<void>;
   clearDevicePreferences: (serial: string) => Promise<void>;
@@ -110,7 +110,7 @@ export function ScrcpyProvider({ children }: { children: ReactNode }) {
     session.incrementLocalCount,
     session.togglePin,
     session.getPinnedApps,
-session.clearDeviceApps,
+    session.clearDeviceApps,
     session.clearAll,
     session.syncWithDevice,
     session.clearDeviceAppCache,
