@@ -128,6 +128,16 @@ export function VirtualScreen({ active = false, displayMode = 'virtual', onStop 
     };
   }, [stopScrcpy]);
 
+  // adb 消失但 scrcpy 仍在运行 → 僵尸状态，立即清理
+  // 场景：USB 异常断开 → store.setAdb(null)，但 scrcpy session 不知道
+  useEffect(() => {
+    if (!store.adb && hasStartedRef.current) {
+      console.log('[VirtualScreen] adb 消失，停止僵尸 scrcpy session');
+      stopScrcpy();
+      hasStartedRef.current = false;
+    }
+  }, [store.adb, stopScrcpy]);
+
   useEffect(() => {
     if (!showResMenu) return;
     const handleClick = () => setShowResMenu(false);

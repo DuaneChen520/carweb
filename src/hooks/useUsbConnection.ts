@@ -28,19 +28,19 @@ async function connectOnce(store: AdbStore, device: AdbDaemonWebUsbDevice): Prom
     store.setConnectionStatus('connected');
 
 adb.disconnected.then(() => {
-	      console.log('[USB] adb.disconnected resolved — 正常断开');
-	      store.setConnectionStatus('disconnected');
-	      store.setAdb(null);
-	      store.setUsbDevice(null);
-	      store.setDeviceInfo(null, null);
-	    }, (error) => {
-	      console.warn('[USB] adb.disconnected rejected — 异常断开:', error?.message || error);
-	      store.setConnectionStatus('disconnected');
-	      store.setAdb(null);
-	      store.setUsbDevice(null);
-	      store.setDeviceInfo(null, null);
-	      store.setError(error?.message || 'ADB transport 异常断开');
-	    });
+		      console.log('[USB] adb.disconnected resolved — 正常断开');
+		      store.setConnectionStatus('disconnected');
+		      store.setAdb(null);
+		      store.setUsbDevice(null);
+		      store.setDeviceInfo(null, null);
+		    }, (error) => {
+		      console.warn('[USB] adb.disconnected rejected — 异常断开:', error?.message || error);
+		      store.setConnectionStatus('disconnected');
+		      store.setAdb(null);
+		      store.setUsbDevice(null);
+		      store.setDeviceInfo(null, null);
+		      store.setError('USB 连接异常断开');
+		    });
   } catch (error) {
     // authenticate 失败后 USB 接口可能被占用，尝试释放以便下一轮重试
     try { await restoreDevice({ reset: () => device.raw.reset(), close: () => device.raw.close() }); } catch {}
@@ -70,12 +70,16 @@ export function useUsbConnection(): UseUsbConnectionResult {
     cancelRef.current = true;
   }, []);
 
-  const tryAutoConnectUsb = useCallback(async (
-    serial: string,
-    onProgress?: (p: RetryProgress) => void,
-  ): Promise<{ success: boolean; cancelled: boolean }> => {
-    cancelRef.current = false;
-    store.setConnectionType('usb');
+const tryAutoConnectUsb = useCallback(async (
+	    serial: string,
+	    onProgress?: (p: RetryProgress) => void,
+	  ): Promise<{ success: boolean; cancelled: boolean }> => {
+	    cancelRef.current = false;
+
+	    // 断开既有连接，防止后续 prepareDevice (reset) 触发残留 adb.disconnected handler
+	    await store.disconnect();
+
+	    store.setConnectionType('usb');
     store.setError(null);
     store.setConnectionStatus('connecting');
 

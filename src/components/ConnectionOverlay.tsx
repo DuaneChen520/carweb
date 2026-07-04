@@ -7,13 +7,14 @@ import { useAdbStore } from '../hooks/useAdbStore';
 import type { RememberedDevice, DisplayMode } from '../hooks/useRememberedDevices';
 
 interface ConnectionOverlayProps {
-  overlayState: 'auto-connecting' | 'auto-reconnecting' | 'auto-failed' | 'manual';
+  overlayState: 'auto-connecting' | 'auto-reconnecting' | 'auto-failed' | 'manual' | 'reconnecting';
   displayMode: DisplayMode;
   rememberedDevices: RememberedDevice[];
   onSelectMode: (mode: DisplayMode) => void;
   onConnect: (device: { id: string; name: string; type: 'usb' | 'wifi'; address: string }, mode: DisplayMode, remember: boolean) => void;
   onForget: (id: string) => void;
   onCancelAutoConnect?: () => void;
+  onReconnect?: () => void;
   fading?: boolean;
 }
 
@@ -29,7 +30,7 @@ function formatRelativeTime(timestamp: number): string {
   return `${days}天前`;
 }
 
-export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices, onSelectMode, onConnect, onForget, onCancelAutoConnect, fading = false }: ConnectionOverlayProps) {
+export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices, onSelectMode, onConnect, onForget, onCancelAutoConnect, onReconnect, fading = false }: ConnectionOverlayProps) {
   const [activeTab, setActiveTab] = useState<'usb' | 'wifi'>('usb');
   const [wifiAddress, setWifiAddress] = useState('');
   const [selectedDevice, setSelectedDevice] = useState<RememberedDevice | null>(null);
@@ -104,6 +105,40 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
               取消
             </button>
           )}
+        </div>
+      </div>
+    );
+  }
+
+  if (overlayState === 'reconnecting') {
+    return (
+      <div className={`fixed inset-0 z-50 bg-black/40 backdrop-blur-xl flex items-center justify-center transition-opacity duration-300 ${fading ? 'opacity-0' : 'opacity-100'}`}>
+        <div className="text-center max-w-sm px-6">
+          <div className="w-12 h-12 rounded-full bg-amber-500/20 flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="w-6 h-6 text-amber-400" />
+          </div>
+          <p className="text-slate-200 text-lg mb-1">USB 连接已断开</p>
+          <p className="text-slate-400 text-sm mb-6">设备可能已被拔出或连接异常，请重新连接。</p>
+          <div className="flex gap-3 justify-center">
+            {onReconnect && (
+              <button
+                onClick={onReconnect}
+                className="px-6 py-2.5 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition-colors flex items-center gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                重新连接
+              </button>
+            )}
+            <button
+              onClick={() => {
+                usb.cancelAutoConnect();
+                window.location.reload();
+              }}
+              className="px-6 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-200 font-medium rounded-lg transition-colors"
+            >
+              返回
+            </button>
+          </div>
         </div>
       </div>
     );

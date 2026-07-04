@@ -13,6 +13,7 @@ type OverlayState =
   | 'auto-reconnecting'    // 进入重试阶段
   | 'auto-failed'          // 重试用尽，温和降级
   | 'manual'
+  | 'reconnecting'         // 使用中断开，提示重连
   | 'hidden';
 
 type PinGuardState =
@@ -92,6 +93,33 @@ function App() {
     }
   }, [store.connectionStatus, store.deviceSerial, store.deviceName, overlayState, hasPin, finishConnect]);
 
+  // USB 异常断开：从桌面切到重连提示
+  useEffect(() => {
+    if (store.connectionStatus === 'disconnected' && overlayState === 'hidden') {
+      setOverlayState('reconnecting');
+    }
+  }, [store.connectionStatus, overlayState]);
+
+  // 重连
+  const handleReconnect = useCallback(() => {
+    const lastDevice = getLastDevice();
+    if (!lastDevice || lastDevice.type !== 'usb') {
+      setOverlayState('manual');
+      return;
+    }
+    setOverlayState('auto-connecting');
+    usb.tryAutoConnectUsb(lastDevice.id, (p) => {
+      if (p.retrying) setOverlayState((prev) => (prev === 'auto-connecting' ? 'auto-reconnecting' : prev));
+    }).then(({ success, cancelled }) => {
+      if (cancelled) {
+        setOverlayState('manual');
+      } else if (!success) {
+        setOverlayState('manual');
+      }
+      // success 时由「连接成功」effect 接管进入 hidden
+    });
+  }, [getLastDevice, usb]);
+
   const handleConnect = useCallback(async (
     device: { id: string; name: string; type: 'usb' | 'wifi'; address: string },
     mode: DisplayMode,
@@ -142,7 +170,7 @@ function App() {
             overlayState={
               overlayState === 'hidden'
                 ? 'manual'
-                : (overlayState as 'auto-connecting' | 'auto-reconnecting' | 'auto-failed' | 'manual')
+                : (overlayState as 'auto-connecting' | 'auto-reconnecting' | 'auto-failed' | 'manual' | 'reconnecting')
             }
             displayMode={displayMode}
             rememberedDevices={devices}
@@ -150,6 +178,7 @@ function App() {
             onConnect={handleConnect}
             onForget={forget}
             onCancelAutoConnect={handleCancelAutoConnect}
+            onReconnect={handleReconnect}
             fading={isFading}
           />
         )}
