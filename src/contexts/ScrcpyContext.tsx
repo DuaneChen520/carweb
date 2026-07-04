@@ -60,6 +60,7 @@ interface ScrcpyContextValue extends ScrcpyState {
   getDeviceCacheInfo: (serial: string) => Promise<{appCacheCount: number; appCacheSize: number; pinnedCount: number; launchCount: number}>;
   getAllDeviceSerials: () => Promise<string[]>;
   flexClient: FlexDisplayClient | null;
+  flexClientRef: React.MutableRefObject<FlexDisplayClient | null>;
 }
 
 const ScrcpyContext = createContext<ScrcpyContextValue | null>(null);
@@ -118,6 +119,7 @@ export function ScrcpyProvider({ children }: { children: ReactNode }) {
     session.getDeviceCacheInfo,
     session.getAllDeviceSerials,
     session.flexClient,
+    session.flexClientRef,
   ]);
 
   return (

@@ -35,32 +35,37 @@ export function VirtualScreen({ active = false, displayMode = 'virtual', onStop 
   const initialStartTimerRef = useRef<NodeJS.Timeout | null>(null);
   const initialStartDoneRef = useRef(false);
 
-  const { startScrcpy, stopScrcpy, injectTouch, injectText, resumeAudio, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay, flexClient } = useScrcpyContext();
+  const { startScrcpy, stopScrcpy, injectTouch, injectText, resumeAudio, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay, flexClient, flexClientRef } = useScrcpyContext();
   const store = useAdbStore();
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    // 注意：flexClient 初始为 null，异步创建后 effect re-run
     const resizeObserver = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (entry) {
         const { width, height } = entry.contentRect;
         setContainerSize({ width, height });
-        // 每次回调读取组件 scope 最新值（非闭包快照）
-        if (flexClient && !useMirrorMode) {
-          flexClient.onContainerResize(width, height, currentPreset.scale, dpr);
+        // 通过 ref 读取最新 flexClient 和 preset，避免 effect re-run 重建 observer
+        const fc = flexClientRef.current;
+        const preset = currentPresetRef.current;
+        if (fc && !useMirrorMode) {
+          fc.onContainerResize(width, height, preset.scale, window.devicePixelRatio || 1);
         }
       }
     });
 
     resizeObserver.observe(container);
     return () => resizeObserver.disconnect();
-  }, [flexClient, useMirrorMode, resolutionPreset]);
+  }, [useMirrorMode]);
 
-  const currentPreset = RESOLUTION_PRESETS.find(p => p.key === resolutionPreset)!;
-  const dpr = window.devicePixelRatio || 1;
+const currentPreset = RESOLUTION_PRESETS.find(p => p.key === resolutionPreset)!;
+const dpr = window.devicePixelRatio || 1;
+
+// ref 副本供 ResizeObserver effect 内部稳定读取（不依赖闭包捕获）
+const currentPresetRef = useRef(currentPreset);
+currentPresetRef.current = currentPreset;
 
   const displayConfig = useMemo(() => {
     if (useMirrorMode || containerSize.width === 0 || containerSize.height === 0) return undefined;
@@ -212,12 +217,16 @@ export function VirtualScreen({ active = false, displayMode = 'virtual', onStop 
     if (preset === resolutionPreset) return;
     setResolutionPreset(preset);
     setShowResMenu(false);
-    if (isRunning || isStarting) {
-      console.log('[VirtualScreen] changeResolutionPreset: 切换分辨率预设');
-      await stopScrcpy();
-      hasStartedRef.current = false;
+    if (isRunning && flexClient) {
+      const newPreset = RESOLUTION_PRESETS.find(p => p.key === preset)!;
+      const container = containerRef.current;
+      if (container) {
+        const { width, height } = container.getBoundingClientRect();
+        console.log(`[FlexResize] preset change: ${resolutionPreset}→${preset}, container=${width}x${height}, scale=${newPreset.scale}`);
+        flexClient.onContainerResize(width, height, newPreset.scale, window.devicePixelRatio || 1);
+      }
     }
-  }, [resolutionPreset, isRunning, isStarting, stopScrcpy]);
+  }, [resolutionPreset, isRunning, flexClient]);
 
   const screenToVideoCoords = useCallback((clientX: number, clientY: number) => {
     const canvas = canvasRef.current;

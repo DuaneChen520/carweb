@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AdbScrcpyClient } from '@yume-chan/adb-scrcpy';
 import { AdbScrcpyExitedError } from '@yume-chan/adb-scrcpy';
 import type { ScrcpyControlMessageWriter } from '@yume-chan/scrcpy';
@@ -74,6 +74,13 @@ export function useScrcpySession() {
   const [audioState, setAudioState] = useState<AudioState>({
     status: 'idle', route: 'browser', muted: false
   });
+
+  const [flexClient, setFlexClient] = useState<FlexDisplayClient | null>(null);
+
+  // flexClientRef 是 state 的镜像，供闭包（pump 循环、sendResize）同步读取最新值
+  useEffect(() => {
+    flexClientRef.current = flexClient;
+  }, [flexClient]);
 
   const clientRef = useRef<AdbScrcpyClient<AdbScrcpyOptions4_0<true>> | null>(null);
   const controllerRef = useRef<ScrcpyControlMessageWriter | null>(null);
@@ -192,6 +199,7 @@ export function useScrcpySession() {
         setCanvasSize: setCanvasSize ?? ((w, h) => { canvas.width = w; canvas.height = h; }),
       }) : null;
       flexClientRef.current = flexClient;
+      setFlexClient(flexClient); // 触发 re-render，Context 透传至 VirtualScreen
 
       const { width, height } = await videoDecoder.setupVideoStream(
         client,
@@ -285,6 +293,7 @@ setState(prev => ({
         flexClientRef.current.dispose();
         flexClientRef.current = null;
       }
+      setFlexClient(null);
 
       if (controllerRef.current) {
         controllerRef.current.close();
@@ -425,7 +434,8 @@ setState(prev => ({
     ...state,
     startScrcpy,
     stopScrcpy,
-    flexClient: flexClientRef.current,
+    flexClient,
+    flexClientRef,
     injectTouch: inputInjector.injectTouch,
     injectText: inputInjector.injectText,
     showKeyboard,
