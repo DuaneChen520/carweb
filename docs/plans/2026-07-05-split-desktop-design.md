@@ -33,14 +33,26 @@
 ```
 App.tsx
 └─ DesktopShell (新，替代当前 VirtualScreen 主区域)
-   ├─ ControlSidebar (改造：桌面按钮导航、新增活动管理按钮、全部应用双模式)
-   ├─ SplitPane × 2 (新)
-   │   └─ PaneCanvas + 顶部下拉悬浮控件
-   ├─ FullscreenOverlay (新，全屏覆盖层)
-   └─ ActivityManagerPanel (新，活动进程管理浮窗)
+   ├─ ControlSidebar (常驻，占据固定宽度，任何状态下都显示)
+   └─ DesktopArea (侧边栏右侧的剩余区域，flex-1)
+      ├─ SplitPane × 2 (新)
+      │   └─ PaneCanvas + 顶部下拉悬浮控件
+      ├─ FullscreenOverlay (新，全屏覆盖层，z-index 高于 SplitPane，覆盖 DesktopArea)
+      └─ ActivityManagerPanel (新，活动进程管理浮窗，z-index 最高)
 ```
 
-### 2.5 SessionManager
+### 2.5 侧边栏常驻原则
+
+ControlSidebar **任何时候都常驻**，且**占据屏幕固定宽度**（沿用现有 `w-13` ≈ 52px）：
+
+- 分屏桌面状态：侧边栏 | 左 pane | 右 pane（左右 pane 平分侧边栏右侧的剩余宽度）
+- 全屏覆盖状态：侧边栏 | FullscreenOverlay（覆盖层只覆盖 DesktopArea，不遮住侧边栏）
+- 活动管理浮窗：浮在 DesktopArea 之上，侧边栏仍可见可点
+- 全部应用浮窗：从侧边栏按钮触发，浮在侧边栏右侧
+
+侧边栏的 z-index 低于浮窗（ActivityManagerPanel / 全部应用），但 DesktopArea 内部的覆盖层（FullscreenOverlay）不遮住侧边栏。
+
+### 2.6 SessionManager
 
 新 hook / store，统一管理所有 `ScrcpySession` 实例、状态机、displayId 池、活动列表。所有组件通过它读写，不直接持有 session。
 
@@ -238,9 +250,31 @@ pane 打开/关闭/切换 app 时异步写入（不阻塞 UI）。仅记 package
 
 ## 12. 布局
 
-首次进入桌面展示布局：`侧边栏 - 左应用组件 - 右应用组件`。
+### 12.1 始终常驻的侧边栏
 
-左右应用组件尺寸随窗口大小响应式动态调整（各占剩余宽度的 50%，中间留分隔间距）。
+ControlSidebar **任何时候都常驻并占据屏幕固定宽度**（沿用现有 `w-13` ≈ 52px）。无论桌面处于分屏、全屏覆盖、活动管理浮窗、全部应用浮窗等任何状态，侧边栏始终可见可点。
+
+### 12.2 分屏桌面布局
+
+首次进入桌面展示布局：`侧边栏 | 左应用组件 | 右应用组件`。
+
+- 侧边栏固定宽度（`w-13`）
+- 左右应用组件平分侧边栏右侧的剩余宽度（各占 50%，中间留分隔间距）
+- 尺寸随窗口大小响应式动态调整
+
+### 12.3 全屏覆盖布局
+
+全屏覆盖层只覆盖侧边栏右侧的 `DesktopArea`，不遮住侧边栏：`侧边栏 | FullscreenOverlay`。用户在全屏状态下仍可操作侧边栏的所有按钮（返回、桌面、活动进程、全部应用等）。
+
+### 12.4 浮窗层级
+
+| 层级 | 组件 | 说明 |
+|---|---|---|
+| 最底 | ControlSidebar + DesktopArea（SplitPane × 2） | 常驻布局 |
+| 中 | FullscreenOverlay | 覆盖 DesktopArea，不遮侧边栏 |
+| 高 | ActivityManagerPanel / 全部应用浮窗 | 覆盖整个区域（含侧边栏），但侧边栏按钮仍可点击触发 |
+
+> 浮窗（ActivityManagerPanel / 全部应用）从侧边栏按钮触发，定位为 `fixed`，可覆盖侧边栏。点击侧边栏其他按钮会关闭当前浮窗。
 
 ## 13. 实施备注
 

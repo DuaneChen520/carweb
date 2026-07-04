@@ -385,11 +385,22 @@ interface SplitPaneProps {
 ```tsx
 // src/components/desktop/DesktopShell.tsx
 export function DesktopShell({ adb }: { adb: Adb | null }) {
-  const { paneLeft, paneRight, apps } = useSessionManager();
-  // 布局：ControlSidebar | SplitPane-left | SplitPane-right
-  // flex 布局，两 pane 各占 50%
+  const { paneLeft, paneRight, apps, fullscreenSessionId } = useSessionManager();
+  // 布局（侧边栏常驻占据固定宽度）：
+  // <ControlSidebar w-13 /> | <DesktopArea flex-1>
+  //   DesktopArea 内：
+  //     <SplitPane left flex-1 /> | <SplitPane right flex-1 />
+  //     {fullscreenSessionId && <FullscreenOverlay absolute inset-0 />}  // 覆盖 DesktopArea，不遮侧边栏
+  //     {showActivityMgr && <ActivityManagerPanel fixed />}  // 浮窗，z-index 最高
+  //   </DesktopArea>
 }
 ```
+
+关键点：
+- ControlSidebar 在 DesktopShell 最外层，固定宽度 `w-13`，任何状态下都常驻
+- DesktopArea 是 `flex-1`，承载 SplitPane 和 FullscreenOverlay
+- FullscreenOverlay 用 `absolute inset-0` 定位在 DesktopArea 内部，不遮侧边栏
+- ActivityManagerPanel 和全部应用浮窗用 `fixed` 定位，可覆盖整个屏幕（含侧边栏），但从侧边栏按钮触发
 
 **Step 3: 空状态组件**
 
