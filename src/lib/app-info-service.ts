@@ -36,6 +36,7 @@ export class AppInfoService {
 
   async parseAllApps(
     adb: Adb,
+    deviceSerial: string,
     onProgress?: ParseCallback
   ): Promise<Map<string, AppInfo>> {
     if (this.parsing) {
@@ -53,13 +54,14 @@ export class AppInfoService {
       const results = new Map<string, AppInfo>();
       const toCache: AppInfo[] = [];
       for (const app of deviceResult.apps) {
-        const cached = await this.cache.get(app.packageName);
+        const cached = await this.cache.get(deviceSerial, app.packageName);
         if (cached && cached.versionCode === app.versionCode) {
           results.set(app.packageName, cached);
           continue;
         }
 
         const appInfo: AppInfo = {
+          deviceSerial,
           packageName: app.packageName,
           label: app.label,
           iconBase64: app.iconBase64,
@@ -71,18 +73,19 @@ export class AppInfoService {
       }
 
       if (toCache.length > 0) {
-        this.cache.setAll(toCache).catch((err) => {
+        this.cache.setAll(deviceSerial, toCache).catch((err) => {
           console.warn(`[AppInfoService] 缓存批量写入失败:`, err);
         });
       }
 
-      const existingRecords = await this.deviceAppsStore.getAll();
+      const existingRecords = await this.deviceAppsStore.getAll(deviceSerial);
       const existingMap = new Map(existingRecords.map(r => [r.packageName, r]));
       const now = Date.now();
 
       const updatedRecords: DeviceAppRecord[] = deviceResult.apps.map(app => {
         const existing = existingMap.get(app.packageName);
         return {
+          deviceSerial,
           packageName: app.packageName,
           versionCode: app.versionCode,
           launchCount: app.launchCount ?? existing?.launchCount ?? 0,
@@ -93,7 +96,7 @@ export class AppInfoService {
         };
       });
 
-      await this.deviceAppsStore.setAll(updatedRecords);
+      await this.deviceAppsStore.setAll(deviceSerial, updatedRecords);
 
       if (deviceResult.errors.length > 0) {
         console.warn('[AppInfoService] 设备端解析部分应用失败:', deviceResult.errors);
@@ -112,7 +115,7 @@ export class AppInfoService {
     }
   }
 
-  async syncWithDevice(adb: Adb, signal?: AbortSignal): Promise<SyncResult> {
+  async syncWithDevice(adb: Adb, deviceSerial: string, signal?: AbortSignal): Promise<SyncResult> {
     if (this.syncing) {
       console.log('[AppInfoService] 同步正在进行中，跳过重复调用');
       return { toParse: [], deviceApps: new Map() };
@@ -124,13 +127,14 @@ export class AppInfoService {
     try {
       const { apps: quickApps } = await this.deviceParser.fetchQuickPackageList(adb, signal);
 
-      const existingRecords = await this.deviceAppsStore.getAll();
+      const existingRecords = await this.deviceAppsStore.getAll(deviceSerial);
       const existingMap = new Map(existingRecords.map(r => [r.packageName, r]));
 
       const now = Date.now();
       const newRecords: DeviceAppRecord[] = quickApps.map(app => {
         const existing = existingMap.get(app.packageName);
         return {
+          deviceSerial,
           packageName: app.packageName,
           versionCode: app.versionCode,
           launchCount: existing?.launchCount ?? 0,
@@ -141,11 +145,11 @@ export class AppInfoService {
         };
       });
 
-      await this.deviceAppsStore.setAll(newRecords);
+      await this.deviceAppsStore.setAll(deviceSerial, newRecords);
 
       const toParse: string[] = [];
       for (const app of quickApps) {
-        const cached = await this.cache.get(app.packageName);
+        const cached = await this.cache.get(deviceSerial, app.packageName);
         if (!cached || cached.versionCode !== app.versionCode) {
           toParse.push(app.packageName);
         }
@@ -162,50 +166,86 @@ export class AppInfoService {
     }
   }
 
-  async getAllDeviceApps(): Promise<DeviceAppRecord[]> {
-    return this.deviceAppsStore.getAll();
+  async clearDeviceAppCache(deviceSerial: string): Promise<void> {
+    await this.cache.clearForDevice(deviceSerial);
   }
 
-  async incrementLocalCount(packageName: string): Promise<void> {
-    await this.deviceAppsStore.incrementLocalCount(packageName);
+  async clearDevicePreferences(deviceSerial: string): Promise<void> {
+    await this.deviceAppsStore.clearForDevice(deviceSerial);
   }
 
-  async togglePin(packageName: string): Promise<boolean> {
-    return this.deviceAppsStore.togglePin(packageName);
+  async getDeviceCacheInfo(deviceSerial: string): Promise<{
+    appCacheCount: number;
+    appCacheSize: number;
+    pinnedCount: number;
+    launchCount: number;
+  }> {
+    const [appCacheCount, appCacheSize, pinnedRecords] = await Promise.all([
+      this.cache.countForDevice(deviceSerial),
+      this.cache.getCacheSizeForDevice(deviceSerial),
+      this.deviceAppsStore.getPinnedApps(deviceSerial),
+    ]);
+    const launchCount = pinnedRecords.reduce((sum, r) => sum + r.localCount, 0);
+    return {
+      appCacheCount,
+      appCacheSize,
+      pinnedCount: pinnedRecords.filter(r => r.pinned).length,
+      launchCount,
+    };
   }
 
-  async getPinnedApps(): Promise<DeviceAppRecord[]> {
-    return this.deviceAppsStore.getPinnedApps();
+  async getAllDeviceSerials(): Promise<string[]> {
+    const [cacheSerials, appsSerials] = await Promise.all([
+      this.cache.allDeviceSerials(),
+      this.deviceAppsStore.allDeviceSerials(),
+    ]);
+    return [...new Set([...cacheSerials, ...appsSerials])];
   }
 
-  async getAppInfo(packageName: string): Promise<AppInfo | null> {
-    return this.cache.get(packageName);
+  async getAllDeviceApps(deviceSerial: string): Promise<DeviceAppRecord[]> {
+    return this.deviceAppsStore.getAll(deviceSerial);
   }
 
-  async getAllCachedPackages(): Promise<string[]> {
-    return this.cache.getAllPackageNames();
+  async incrementLocalCount(deviceSerial: string, packageName: string): Promise<void> {
+    await this.deviceAppsStore.incrementLocalCount(deviceSerial, packageName);
+  }
+
+  async togglePin(deviceSerial: string, packageName: string): Promise<boolean> {
+    return this.deviceAppsStore.togglePin(deviceSerial, packageName);
+  }
+
+  async getPinnedApps(deviceSerial: string): Promise<DeviceAppRecord[]> {
+    return this.deviceAppsStore.getPinnedApps(deviceSerial);
+  }
+
+  async getAppInfo(deviceSerial: string, packageName: string): Promise<AppInfo | null> {
+    return this.cache.get(deviceSerial, packageName);
+  }
+
+  async getCachedPackagesForDevice(deviceSerial: string): Promise<AppInfo[]> {
+    return this.cache.getAllForDevice(deviceSerial);
   }
 
   async getCacheCount(): Promise<number> {
-    return this.cache.count();
+    return this.cache.countAll();
   }
 
   async getCacheSize(): Promise<number> {
-    return this.cache.getCacheSize();
+    return this.cache.getTotalCacheSize();
   }
 
   async clearCache(): Promise<void> {
-    await this.cache.clear();
+    await this.cache.clearAll();
   }
 
   async clearDeviceApps(): Promise<void> {
-    await this.deviceAppsStore.clear();
+    await this.deviceAppsStore.clearAll();
   }
 
   async clearAll(): Promise<void> {
     await Promise.all([
-      this.cache.clear(),
-      this.deviceAppsStore.clear(),
+      this.cache.clearAll(),
+      this.deviceAppsStore.clearAll(),
     ]);
   }
 }
