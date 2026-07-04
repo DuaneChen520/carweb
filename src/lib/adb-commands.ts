@@ -300,6 +300,39 @@ export async function killScrcpyServer(adb: Adb, deleteJar = false): Promise<voi
   }
 }
 
+/**
+ * 获取当前设备上所有 scrcpy server 进程的 PID。
+ *
+ * 多实例并发时会返回多个 PID（空格分隔）。
+ * 调用方应在 AdbScrcpyClient.start() 成功后立即调用，
+ * 与启动前的 PID 列表对比以确定本次启动的新 PID。
+ */
+export async function getScrcpyServerPids(adb: Adb): Promise<number[]> {
+  try {
+    const output = await runAdbCommand(adb, 'pidof scrcpy 2>/dev/null');
+    return output
+      .split(/\s+/)
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => !isNaN(n));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 按 PID 精确 kill scrcpy server 进程。
+ *
+ * 用于多实例并发场景下替代 killScrcpyServer 的全杀模式，
+ * 避免误杀其他 session 的 scrcpy 进程。
+ */
+export async function killScrcpyByPid(adb: Adb, pid: number): Promise<void> {
+  try {
+    await runAdbCommand(adb, `kill -9 ${pid} 2>/dev/null || true`);
+  } catch {
+    // ignore
+  }
+}
+
 function formatPackageName(pkg: string): string {
   const segments = pkg.split('.');
   const last = segments[segments.length - 1];
