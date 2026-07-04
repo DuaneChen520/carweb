@@ -54,13 +54,13 @@ interface ScrcpyContextValue extends ScrcpyState {
   getPinnedApps: () => Promise<import('@/lib/device-apps-store').DeviceAppRecord[]>;
   clearDeviceApps: () => Promise<void>;
 clearAll: () => Promise<void>;
-	  syncWithDevice: (signal?: AbortSignal) => Promise<import('@/lib/app-info-service').SyncResult>;
-	  clearDeviceAppCache: (serial: string) => Promise<void>;
-	  clearDevicePreferences: (serial: string) => Promise<void>;
-	  getDeviceCacheInfo: (serial: string) => Promise<{appCacheCount: number; appCacheSize: number; pinnedCount: number; launchCount: number}>;
-	  getAllDeviceSerials: () => Promise<string[]>;
-	  flexClient: FlexDisplayClient | null;
-	}
+  syncWithDevice: (signal?: AbortSignal) => Promise<import('@/lib/app-info-service').SyncResult>;
+  clearDeviceAppCache: (serial: string) => Promise<void>;
+  clearDevicePreferences: (serial: string) => Promise<void>;
+  getDeviceCacheInfo: (serial: string) => Promise<{appCacheCount: number; appCacheSize: number; pinnedCount: number; launchCount: number}>;
+  getAllDeviceSerials: () => Promise<string[]>;
+  flexClient: FlexDisplayClient | null;
+}
 
 const ScrcpyContext = createContext<ScrcpyContextValue | null>(null);
 
@@ -111,13 +111,13 @@ export function ScrcpyProvider({ children }: { children: ReactNode }) {
     session.togglePin,
     session.getPinnedApps,
 session.clearDeviceApps,
-	    session.clearAll,
-	    session.syncWithDevice,
-	    session.clearDeviceAppCache,
-	    session.clearDevicePreferences,
-	    session.getDeviceCacheInfo,
-	    session.getAllDeviceSerials,
-	    session.flexClient,
+    session.clearAll,
+    session.syncWithDevice,
+    session.clearDeviceAppCache,
+    session.clearDevicePreferences,
+    session.getDeviceCacheInfo,
+    session.getAllDeviceSerials,
+    session.flexClient,
   ]);
 
   return (
