@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { VirtualScreen } from './components/VirtualScreen';
+import { DesktopScreen } from './components/DesktopScreen';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { PinDialog } from './components/PinDialog';
 import { ScrcpyProvider } from './contexts/ScrcpyContext';
@@ -160,11 +161,19 @@ function App() {
   return (
     <ScrcpyProvider>
       <div className="w-full h-screen bg-slate-900">
-        <VirtualScreen
-          active={overlayState === 'hidden'}
-          displayMode={displayMode}
-          onStop={handleStop}
-        />
+        {displayMode === 'mirror' ? (
+          // mirror 模式仍使用 VirtualScreen（向后兼容）
+          <VirtualScreen
+            active={overlayState === 'hidden'}
+            displayMode={displayMode}
+            onStop={handleStop}
+          />
+        ) : (
+          // virtual 模式使用分屏桌面（Task 10 集成）
+          overlayState === 'hidden' && (
+            <DesktopScreen onStop={handleStop} />
+          )
+        )}
         {(overlayState !== 'hidden' || isFading) && (
           <ConnectionOverlay
             overlayState={
