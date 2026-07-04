@@ -6,11 +6,20 @@ import {
   batchGetAppLabels as fetchBatchAppLabels,
 } from '@/lib/adb-commands';
 import { AppInfoService, type ParseProgress, type SyncResult } from '@/lib/app-info-service';
+import { useAdbStore } from '@/hooks/useAdbStore';
 
 export function useAppManager() {
   const adbRef = useRef<Adb | null>(null);
   const labelCacheRef = useRef<Map<string, string | null>>(new Map());
   const serviceRef = useRef(new AppInfoService());
+  const deviceSerial = useAdbStore(s => s.deviceSerial);
+  const prevSerialRef = useRef<string | null>(null);
+
+  // 设备切换时清空内存缓存
+  if (deviceSerial !== prevSerialRef.current) {
+    labelCacheRef.current.clear();
+    prevSerialRef.current = deviceSerial;
+  }
 
   const setAdb = useCallback((adb: Adb | null) => {
     adbRef.current = adb;
@@ -23,7 +32,9 @@ export function useAppManager() {
   }, []);
 
   const getAppLabel = useCallback(async (pkg: string): Promise<string> => {
-    const serviceInfo = await serviceRef.current.getAppInfo(pkg);
+    if (!deviceSerial) return formatPackageName(pkg);
+
+    const serviceInfo = await serviceRef.current.getAppInfo(deviceSerial, pkg);
     if (serviceInfo?.label) return serviceInfo.label;
 
     const cached = labelCacheRef.current.get(pkg);
@@ -35,16 +46,18 @@ export function useAppManager() {
     const label = await fetchAppLabel(adb, pkg);
     labelCacheRef.current.set(pkg, label);
     return label;
-  }, []);
+  }, [deviceSerial]);
 
   const getAppIcon = useCallback(async (pkg: string): Promise<string | null> => {
-    const serviceInfo = await serviceRef.current.getAppInfo(pkg);
+    if (!deviceSerial) return null;
+
+    const serviceInfo = await serviceRef.current.getAppInfo(deviceSerial, pkg);
     if (serviceInfo?.iconBase64) {
       const icon = serviceInfo.iconBase64;
       return icon.startsWith('data:') ? icon : `data:image/png;base64,${icon}`;
     }
     return null;
-  }, []);
+  }, [deviceSerial]);
 
   const batchGetAppLabels = useCallback(async (packages: string[]): Promise<Map<string, string>> => {
     const adb = adbRef.current;
@@ -63,10 +76,10 @@ export function useAppManager() {
     onProgress?: (progress: ParseProgress) => void
   ): Promise<void> => {
     const adb = adbRef.current;
-    if (!adb) return;
+    if (!adb || !deviceSerial) return;
 
-    await serviceRef.current.parseAllApps(adb, onProgress);
-  }, []);
+    await serviceRef.current.parseAllApps(adb, deviceSerial, onProgress);
+  }, [deviceSerial]);
 
   const abortParseApps = useCallback(() => {
     serviceRef.current.abort();
@@ -75,11 +88,11 @@ export function useAppManager() {
   const getCachedAppLabels = useCallback(async (packages: string[]): Promise<Map<string, string>> => {
     const labels = new Map<string, string>();
     for (const pkg of packages) {
-      const info = await serviceRef.current.getAppInfo(pkg);
+      const info = await serviceRef.current.getAppInfo(deviceSerial, pkg);
       labels.set(pkg, info?.label ?? formatPackageName(pkg));
     }
     return labels;
-  }, []);
+  }, [deviceSerial]);
 
   const clearAppInfoCache = useCallback(async (): Promise<void> => {
     await serviceRef.current.clearCache();
@@ -95,32 +108,38 @@ export function useAppManager() {
   }, []);
 
   const getAllCachedPackages = useCallback(async (): Promise<string[]> => {
-    return serviceRef.current.getAllCachedPackages();
-  }, []);
+    if (!deviceSerial) return [];
+    const appInfos = await serviceRef.current.getCachedPackagesForDevice(deviceSerial);
+    return appInfos.map(info => info.packageName);
+  }, [deviceSerial]);
 
   const syncWithDevice = useCallback(async (signal?: AbortSignal): Promise<SyncResult> => {
     const adb = adbRef.current;
-    if (!adb) {
+    if (!adb || !deviceSerial) {
       return { toParse: [], deviceApps: new Map() };
     }
-    return serviceRef.current.syncWithDevice(adb, signal);
-  }, []);
+    return serviceRef.current.syncWithDevice(adb, deviceSerial, signal);
+  }, [deviceSerial]);
 
   const getAllDeviceApps = useCallback(async () => {
-    return serviceRef.current.getAllDeviceApps();
-  }, []);
+    if (!deviceSerial) return [];
+    return serviceRef.current.getAllDeviceApps(deviceSerial);
+  }, [deviceSerial]);
 
   const incrementLocalCount = useCallback(async (pkg: string): Promise<void> => {
-    await serviceRef.current.incrementLocalCount(pkg);
-  }, []);
+    if (!deviceSerial) return;
+    await serviceRef.current.incrementLocalCount(deviceSerial, pkg);
+  }, [deviceSerial]);
 
   const togglePin = useCallback(async (pkg: string): Promise<boolean> => {
-    return serviceRef.current.togglePin(pkg);
-  }, []);
+    if (!deviceSerial) return false;
+    return serviceRef.current.togglePin(deviceSerial, pkg);
+  }, [deviceSerial]);
 
   const getPinnedApps = useCallback(async () => {
-    return serviceRef.current.getPinnedApps();
-  }, []);
+    if (!deviceSerial) return [];
+    return serviceRef.current.getPinnedApps(deviceSerial);
+  }, [deviceSerial]);
 
   const clearDeviceApps = useCallback(async (): Promise<void> => {
     await serviceRef.current.clearDeviceApps();
@@ -129,6 +148,25 @@ export function useAppManager() {
   const clearAll = useCallback(async (): Promise<void> => {
     await serviceRef.current.clearAll();
     labelCacheRef.current.clear();
+  }, []);
+
+  // --- 新增按设备清理方法 ---
+
+  const clearDeviceAppCache = useCallback(async (serial: string): Promise<void> => {
+    await serviceRef.current.clearDeviceAppCache(serial);
+    labelCacheRef.current.clear();
+  }, []);
+
+  const clearDevicePreferences = useCallback(async (serial: string): Promise<void> => {
+    await serviceRef.current.clearDevicePreferences(serial);
+  }, []);
+
+  const getDeviceCacheInfo = useCallback(async (serial: string) => {
+    return serviceRef.current.getDeviceCacheInfo(serial);
+  }, []);
+
+  const getAllDeviceSerials = useCallback(async () => {
+    return serviceRef.current.getAllDeviceSerials();
   }, []);
 
   return useMemo(() => ({
@@ -150,7 +188,34 @@ export function useAppManager() {
     getPinnedApps,
     clearDeviceApps,
     clearAll,
-  }), [setAdb, getAppList, getAppLabel, getAppIcon, batchGetAppLabels, parseAllApps, abortParseApps, getCachedAppLabels, getAllCachedPackages, clearAppInfoCache, getCacheInfo, syncWithDevice, getAllDeviceApps, incrementLocalCount, togglePin, getPinnedApps, clearDeviceApps, clearAll]);
+    clearDeviceAppCache,
+    clearDevicePreferences,
+    getDeviceCacheInfo,
+    getAllDeviceSerials,
+  }), [
+    setAdb,
+    getAppList,
+    getAppLabel,
+    getAppIcon,
+    batchGetAppLabels,
+    parseAllApps,
+    abortParseApps,
+    getCachedAppLabels,
+    getAllCachedPackages,
+    clearAppInfoCache,
+    getCacheInfo,
+    syncWithDevice,
+    getAllDeviceApps,
+    incrementLocalCount,
+    togglePin,
+    getPinnedApps,
+    clearDeviceApps,
+    clearAll,
+    clearDeviceAppCache,
+    clearDevicePreferences,
+    getDeviceCacheInfo,
+    getAllDeviceSerials,
+  ]);
 }
 
 function formatPackageName(pkg: string): string {
