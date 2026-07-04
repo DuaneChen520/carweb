@@ -123,4 +123,72 @@ describe('FlexDisplayClient', () => {
     vi.advanceTimersByTime(500);
     expect(sendResize).not.toHaveBeenCalled();
   });
+
+  it('pendingResize 未确认时不重复发送相同 target', () => {
+    client.setInitialDisplaySize(1920, 1080);
+    // 第一次 resize → 发送
+    client.onContainerResize(1280, 720, 1.0, 1);
+    vi.advanceTimersByTime(200);
+    expect(sendResize).toHaveBeenCalledTimes(1);
+    expect(sendResize).toHaveBeenCalledWith(1280, 720);
+    // 第二次同尺寸（pendingResize 仍未确认）→ 应跳过
+    client.onContainerResize(1280, 720, 1.0, 1);
+    vi.advanceTimersByTime(200);
+    expect(sendResize).toHaveBeenCalledTimes(1);
+    // 第三次同尺寸 → 仍应跳过
+    client.onContainerResize(1280, 720, 1.0, 1);
+    vi.advanceTimersByTime(200);
+    expect(sendResize).toHaveBeenCalledTimes(1);
+  });
+
+  it('相同 target 已发送后不再重复发（去重）', () => {
+    client.setInitialDisplaySize(1920, 1080);
+    // 发送 1280×720
+    client.onContainerResize(1280, 720, 1.0, 1);
+    vi.advanceTimersByTime(200);
+    expect(sendResize).toHaveBeenCalledWith(1280, 720);
+    // 即使 pendingResize 已被清除，相同 target 也不应重复发
+    client.onSessionPacket(1280, 720, true); // 清除 pending
+    client.onContainerResize(1280, 720, 1.0, 1);
+    vi.advanceTimersByTime(200);
+    expect(sendResize).toHaveBeenCalledTimes(1);
+  });
+
+  it('session 包 clientResized=false 但尺寸匹配时清除 pending', () => {
+    client.setInitialDisplaySize(1920, 1080);
+    client.onContainerResize(1280, 720, 1.0, 1);
+    vi.advanceTimersByTime(200);
+    expect(sendResize).toHaveBeenCalledWith(1280, 720);
+    // server 回复 clientResized=false 但尺寸匹配 → 清除 pending
+    client.onSessionPacket(1280, 720, false);
+    // pending 已被清除，相同尺寸不应再发
+    client.onContainerResize(1280, 720, 1.0, 1);
+    vi.advanceTimersByTime(200);
+    expect(sendResize).toHaveBeenCalledTimes(1);
+  });
+
+  it('session 包尺寸不匹配时不清除 pending（保留重发机制）', () => {
+    client.setInitialDisplaySize(1920, 1080);
+    client.onContainerResize(1280, 720, 1.0, 1);
+    vi.advanceTimersByTime(200);
+    expect(sendResize).toHaveBeenCalledWith(1280, 720);
+    // server 回复不同尺寸（如 App 自旋转 800×600）
+    client.onSessionPacket(800, 600, false);
+    // pending 未清除（因为尺寸不匹配），应重发 pending
+    expect(sendResize).toHaveBeenCalledTimes(2);
+    expect(sendResize).toHaveBeenLastCalledWith(1280, 720);
+  });
+
+  it('不同 target 不受跳过逻辑影响', () => {
+    client.setInitialDisplaySize(1920, 1080);
+    // 发送 1280×720
+    client.onContainerResize(1280, 720, 1.0, 1);
+    vi.advanceTimersByTime(200);
+    expect(sendResize).toHaveBeenCalledWith(1280, 720);
+    // 新 target 1600×900 → 应发送
+    client.onContainerResize(1600, 900, 1.0, 1);
+    vi.advanceTimersByTime(200);
+    expect(sendResize).toHaveBeenCalledTimes(2);
+    expect(sendResize).toHaveBeenLastCalledWith(1600, 900);
+  });
 });

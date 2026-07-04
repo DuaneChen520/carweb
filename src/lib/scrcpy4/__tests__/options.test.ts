@@ -44,7 +44,7 @@ describe('AdbScrcpyOptions4_0', () => {
     expect(opts.serialize()).toContain('keep_active=true');
   });
 
-  it('controlMessageTypes 含 ResizeDisplay（值为 18，在末尾）', () => {
+  it('controlMessageTypes 末尾为 ResizeDisplay', () => {
     const opts = new AdbScrcpyOptions4_0({ video: true, control: true });
     const types = opts.controlMessageTypes;
     expect(types[types.length - 1]).toBe(RESIZE_DISPLAY_TYPE);

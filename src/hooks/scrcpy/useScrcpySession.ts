@@ -178,14 +178,16 @@ export function useScrcpySession() {
         controllerRef.current = controller;
       }
 
-      // 计算 RESIZE_DISPLAY 的 type 字节值
-      const resizeTypeByte = options.controlMessageTypes.indexOf(RESIZE_DISPLAY_TYPE);
+      // RESIZE_DISPLAY 的 type 字节值 = 21（scrcpy 4.0 源码确认），直接用常量
+      const resizeTypeByte = RESIZE_DISPLAY_TYPE;
 
       const flexClient = useVirtualDisplay ? new FlexDisplayClient({
         sendResize: async (w, h) => {
           const ctrl = controllerRef.current;
           if (!ctrl) return;
-          await ctrl.write(serializeResizeDisplay(resizeTypeByte, w, h));
+          const bytes = serializeResizeDisplay(resizeTypeByte, w, h);
+          console.log(`[FlexResize] requestResize: sent RESIZE_DISPLAY type=${resizeTypeByte} bytes=${Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+          await ctrl.write(bytes);
         },
         setCanvasSize: setCanvasSize ?? ((w, h) => { canvas.width = w; canvas.height = h; }),
       }) : null;

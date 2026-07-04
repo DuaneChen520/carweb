@@ -9,9 +9,10 @@ import { createScrcpy4Demuxer } from './video/demuxer';
 /**
  * scrcpy 4.0 新增的 RESIZE_DISPLAY 控制消息类型。
  * @yume-chan/scrcpy 2.x 的 ScrcpyControlMessageType 枚举只到 17（ResetVideo），
- * 4.0 在末尾追加 RESIZE_DISPLAY，线上字节值 = 18。
+ * 4.0 在末尾追加了 CAMERA_SET_TORCH(18) / CAMERA_ZOOM_IN(19) / CAMERA_ZOOM_OUT(20)，
+ * RESIZE_DISPLAY 为 21（经 scrcpy v4.0 源码 ControlMessage.java 确认）。
  */
-export const RESIZE_DISPLAY_TYPE = 18 as ScrcpyControlMessageType;
+export const RESIZE_DISPLAY_TYPE = 21 as ScrcpyControlMessageType;
 
 /**
  * scrcpy 4.0 ADB 选项。

@@ -26,6 +26,8 @@ export class FlexDisplayClient {
   private readonly debounceMs: number;
   private readonly sendResize: (w: number, h: number) => Promise<void>;
   private readonly setCanvasSize: (w: number, h: number) => void;
+  /** 最近一次发送的尺寸，用于去重。 */
+  private lastSentTarget: { w: number; h: number } | null = null;
 
   constructor(opts: FlexDisplayClientOptions) {
     this.sendResize = opts.sendResize;
@@ -59,6 +61,22 @@ export class FlexDisplayClient {
     ) {
       return;
     }
+    // pendingResize 已存在且与新 target 相同 → 跳过（已发送等确认，不重复发）
+    if (
+      this.pendingResize !== null &&
+      this.pendingResize.w === target.w &&
+      this.pendingResize.h === target.h
+    ) {
+      return;
+    }
+    // 与最近一次已发送的完全一致 → 跳过（去重，预防 ResizeObserver 高频触发）
+    if (
+      this.lastSentTarget !== null &&
+      this.lastSentTarget.w === target.w &&
+      this.lastSentTarget.h === target.h
+    ) {
+      return;
+    }
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null;
       this.requestResize(target);
@@ -68,6 +86,7 @@ export class FlexDisplayClient {
   private requestResize(target: { w: number; h: number }): void {
     // squash：只保留最新请求
     this.pendingResize = target;
+    this.lastSentTarget = target;
     this.sendResize(target.w, target.h).catch((e) => {
       console.warn('[FlexClient] RESIZE_DISPLAY 发送失败:', e);
     });
@@ -81,21 +100,29 @@ export class FlexDisplayClient {
 
     if (clientResized) {
       // 客户端请求的 resize 被确认，清除 pending
-      if (
-        this.pendingResize !== null &&
-        this.pendingResize.w === w &&
-        this.pendingResize.h === h
-      ) {
-        this.pendingResize = null;
-      }
+      this.clearPendingIfMatches(w, h);
     } else {
-      // 独立变化（如 App 自旋转），不清除 pending；若 pending 仍在，重发以校正（带节流）
+      // 独立变化（如 App 自旋转），不清除 pending；
+      // 但如果 session 包尺寸与 pendingResize 匹配，server 实际已应用了变化，清除 pending
+      this.clearPendingIfMatches(w, h);
+      // 若 pending 仍在且未与 session 匹配，重发以校正（带节流）
       if (this.pendingResize !== null && Date.now() - this.lastRetryTime > this.retryInterval) {
         this.lastRetryTime = Date.now();
         this.sendResize(this.pendingResize.w, this.pendingResize.h).catch((e) => {
           console.warn('[FlexClient] RESIZE_DISPLAY 重发失败:', e);
         });
       }
+    }
+  }
+
+  /** 如果 pendingResize 与 session 包尺寸匹配，清除 pending。 */
+  private clearPendingIfMatches(w: number, h: number): void {
+    if (
+      this.pendingResize !== null &&
+      this.pendingResize.w === w &&
+      this.pendingResize.h === h
+    ) {
+      this.pendingResize = null;
     }
   }
 
@@ -110,5 +137,6 @@ export class FlexDisplayClient {
       this.debounceTimer = null;
     }
     this.pendingResize = null;
+    this.lastSentTarget = null;
   }
 }
