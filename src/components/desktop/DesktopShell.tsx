@@ -22,43 +22,49 @@
  * 解耦设计：
  * sidebar 通过 children 注入（Task 8 改造 ControlSidebar 后由 App.tsx 注入）。
  * SessionManager 通过 useSessionManager store 直接读取，无需 prop drilling。
+ *
+ * Task 6 集成：FullscreenOverlay 内置 Canvas Reparenting，自动管理 canvas 移动。
+ * Task 5 集成：PaneDropdown 通过 paneDropdownFactory 注入到 SplitPane。
  */
 
 import { type ReactNode, useCallback } from 'react';
 import { SplitPane } from './SplitPane';
+import { FullscreenOverlay } from './FullscreenOverlay';
+import { PaneDropdown } from './PaneDropdown';
 import { useSessionManager } from '@/lib/session-manager';
 import type { DisplayConfig } from '@/lib/scrcpy-session';
 
 interface DesktopShellProps {
   /** 侧边栏内容（ControlSidebar，Task 8 改造后注入） */
   sidebar?: ReactNode;
-  /** 全屏覆盖层（Task 6 实现后注入） */
-  fullscreenOverlay?: ReactNode;
   /** 活动管理面板（Task 7 实现后注入） */
   activityManagerPanel?: ReactNode;
   /** 全部应用浮窗（Task 9 实现后注入） */
   appPickerOverlay?: ReactNode;
-  /** pane 下拉菜单工厂函数（Task 5 实现后注入） */
-  paneDropdownFactory?: (pane: 'left' | 'right') => ReactNode;
-  /** 打开应用选择器回调（pane 模式） */
+  /** 打开应用选择器回调（pane 模式，来自空 pane 点击） */
   onOpenAppPicker?: (pane: 'left' | 'right') => void;
-  /** 显示配置（由 App.tsx 传入，用于 launchOnPane） */
+  /** 打开应用选择器回调（全屏模式，来自侧边栏） */
+  onOpenAppPickerFullscreen?: () => void;
+  /** 切换 pane 应用回调（弹应用选择器 pane 模式） */
+  onSwitchPaneApp?: (pane: 'left' | 'right') => void;
+  /** 显示配置（由 App.tsx 传入，用于 paneToFullscreen 等） */
   displayConfig: DisplayConfig;
 }
 
 export function DesktopShell({
   sidebar,
-  fullscreenOverlay,
   activityManagerPanel,
   appPickerOverlay,
-  paneDropdownFactory,
   onOpenAppPicker,
+  onSwitchPaneApp,
   displayConfig,
 }: DesktopShellProps) {
   const paneLeft = useSessionManager((s) => s.paneLeft);
   const paneRight = useSessionManager((s) => s.paneRight);
   const getSession = useSessionManager((s) => s.getSession);
   const getPaneApp = useSessionManager((s) => s.getPaneApp);
+  const paneToFullscreen = useSessionManager((s) => s.paneToFullscreen);
+  const closePane = useSessionManager((s) => s.closePane);
 
   const leftApp = getPaneApp('left');
   const rightApp = getPaneApp('right');
@@ -68,6 +74,26 @@ export function DesktopShell({
   const handleOpenPicker = useCallback((pane: 'left' | 'right') => {
     onOpenAppPicker?.(pane);
   }, [onOpenAppPicker]);
+
+  // PaneDropdown 工厂函数
+  const renderPaneDropdown = useCallback((pane: 'left' | 'right') => {
+    const app = pane === 'left' ? leftApp : rightApp;
+    if (!app) return null;
+
+    return (
+      <PaneDropdown
+        pane={pane}
+        app={app}
+        onSwitch={() => onSwitchPaneApp?.(pane)}
+        onFullscreen={() => {
+          void paneToFullscreen(pane);
+        }}
+        onClose={() => {
+          void closePane(pane);
+        }}
+      />
+    );
+  }, [leftApp, rightApp, onSwitchPaneApp, paneToFullscreen, closePane]);
 
   return (
     <div className="w-full h-screen flex bg-slate-200 overflow-hidden">
@@ -87,23 +113,20 @@ export function DesktopShell({
             app={leftApp}
             session={leftSession}
             onOpenAppPicker={() => handleOpenPicker('left')}
-            dropdown={paneDropdownFactory?.('left')}
+            dropdown={renderPaneDropdown('left')}
           />
           <SplitPane
             pane="right"
             app={rightApp}
             session={rightSession}
             onOpenAppPicker={() => handleOpenPicker('right')}
-            dropdown={paneDropdownFactory?.('right')}
+            dropdown={renderPaneDropdown('right')}
           />
         </div>
 
-        {/* 全屏覆盖层：覆盖 DesktopArea，不遮侧边栏（Task 6） */}
-        {fullscreenOverlay && (
-          <div className="absolute inset-0 z-10">
-            {fullscreenOverlay}
-          </div>
-        )}
+        {/* 全屏覆盖层：覆盖 DesktopArea，不遮侧边栏（Task 6）
+            FullscreenOverlay 内置 Canvas Reparenting，自动管理 canvas 移动 */}
+        <FullscreenOverlay displayConfig={displayConfig} />
 
         {/* 活动管理浮窗 / 全部应用浮窗：fixed 定位，可覆盖整个区域（Task 7/9） */}
         {activityManagerPanel}
