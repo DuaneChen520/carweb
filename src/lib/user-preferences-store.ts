@@ -1,9 +1,11 @@
 export interface PinnedRecord {
+  deviceSerial: string;
   packageName: string;
   order: number;
 }
 
 export interface LaunchCountRecord {
+  deviceSerial: string;
   packageName: string;
   localCount: number;
   dexBaseline: number;
@@ -11,7 +13,7 @@ export interface LaunchCountRecord {
 
 export class UserPreferencesStore {
   private dbName: string;
-  private dbVersion = 1;
+  private dbVersion = 2; // 版本 1 → 2
   private db: IDBDatabase | null = null;
 
   constructor(dbName: string = 'user-preferences') {
@@ -20,7 +22,6 @@ export class UserPreferencesStore {
 
   private async openDB(): Promise<IDBDatabase> {
     if (this.db) return this.db;
-
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(this.dbName, this.dbVersion);
 
@@ -32,11 +33,21 @@ export class UserPreferencesStore {
 
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
-        if (!db.objectStoreNames.contains('pinned')) {
-          db.createObjectStore('pinned', { keyPath: 'packageName' });
-        }
-        if (!db.objectStoreNames.contains('launch-counts')) {
-          db.createObjectStore('launch-counts', { keyPath: 'packageName' });
+        if (event.oldVersion < 2) {
+          // 重建 pinned store
+          if (db.objectStoreNames.contains('pinned')) {
+            db.deleteObjectStore('pinned');
+          }
+          db.createObjectStore('pinned', {
+            keyPath: ['deviceSerial', 'packageName']
+          });
+          // 重建 launch-counts store
+          if (db.objectStoreNames.contains('launch-counts')) {
+            db.deleteObjectStore('launch-counts');
+          }
+          db.createObjectStore('launch-counts', {
+            keyPath: ['deviceSerial', 'packageName']
+          });
         }
       };
     });
@@ -44,14 +55,16 @@ export class UserPreferencesStore {
 
   // ── Pinned ──
 
-  async getPinned(): Promise<PinnedRecord[]> {
+  async getPinned(deviceSerial: string): Promise<PinnedRecord[]> {
     const db = await this.openDB();
-
     return new Promise((resolve, reject) => {
       const transaction = db.transaction('pinned', 'readonly');
       const store = transaction.objectStore('pinned');
-      const request = store.getAll();
-
+      const range = IDBKeyRange.bound(
+        [deviceSerial, ''],
+        [deviceSerial, '\uffff']
+      );
+      const request = store.getAll(range);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
         const records = (request.result as PinnedRecord[]).sort(
@@ -62,77 +75,61 @@ export class UserPreferencesStore {
     });
   }
 
-  async setPinned(records: PinnedRecord[]): Promise<void> {
+  async setPinned(deviceSerial: string, records: PinnedRecord[]): Promise<void> {
     const db = await this.openDB();
-
+    // 先清空该设备的固定记录，再批量写入
+    await this.clearPinned(deviceSerial);
     return new Promise((resolve, reject) => {
       const transaction = db.transaction('pinned', 'readwrite');
       const store = transaction.objectStore('pinned');
-      const clearReq = store.clear();
-
-      clearReq.onerror = () => reject(clearReq.error);
-      clearReq.onsuccess = () => {
-        let pending = records.length;
-        if (pending === 0) {
-          resolve();
-          return;
-        }
-
-        for (const record of records) {
-          const putReq = store.put(record);
-          putReq.onerror = () => reject(putReq.error);
-          putReq.onsuccess = () => {
-            pending -= 1;
-            if (pending === 0) resolve();
-          };
-        }
-      };
+      let pending = records.length;
+      if (pending === 0) { resolve(); return; }
+      for (const record of records) {
+        const putReq = store.put({ ...record, deviceSerial });
+        putReq.onerror = () => reject(putReq.error);
+        putReq.onsuccess = () => {
+          pending -= 1;
+          if (pending === 0) resolve();
+        };
+      }
     });
   }
 
-  async togglePinned(packageName: string): Promise<boolean> {
-    const db = await this.openDB();
-
-    const currentlyPinned = await this.isPinned(packageName);
+  async togglePinned(deviceSerial: string, packageName: string): Promise<boolean> {
+    const currentlyPinned = await this.isPinned(deviceSerial, packageName);
     if (currentlyPinned) {
+      const db = await this.openDB();
       return new Promise((resolve, reject) => {
         const transaction = db.transaction('pinned', 'readwrite');
         const store = transaction.objectStore('pinned');
-        const request = store.delete(packageName);
-
+        const request = store.delete([deviceSerial, packageName]);
         request.onerror = () => reject(request.error);
         request.onsuccess = () => resolve(false);
       });
     }
-
-    const existing = await this.getPinned();
-    const maxOrder = existing.reduce(
-      (max, r) => Math.max(max, r.order),
-      -1,
-    );
+    const existing = await this.getPinned(deviceSerial);
+    const maxOrder = existing.reduce((max, r) => Math.max(max, r.order), -1);
     const newRecord: PinnedRecord = {
+      deviceSerial,
       packageName,
       order: maxOrder + 1,
     };
-
+    const db = await this.openDB();
     return new Promise((resolve, reject) => {
       const transaction = db.transaction('pinned', 'readwrite');
       const store = transaction.objectStore('pinned');
       const request = store.put(newRecord);
-
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve(true);
     });
   }
 
-  async isPinned(packageName: string): Promise<boolean> {
+  async isPinned(deviceSerial: string, packageName: string): Promise<boolean> {
     const db = await this.openDB();
-
     return new Promise((resolve, reject) => {
       const transaction = db.transaction('pinned', 'readonly');
       const store = transaction.objectStore('pinned');
-      const request = store.getKey(packageName);
-
+      const request = store.getKey([deviceSerial, packageName]);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve(request.result !== undefined);
     });
@@ -140,14 +137,16 @@ export class UserPreferencesStore {
 
   // ── Launch Counts ──
 
-  async getLaunchCounts(): Promise<Map<string, LaunchCountRecord>> {
+  async getLaunchCounts(deviceSerial: string): Promise<Map<string, LaunchCountRecord>> {
     const db = await this.openDB();
-
     return new Promise((resolve, reject) => {
       const transaction = db.transaction('launch-counts', 'readonly');
       const store = transaction.objectStore('launch-counts');
-      const request = store.getAll();
-
+      const range = IDBKeyRange.bound(
+        [deviceSerial, ''],
+        [deviceSerial, '\uffff']
+      );
+      const request = store.getAll(range);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
         const records = request.result as LaunchCountRecord[];
@@ -160,68 +159,55 @@ export class UserPreferencesStore {
     });
   }
 
-  async incrementLaunchCount(packageName: string): Promise<void> {
-    const db = await this.openDB();
-    const map = await this.getLaunchCounts();
+  async incrementLaunchCount(deviceSerial: string, packageName: string): Promise<void> {
+    const map = await this.getLaunchCounts(deviceSerial);
     const existing = map.get(packageName);
-
     if (existing) {
       existing.localCount += 1;
+      const db = await this.openDB();
       return new Promise((resolve, reject) => {
         const transaction = db.transaction('launch-counts', 'readwrite');
         const store = transaction.objectStore('launch-counts');
         const request = store.put(existing);
-
         request.onerror = () => reject(request.error);
         request.onsuccess = () => resolve();
       });
     }
-
     const newRecord: LaunchCountRecord = {
+      deviceSerial,
       packageName,
       localCount: 1,
       dexBaseline: 0,
     };
-
+    const db = await this.openDB();
     return new Promise((resolve, reject) => {
       const transaction = db.transaction('launch-counts', 'readwrite');
       const store = transaction.objectStore('launch-counts');
       const request = store.put(newRecord);
-
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve();
     });
   }
 
-  async bulkSetDexBaseline(
-    entries: [string, number][],
-  ): Promise<void> {
+  async bulkSetDexBaseline(deviceSerial: string, entries: [string, number][]): Promise<void> {
     const db = await this.openDB();
-
     return new Promise((resolve, reject) => {
       const transaction = db.transaction('launch-counts', 'readwrite');
       const store = transaction.objectStore('launch-counts');
       let pending = entries.length;
-
-      if (pending === 0) {
-        resolve();
-        return;
-      }
-
+      if (pending === 0) { resolve(); return; }
       for (const [packageName, baseline] of entries) {
-        const getReq = store.get(packageName);
+        const getReq = store.get([deviceSerial, packageName]);
         getReq.onerror = () => reject(getReq.error);
         getReq.onsuccess = () => {
-          const existing = getReq.result as
-            | LaunchCountRecord
-            | undefined;
+          const existing = getReq.result as LaunchCountRecord | undefined;
           const record: LaunchCountRecord = existing ?? {
+            deviceSerial,
             packageName,
             localCount: 0,
             dexBaseline: 0,
           };
           record.dexBaseline = baseline;
-
           const putReq = store.put(record);
           putReq.onerror = () => reject(putReq.error);
           putReq.onsuccess = () => {
@@ -235,63 +221,80 @@ export class UserPreferencesStore {
 
   // ── Clear Methods ──
 
-  async clearPinned(): Promise<void> {
+  async clearPinned(deviceSerial: string): Promise<void> {
     const db = await this.openDB();
-
     return new Promise((resolve, reject) => {
       const transaction = db.transaction('pinned', 'readwrite');
       const store = transaction.objectStore('pinned');
-      const request = store.clear();
-
+      const range = IDBKeyRange.bound(
+        [deviceSerial, ''],
+        [deviceSerial, '\uffff']
+      );
+      const request = store.delete(range);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve();
     });
   }
 
-  async clearLocalCounts(): Promise<void> {
+  async clearLocalCounts(deviceSerial: string): Promise<void> {
     const db = await this.openDB();
-
     return new Promise((resolve, reject) => {
       const transaction = db.transaction('launch-counts', 'readwrite');
       const store = transaction.objectStore('launch-counts');
-      const cursor = store.openCursor();
-
-      cursor.onerror = () => reject(cursor.error);
-      cursor.onsuccess = () => {
-        const result = cursor.result;
-        if (result) {
-          const record = result.value as LaunchCountRecord;
-          record.localCount = 0;
-          result.update(record);
-          result.continue();
-        } else {
-          resolve();
-        }
-      };
+      const range = IDBKeyRange.bound(
+        [deviceSerial, ''],
+        [deviceSerial, '\uffff']
+      );
+      const request = store.delete(range);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve();
     });
   }
 
-  async clearAll(): Promise<void> {
+  async clearAll(deviceSerial: string): Promise<void> {
+    await Promise.all([
+      this.clearPinned(deviceSerial),
+      this.clearLocalCounts(deviceSerial),
+    ]);
+  }
+
+  async clearAllDevices(): Promise<void> {
     const db = await this.openDB();
-
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction(
-        ['pinned', 'launch-counts'],
-        'readwrite',
-      );
-      const pinnedStore = transaction.objectStore('pinned');
-      const countsStore = transaction.objectStore('launch-counts');
-
+      const transaction = db.transaction(['pinned', 'launch-counts'], 'readwrite');
       let done = 0;
       const onSuccess = () => {
         done += 1;
         if (done === 2) resolve();
       };
-
-      pinnedStore.clear().onsuccess = onSuccess;
-      countsStore.clear().onsuccess = onSuccess;
-
+      transaction.objectStore('pinned').clear().onsuccess = onSuccess;
+      transaction.objectStore('launch-counts').clear().onsuccess = onSuccess;
       transaction.onerror = () => reject(transaction.error);
     });
+  }
+
+  async allDeviceSerials(): Promise<string[]> {
+    const db = await this.openDB();
+    const pinnedSerials = await new Promise<string[]>((resolve, reject) => {
+      const transaction = db.transaction('pinned', 'readonly');
+      const store = transaction.objectStore('pinned');
+      const request = store.getAllKeys();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const keys = (request.result as [string, string][]);
+        resolve([...new Set(keys.map(k => k[0]))]);
+      };
+    });
+    const countsSerials = await new Promise<string[]>((resolve, reject) => {
+      const transaction = db.transaction('launch-counts', 'readonly');
+      const store = transaction.objectStore('launch-counts');
+      const request = store.getAllKeys();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const keys = (request.result as [string, string][]);
+        resolve([...new Set(keys.map(k => k[0]))]);
+      };
+    });
+    return [...new Set([...pinnedSerials, ...countsSerials])];
   }
 }
