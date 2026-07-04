@@ -1,9 +1,13 @@
 import { useCallback, useMemo } from 'react';
 import type { ScrcpyControlMessageWriter } from '@yume-chan/scrcpy';
 import { AndroidKeyCode, AndroidKeyEventAction } from '@yume-chan/scrcpy';
+import type { ControllerHealth } from '@/lib/scrcpy4';
 
-export function useInputInjector(controllerRef: React.RefObject<ScrcpyControlMessageWriter | null>) {
-const injectTouch = useCallback(async (message: {
+export function useInputInjector(
+  controllerRef: React.RefObject<ScrcpyControlMessageWriter | null>,
+  health: ControllerHealth,
+) {
+  const injectTouch = useCallback(async (message: {
     action: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
     pointerId: bigint;
     pointerX: number;
@@ -14,45 +18,37 @@ const injectTouch = useCallback(async (message: {
     actionButton: number;
     buttons: number;
   }) => {
-    for (let attempt = 0; attempt <= 3; attempt++) {
-      const controller = controllerRef.current;
-      if (!controller) return;
+    const controller = health.tryGetController(controllerRef);
+    if (!controller) return;
 
-      try {
-        await controller.injectTouch(message);
-        return;
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        if (msg.includes('Socket closed') && attempt < 3) {
-          // resize 期间控制 Socket 短暂关闭，重试等待恢复
-          await new Promise(r => setTimeout(r, 100 * (attempt + 1)));
-          continue;
-        }
-        if (msg.includes('Socket closed')) {
-          // 3 次重试用尽 → Socket 已永久死亡，清除引用防止后续刷屏
-          console.warn('[touch] 控制 Socket 已永久关闭，停止触摸注入:', msg);
-          controllerRef.current = null;
-        } else {
-          console.error('[touch] 触摸事件转发错误:', error);
-        }
-        return;
+    try {
+      await controller.injectTouch(message);
+      health.markHealthy();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (msg.includes('Socket closed')) {
+        console.log(`[touch] Socket closed，交 ControllerHealth 处理`);
+      } else {
+        console.error('[touch] 触摸事件转发错误:', error);
       }
+      health.reportError(error);
     }
-  }, [controllerRef]);
+  }, [controllerRef, health]);
 
   const injectText = useCallback(async (text: string) => {
-    const controller = controllerRef.current;
+    const controller = health.tryGetController(controllerRef);
     if (!controller) return;
 
     try {
       await controller.injectText(text);
+      health.markHealthy();
     } catch (error) {
-      console.error('文本输入错误:', error);
+      health.reportError(error);
     }
-  }, [controllerRef]);
+  }, [controllerRef, health]);
 
   const injectKeyCode = useCallback(async (keyCode: AndroidKeyCode) => {
-    const controller = controllerRef.current;
+    const controller = health.tryGetController(controllerRef);
     if (!controller) return;
 
     try {
@@ -68,39 +64,41 @@ const injectTouch = useCallback(async (message: {
         repeat: 0,
         metaState: 0,
       });
+      health.markHealthy();
     } catch (error) {
-      console.error('按键注入错误:', error);
+      health.reportError(error);
     }
-  }, [controllerRef]);
+  }, [controllerRef, health]);
 
   const goHome = useCallback(async () => {
     await injectKeyCode(AndroidKeyCode.AndroidHome);
   }, [injectKeyCode]);
 
   const goBack = useCallback(async () => {
-    const controller = controllerRef.current;
+    const controller = health.tryGetController(controllerRef);
     if (!controller) return;
     try {
       await controller.backOrScreenOn(0);
+      health.markHealthy();
     } catch (error) {
-      console.error('返回错误:', error);
+      health.reportError(error);
     }
-  }, [controllerRef]);
+  }, [controllerRef, health]);
 
   const showRecentApps = useCallback(async () => {
     await injectKeyCode(AndroidKeyCode.AndroidAppSwitch);
   }, [injectKeyCode]);
 
   const startApp = useCallback(async (appName: string) => {
-    const controller = controllerRef.current;
+    const controller = health.tryGetController(controllerRef);
     if (!controller) return;
-
     try {
       await controller.startApp(appName);
+      health.markHealthy();
     } catch (error) {
-      console.error('启动应用错误:', error);
+      health.reportError(error);
     }
-  }, [controllerRef]);
+  }, [controllerRef, health]);
 
   return useMemo(() => ({
     injectTouch,

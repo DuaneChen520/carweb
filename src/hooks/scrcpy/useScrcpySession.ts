@@ -3,7 +3,7 @@ import type { AdbScrcpyClient } from '@yume-chan/adb-scrcpy';
 import { AdbScrcpyExitedError } from '@yume-chan/adb-scrcpy';
 import type { ScrcpyControlMessageWriter } from '@yume-chan/scrcpy';
 import { ScrcpyNewDisplay, ScrcpyCaptureOrientation } from '@yume-chan/scrcpy';
-import { AdbScrcpyOptions4_0, FlexDisplayClient, serializeResizeDisplay, RESIZE_DISPLAY_TYPE } from '@/lib/scrcpy4';
+import { AdbScrcpyOptions4_0, FlexDisplayClient, serializeResizeDisplay, RESIZE_DISPLAY_TYPE, ControllerHealth } from '@/lib/scrcpy4';
 import type { Adb } from '@yume-chan/adb';
 import { useVideoDecoder } from './useVideoDecoder';
 import { useAudioDecoder } from './useAudioDecoder';
@@ -82,20 +82,30 @@ export function useScrcpySession() {
     flexClientRef.current = flexClient;
   }, [flexClient]);
 
-  const clientRef = useRef<AdbScrcpyClient<AdbScrcpyOptions4_0<true>> | null>(null);
-  const controllerRef = useRef<ScrcpyControlMessageWriter | null>(null);
-  const adbRef = useRef<Adb | null>(null);
-  const rotationStateRef = useRef<RotationState | null>(null);
-  const displayIdRef = useRef<number | null>(null);
-  const startingLockRef = useRef<boolean>(false);
-  const flexClientRef = useRef<FlexDisplayClient | null>(null);
+const clientRef = useRef<AdbScrcpyClient<AdbScrcpyOptions4_0<true>> | null>(null);
+const controllerRef = useRef<ScrcpyControlMessageWriter | null>(null);
+const adbRef = useRef<Adb | null>(null);
+const rotationStateRef = useRef<RotationState | null>(null);
+const displayIdRef = useRef<number | null>(null);
+const startingLockRef = useRef<boolean>(false);
+const flexClientRef = useRef<FlexDisplayClient | null>(null);
+const canvasRef = useRef<HTMLCanvasElement | null>(null);
+const healthRef = useRef<ControllerHealth>(new ControllerHealth());
+const reconnectAttemptRef = useRef(0);
+const MAX_RECONNECT_ATTEMPTS = 3;
 
-  const videoDecoder = useVideoDecoder();
-  const audioDecoder = useAudioDecoder();
-  const inputInjector = useInputInjector(controllerRef);
-  const appManager = useAppManager();
+const videoDecoder = useVideoDecoder();
+const audioDecoder = useAudioDecoder();
+const inputInjector = useInputInjector(controllerRef, healthRef.current);
+const appManager = useAppManager();
 
   const startScrcpy = useCallback(async (adb: Adb, canvas: HTMLCanvasElement, displayConfig?: DisplayConfig, setCanvasSize?: (w: number, h: number) => void) => {
+    // 保存 canvas 供自动重连使用
+    canvasRef.current = canvas;
+    // 重置重连状态
+    healthRef.current.reset();
+    reconnectAttemptRef.current = 0;
+
     // 防止并行调用
     if (startingLockRef.current) {
       console.warn('[Scrcpy] startScrcpy 被跳过：已有启动正在进行中');
@@ -183,6 +193,7 @@ export function useScrcpySession() {
       const controller = client.controller;
       if (controller) {
         controllerRef.current = controller;
+        healthRef.current.markHealthy();
       }
 
       // RESIZE_DISPLAY 的 type 字节值 = 21（scrcpy 4.0 源码确认），直接用常量
@@ -190,11 +201,20 @@ export function useScrcpySession() {
 
       const flexClient = useVirtualDisplay ? new FlexDisplayClient({
         sendResize: async (w, h) => {
-          const ctrl = controllerRef.current;
-          if (!ctrl) return;
-          const bytes = serializeResizeDisplay(resizeTypeByte, w, h);
-          console.log(`[FlexResize] requestResize: sent RESIZE_DISPLAY type=${resizeTypeByte} bytes=${Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-          await ctrl.write(bytes);
+          const ctrl = healthRef.current.tryGetController(controllerRef);
+          if (!ctrl) {
+            console.warn(`[FlexResize] sendResize skipped: controller DEAD, pending=${w}x${h}`);
+            return;
+          }
+          try {
+            const bytes = serializeResizeDisplay(resizeTypeByte, w, h);
+            console.log(`[FlexResize] requestResize: sent RESIZE_DISPLAY type=${resizeTypeByte} bytes=${Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+            await ctrl.write(bytes);
+            healthRef.current.markHealthy();
+          } catch (error) {
+            console.warn(`[FlexResize] sendResize failed: ${error instanceof Error ? error.message : String(error)}, controllerDead=${healthRef.current.isDead()}`);
+            healthRef.current.reportError(error);
+          }
         },
         setCanvasSize: setCanvasSize ?? ((w, h) => { canvas.width = w; canvas.height = h; }),
       }) : null;
@@ -430,10 +450,61 @@ setState(prev => ({
     }
   }, [ensureDisplayId]);
 
+  const reconnect = useCallback(async () => {
+    const adb = adbRef.current;
+    const canvas = canvasRef.current;
+    if (!adb || !canvas) {
+      console.warn('[Scrcpy] 无法重连：adb 或 canvas 不可用');
+      return;
+    }
+
+    if (reconnectAttemptRef.current >= MAX_RECONNECT_ATTEMPTS) {
+      console.error('[Scrcpy] 重连次数已达上限，停止自动重连');
+      setState(prev => ({ ...prev, isRunning: false, error: '连接已断开，请手动重连' }));
+      return;
+    }
+
+    reconnectAttemptRef.current++;
+    console.log(`[Scrcpy] 自动重连尝试 ${reconnectAttemptRef.current}/${MAX_RECONNECT_ATTEMPTS}`);
+
+    try {
+      // 清理旧会话
+      await stopScrcpy();
+
+      // 退避等待
+      const delay = 500 * Math.pow(2, reconnectAttemptRef.current - 1);
+      console.log(`[Scrcpy] 重连退避 ${delay}ms`);
+      await new Promise(r => setTimeout(r, delay));
+
+      // 重新启动（使用当前容器尺寸，由外部 displayConfig 管理）
+      await startScrcpy(adb, canvas);
+
+      // 成功 → 重置计数
+      reconnectAttemptRef.current = 0;
+      console.log(`[Scrcpy] 自动重连成功`);
+    } catch (error) {
+      console.error(`[Scrcpy] 重连失败 (${reconnectAttemptRef.current}/${MAX_RECONNECT_ATTEMPTS}):`, error);
+    }
+  }, [startScrcpy, stopScrcpy]);
+
+  // 自动重连守护：监听 ControllerHealth DEAD 态
+  useEffect(() => {
+    const health = healthRef.current;
+    return health.onStateChange((state) => {
+      if (state === 'DEAD') {
+        console.log('[CtrlHealth] DEAD → 触发自动重连');
+        setTimeout(() => {
+          reconnect();
+        }, 100);
+      }
+    });
+  }, [reconnect]);
+
   return {
     ...state,
     startScrcpy,
     stopScrcpy,
+    reconnect,
     flexClient,
     flexClientRef,
     injectTouch: inputInjector.injectTouch,
