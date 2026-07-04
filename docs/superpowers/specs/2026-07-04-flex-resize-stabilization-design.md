@@ -1,7 +1,7 @@
 # CarWeb Flex Display Resize 稳定化设计
 
 - 日期：2026-07-04
-- 状态：草案（待用户审阅）
+- 状态：已实现（见 `docs/superpowers/plans/2026-07-04-flex-resize-stabilization-plan.md`）
 - 关联：`docs/superpowers/specs/2026-07-01-scrcpy4-flex-display-design.md`、`docs/superpowers/specs/2026-07-04-usb-disconnect-handling-design.md`
 
 ## 1. 背景与问题

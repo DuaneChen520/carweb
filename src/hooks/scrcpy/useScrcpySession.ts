@@ -407,6 +407,8 @@ setState(prev => ({
   }, []);
 
   const resizeDisplay = useCallback(async (width: number, height: number, dpi: number) => {
+    // 已废弃：flex-client 接管了 resize（通过 RESIZE_DISPLAY 控制消息）。
+    // 保留作为 flex-client 失败时的 ADB shell 降级路径。
     const adb = adbRef.current;
     if (!adb) return;
 
