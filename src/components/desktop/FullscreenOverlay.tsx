@@ -3,19 +3,20 @@
  *
  * 设计文档 §2.4 / §3.1 / §12.3：
  * - 覆盖侧边栏右侧的 DesktopArea，不遮住侧边栏
+ * - 全屏尺寸 = DesktopArea 尺寸（浏览器窗口 - 侧边栏）
  * - 承载 fullscreenSessionId 对应 session 的 canvas
  * - 顶部 FullscreenDropdown
  *
  * 核心机制（§3.1 关键原则）：session 不重启，只换渲染目标 canvas。
- * 分屏 ↔ 全屏转换时，通过 ScrcpySession.reparentCanvas() 移动 DOM 父节点，
- * WebGL context 保持不变，音频画面连续不断。
  *
- * 实现要点：
- * 1. overlay 容器 ref 通过 useEffect 监听 fullscreenSessionId 变化
- * 2. 当 fullscreenSessionId 存在时，调用 session.reparentCanvas(overlayContainer)
- * 3. canvas 从 SplitPane 容器移动到 FullscreenOverlay 容器，WebGL context 不变
- * 4. 退出全屏时，SessionManager.fullscreenToPane/fullscreenToDesktop 会更新状态，
- *    SplitPane 的 useEffect 会自动把 canvas reparent 回 pane 容器
+ * 自适应尺寸（bugfix 2026-07-05 v2）：
+ * ResizeObserver 监听 overlay 容器尺寸 → flexClient.onContainerResize →
+ * 设备调整虚拟屏分辨率到全屏尺寸。
+ *
+ * 与 SplitPane 共享同一套 resize 管线：
+ * - sessionIsRunning 订阅触发 re-render
+ * - flexClientRef 在 render 时同步
+ * - ResizeObserver 依赖 sessionIsRunning 确保容器出现时启动
  */
 
 import { useEffect, useRef } from 'react';
@@ -24,12 +25,17 @@ import { FullscreenDropdown } from './FullscreenDropdown';
 import type { DisplayConfig } from '@/lib/scrcpy-session';
 
 interface FullscreenOverlayProps {
-  /** 显示配置（用于 fullscreenToPane 时的 displayConfig，可选） */
+  /** 显示配置（保留接口，当前由 ResizeObserver 动态调整） */
   displayConfig?: DisplayConfig;
+  /** 分辨率缩放系数，默认 1.0 */
+  resizeScale?: number;
 }
 
-export function FullscreenOverlay({ displayConfig }: FullscreenOverlayProps) {
+export function FullscreenOverlay({ displayConfig, resizeScale = 1.0 }: FullscreenOverlayProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const flexClientRef = useRef<import('@/lib/scrcpy4').FlexDisplayClient | null>(null);
+  const lastSizeRef = useRef({ width: 0, height: 0 });
+
   const fullscreenSessionId = useSessionManager((s) => s.fullscreenSessionId);
   const getSession = useSessionManager((s) => s.getSession);
   const getPaneApp = useSessionManager((s) => s.getPaneApp);
@@ -41,20 +47,70 @@ export function FullscreenOverlay({ displayConfig }: FullscreenOverlayProps) {
     s.fullscreenSessionId ? s.apps.find((a) => a.sessionId === s.fullscreenSessionId) : undefined
   );
 
-  // Canvas Reparenting：当 fullscreenSessionId 变化时，将 canvas 移到 overlay 容器
+  // 订阅 session isRunning 状态，start 完成后触发 re-render
+  const sessionIsRunning = useSessionManager((s) => {
+    if (!fullscreenSessionId) return false;
+    const managed = s.sessions[fullscreenSessionId];
+    return managed?.state.isRunning ?? false;
+  });
+
+  // 同步 flexClientRef（render 时执行，拿到最新值）
+  flexClientRef.current = session?.flexClientInstance ?? null;
+
+  // flexClient 新可用时，立即用缓存尺寸触发一次 resize
+  useEffect(() => {
+    const fc = flexClientRef.current;
+    if (fc && lastSizeRef.current.width > 0 && lastSizeRef.current.height > 0) {
+      fc.onContainerResize(
+        lastSizeRef.current.width,
+        lastSizeRef.current.height,
+        resizeScale,
+        window.devicePixelRatio || 1,
+      );
+    }
+  }, [session, sessionIsRunning, resizeScale]);
+
+  // 1. Canvas Reparenting
   useEffect(() => {
     const container = containerRef.current;
     if (!container || !session?.canvas) return;
 
-    // 将 session 的 canvas reparent 到 overlay 容器
-    // WebGL context 保持不变（Task 6 核心机制）
     if (session.canvas.parentElement !== container) {
       container.appendChild(session.canvas);
     }
-  }, [session, fullscreenSessionId]);
+  }, [session, fullscreenSessionId, sessionIsRunning]);
 
-  // 清理：overlay 卸载时无需显式移除 canvas，
-  // SplitPane 的 useEffect 会在 fullscreenSessionId 变 null 时自动 reparent 回去
+  // 2. ResizeObserver —— 全屏覆盖层也需要动态调整虚拟屏尺寸
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+
+      const { width, height } = entry.contentRect;
+      if (width === 0 || height === 0) return;
+
+      lastSizeRef.current = { width, height };
+
+      const fc = flexClientRef.current;
+      if (fc) {
+        fc.onContainerResize(
+          width,
+          height,
+          resizeScale,
+          window.devicePixelRatio || 1,
+        );
+      }
+    });
+
+    observer.observe(container);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [fullscreenSessionId, session, sessionIsRunning, resizeScale]);
 
   if (!fullscreenSessionId || !session || !app) {
     return null;
