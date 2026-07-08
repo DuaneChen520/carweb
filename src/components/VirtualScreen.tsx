@@ -6,6 +6,7 @@ import type { ResolutionPresetKey } from '../hooks/scrcpy';
 import { calculateDpi } from '../utils/display';
 import { useAdbStore } from '../hooks/useAdbStore';
 import { useScrcpyContext } from '../contexts/ScrcpyContext';
+import { subscribeLinkState } from '../lib/link-state-bus';
 import { ControlSidebar } from './ControlSidebar';
 
 interface VirtualScreenProps {
@@ -133,15 +134,18 @@ currentPresetRef.current = currentPreset;
     };
   }, [stopScrcpy]);
 
-  // adb 消失但 scrcpy 仍在运行 → 僵尸状态，立即清理
-  // 场景：USB 异常断开 → store.setAdb(null)，但 scrcpy session 不知道
+  // 订阅统一链路状态：disconnected / failed → 僵尸清理
+  // 取代原先散落的 !store.adb 反应：ADB-down 由 LinkSupervisor 统一映射为
+  // disconnected；scrcpy 重连用尽则映射为 failed。两者都意味着链路已不可用。
   useEffect(() => {
-    if (!store.adb && hasStartedRef.current) {
-      console.log('[VirtualScreen] adb 消失，停止僵尸 scrcpy session');
-      stopScrcpy();
-      hasStartedRef.current = false;
-    }
-  }, [store.adb, stopScrcpy]);
+    return subscribeLinkState((s) => {
+      if ((s === 'disconnected' || s === 'failed') && hasStartedRef.current) {
+        console.log(`[VirtualScreen] 链路 ${s}，停止僵尸 scrcpy session`);
+        stopScrcpy();
+        hasStartedRef.current = false;
+      }
+    });
+  }, [stopScrcpy]);
 
   useEffect(() => {
     if (!showResMenu) return;

@@ -56,6 +56,8 @@ export interface ScrcpySessionCallbacks {
   onVideoSize: (width: number, height: number) => void;
   onAudioStateChange?: (state: AudioState) => void;
   onHealthChange?: (state: ControllerHealthState) => void;
+  /** flex-client 就绪/销毁时回调（供上层透传到渲染层）。 */
+  onFlexClient?: (flexClient: FlexDisplayClient | null) => void;
 }
 
 // 音频流原始包解析常量（与 useAudioDecoder 一致）
@@ -159,9 +161,13 @@ export class ScrcpySession {
   // ===== 健康监听取消订阅 =====
   private healthUnsubscribe: (() => void) | null = null;
 
-  constructor(id: string, callbacks: ScrcpySessionCallbacks) {
+  constructor(id: string, callbacks: ScrcpySessionCallbacks, health?: ControllerHealth) {
     this.id = id;
     this.callbacks = callbacks;
+    // 允许外部注入共享的健康实例（如与 LinkSupervisor 共用同一个 ControllerHealth）。
+    if (health) {
+      this.health = health;
+    }
 
     // 监听健康状态变化
     this.healthUnsubscribe = this.health.onStateChange((s) => {
@@ -249,14 +255,17 @@ export class ScrcpySession {
    *   而非创建新虚拟屏。用于 T5：后台 app resume 时复用原 displayId，
    *   画面瞬间回前台、无「Launcher 闪→黑→app」重建跳动。
    */
-  async start(adb: Adb, displayConfig?: DisplayConfig, attachDisplayId?: number): Promise<void> {
-    // 复用或创建 canvas
+  async start(adb: Adb, displayConfig?: DisplayConfig, attachDisplayId?: number, externalCanvas?: HTMLCanvasElement): Promise<void> {
+    // 复用或创建 canvas：若调用方传入外部 canvas（如 React 渲染的 <canvas>），优先复用，
+    // 否则自行创建（分屏/全屏路径）。
     if (!this._canvas) {
-      this._canvas = document.createElement('canvas');
-      this._canvas.className = 'scrcpy-canvas';
-      this._canvas.style.width = '100%';
-      this._canvas.style.height = '100%';
-      this._canvas.style.display = 'block';
+      this._canvas = externalCanvas ?? document.createElement('canvas');
+      if (!externalCanvas) {
+        this._canvas.className = 'scrcpy-canvas';
+        this._canvas.style.width = '100%';
+        this._canvas.style.height = '100%';
+        this._canvas.style.display = 'block';
+      }
     }
     const canvas = this._canvas;
 
@@ -418,6 +427,7 @@ export class ScrcpySession {
         },
       }) : null;
       this.flexClient = flexClient;
+      this.callbacks.onFlexClient?.(flexClient);
 
       // 视频流 setup（内联自 useVideoDecoder）
       await this.setupVideoStream(client, canvas, (w, h) => {
@@ -716,6 +726,7 @@ export class ScrcpySession {
       if (this.flexClient) {
         this.flexClient.dispose();
         this.flexClient = null;
+        this.callbacks.onFlexClient?.(null);
       }
 
       if (this.controller) {

@@ -157,7 +157,16 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
 
   // 3. 启动恢复：连接成功后读取持久化 pane 状态（§8.3）
   useEffect(() => {
-    if (!adb || !store.deviceSerial || hasRestoredRef.current) return;
+    // 仅在「已连接且存活」时恢复分屏：以 connectionStatus === 'connected' 为权威活性信号，
+    // 避免对死连接（adb 引用非空但 transport 已断）启动 scrcpy（AdbScrcpyExitedError）。
+    // 断开后清空 hasRestoredRef，使重连后能重新恢复分屏布局。
+    if (store.connectionStatus !== 'connected' || !store.deviceSerial) {
+      if (store.connectionStatus !== 'connected') {
+        hasRestoredRef.current = false;
+      }
+      return;
+    }
+    if (hasRestoredRef.current) return;
     hasRestoredRef.current = true;
 
     const restorePanes = async () => {
@@ -192,7 +201,7 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
     };
 
     void restorePanes();
-  }, [adb, store.deviceSerial, launchOnPane]);
+  }, [store.connectionStatus, store.deviceSerial, launchOnPane]);
 
   // 4. 页面卸载时清理所有 session
   useEffect(() => {

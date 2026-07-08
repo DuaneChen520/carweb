@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useSessionManager, type AppInstance } from '@/lib/session-manager';
+import { useAdbStore } from '@/hooks/useAdbStore';
 import type { ScrcpySession, SessionState } from '@/lib/scrcpy-session';
 import { killScrcpyServer } from '@/lib/adb-commands';
 
@@ -76,6 +77,8 @@ function resetStore() {
     allocatedDisplayIds: new Set(),
     _persistCallback: null,
   });
+  // 模拟已连接：启动门禁要求 connectionStatus === 'connected'（见 2026-07-09 诊断）
+  useAdbStore.setState({ connectionStatus: 'connected' });
   installMockSessionFactory();
 }
 

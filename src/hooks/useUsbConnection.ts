@@ -29,10 +29,12 @@ async function connectOnce(store: AdbStore, device: AdbDaemonWebUsbDevice): Prom
 
 adb.disconnected.then(() => {
 		      console.log('[USB] adb.disconnected resolved — 正常断开');
-		      store.setConnectionStatus('disconnected');
+		      // 先清空 adb/设备引用，再置 status：避免「adb 仍非空但连接已死」的窗口，
+		      // 防止上层在死连接上启动 scrcpy（AdbScrcpyExitedError）。见 2026-07-09 诊断。
 		      store.setAdb(null);
 		      store.setUsbDevice(null);
 		      store.setDeviceInfo(null, null);
+		      store.setConnectionStatus('disconnected');
 		    }, (error) => {
 		      console.warn('[USB] adb.disconnected rejected — 异常断开:', error?.message || error);
 		      store.setConnectionStatus('disconnected');

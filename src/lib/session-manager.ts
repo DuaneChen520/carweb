@@ -22,6 +22,7 @@ import { create } from 'zustand';
 import { ScrcpySession, type DisplayConfig, type SessionState } from './scrcpy-session';
 import type { Adb } from '@yume-chan/adb';
 import { forceStopPackage } from './adb-commands';
+import { useAdbStore } from '@/hooks/useAdbStore';
 import type { AudioState } from '@/hooks/scrcpy/audio/types';
 
 /** 聚合多个 session 的音频状态，决定侧边栏音频/静音按钮的显示 */
@@ -93,6 +94,8 @@ interface SessionManagerState {
   _persistPanes: () => void;
   _registerSession: (sessionId: string, session: ScrcpySession) => void;
   _unregisterSession: (sessionId: string) => void;
+  /** 返回「已连接且存活」的 adb；adb 为空或 connectionStatus 非 'connected' 时返回 null（见 2026-07-09 启动门禁诊断）。 */
+  getLiveAdb: () => Adb | null;
   /** 让一个 app 进入 background 状态（断开 scrcpy，保留虚拟屏） */
   _backgroundify: (sessionId: string) => Promise<void>;
   /** 重启 background app 的 scrcpy session（恢复 streaming，复用原 displayId） */
@@ -275,7 +278,7 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
     if (!app || !managed) return;
 
     const session = managed.session;
-    const adb = state.adb;
+    const adb = get().getLiveAdb();
     if (!adb) return;
 
     // start 会复用 session 的 canvas（如果存在）。
@@ -298,6 +301,17 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
       Object.values(get().sessions).forEach(({ session }) => session.invalidateAdb());
     }
     set({ adb });
+  },
+
+  getLiveAdb: () => {
+    const { adb } = get();
+    if (!adb) return null;
+    // 仅 connectionStatus === 'connected' 视为存活：拦截「store.adb 非空但底层
+    // transport 已死」的竞态（断开处理先置 status 再置空 adb 的窗口、或残留引用），
+    // 避免对死连接调用 session.start 导致 scrcpy server 立即退出
+    // （AdbScrcpyExitedError: scrcpy server exited prematurely）。见 2026-07-09 诊断。
+    if (useAdbStore.getState().connectionStatus !== 'connected') return null;
+    return adb;
   },
 
   setPersistCallback: (cb) => set({ _persistCallback: cb }),
@@ -332,7 +346,7 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
 
   // ===== launchOnPane（§5 启动入口）=====
   launchOnPane: async (packageName, pane, displayConfig, appLabel) => {
-    const { adb } = get();
+    const adb = get().getLiveAdb();
     if (!adb) {
       console.error('[SessionManager] launchOnPane 失败：adb 未连接');
       return null;
@@ -388,7 +402,8 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
 
   // ===== launchFullscreen（§5 启动入口）=====
   launchFullscreen: async (packageName, displayConfig, appLabel) => {
-    const { adb, fullscreenSessionId } = get();
+    const { fullscreenSessionId } = get();
+    const adb = get().getLiveAdb();
     if (!adb) {
       console.error('[SessionManager] launchFullscreen 失败：adb 未连接');
       return null;

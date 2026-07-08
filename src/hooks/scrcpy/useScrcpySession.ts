@@ -1,33 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AdbScrcpyClient } from '@yume-chan/adb-scrcpy';
-import { AdbScrcpyExitedError } from '@yume-chan/adb-scrcpy';
-import type { ScrcpyControlMessageWriter } from '@yume-chan/scrcpy';
-import { ScrcpyNewDisplay, ScrcpyCaptureOrientation } from '@yume-chan/scrcpy';
-import { AdbScrcpyOptions4_0, FlexDisplayClient, serializeResizeDisplay, RESIZE_DISPLAY_TYPE, ControllerHealth } from '@/lib/scrcpy4';
 import type { Adb } from '@yume-chan/adb';
-import { useVideoDecoder } from './useVideoDecoder';
-import { useAudioDecoder } from './useAudioDecoder';
-import type { AudioState } from './audio/types';
-import { useInputInjector } from './useInputInjector';
+import { ScrcpySession, type SessionState } from '@/lib/scrcpy-session';
+import { LinkSupervisor } from '@/lib/link-supervisor';
+import { publishLinkState } from '@/lib/link-state-bus';
+import { ControllerHealth, type FlexDisplayClient } from '@/lib/scrcpy4';
+import { useAdbStore } from '../useAdbStore';
 import { useAppManager } from './useAppManager';
 import {
-  runAdbCommand,
-  getRotationState,
-  setRotationLocked,
-  restoreRotation,
   getDefaultIme,
   setIme,
   hideIme,
+  toggleScreen,
   turnOffScreen,
   turnOnScreen,
   resizeDisplay as adbResizeDisplay,
   getCurrentForegroundApp,
   getVirtualDisplayId,
-  killScrcpyServer,
-  killScrcpyByPid,
-  getScrcpyServerPids,
 } from '@/lib/adb-commands';
-import type { RotationState } from '@/lib/adb-commands';
+import type { AudioState } from './audio/types';
 
 export interface DisplayConfig {
   width: number;
@@ -60,6 +50,22 @@ export interface ScrcpyState {
   isVirtualDisplay: boolean;
 }
 
+/**
+ * useScrcpySession —— 薄适配器层。
+ *
+ * 会话的「传输核心」（启动/停止、视频/音频解码、flex 缩放、输入注入、旋转锁定、
+ * 重连 PID 追踪、多实例 scid/互斥）全部委托给 ScrcpySession 类（与分屏桌面
+ * DesktopScreen/SessionManager 共用同一实现），从而：
+ *   - 消除与 ScrcpySession 类的重复实现；
+ *   - 让镜像路径自动获得类已实现的能力（每会话独立 scid、启动互斥、15s 启动超时、
+ *     以及虚拟屏 `vdSystemDecorations:false` 修复——修复「虚拟屏启动多次跳转」）。
+ *
+ * 本 hook 仅保留真正属于 React 层的关注点：
+ *   - 应用管理（useAppManager：设备端解析、IndexedDB 缓存、置顶）；
+ *   - IME 软键盘（showKeyboard/hideKeyboard，依赖 adb shell）；
+ *   - 设备级屏控（togglePhysicalScreen 等，依赖 adb commands）；
+ *   - 链路监督（LinkSupervisor，包裹共享的 ControllerHealth 并广播到 link-state bus）。
+ */
 export function useScrcpySession() {
   const [state, setState] = useState<ScrcpyState>({
     isStarting: false,
@@ -71,308 +77,86 @@ export function useScrcpySession() {
   });
 
   const [audioState, setAudioState] = useState<AudioState>({
-    status: 'idle', route: 'browser', muted: false
+    status: 'idle', route: 'browser', muted: false,
   });
 
   const [flexClient, setFlexClient] = useState<FlexDisplayClient | null>(null);
 
-  // flexClientRef 是 state 的镜像，供闭包（pump 循环、sendResize）同步读取最新值
+  // flexClientRef 是 state 的镜像，供闭包（如渲染层）同步读取最新值
   useEffect(() => {
     flexClientRef.current = flexClient;
   }, [flexClient]);
 
-const clientRef = useRef<AdbScrcpyClient<AdbScrcpyOptions4_0<true>> | null>(null);
-const controllerRef = useRef<ScrcpyControlMessageWriter | null>(null);
-const adbRef = useRef<Adb | null>(null);
-const rotationStateRef = useRef<RotationState | null>(null);
-const displayIdRef = useRef<number | null>(null);
-// T6：记录本次启动的 scrcpy server PID，用于 stop 时精确 kill（避免误杀其它会话）
-const serverPidRef = useRef<number | null>(null);
-const startingLockRef = useRef<boolean>(false);
-const flexClientRef = useRef<FlexDisplayClient | null>(null);
-const canvasRef = useRef<HTMLCanvasElement | null>(null);
-const healthRef = useRef<ControllerHealth>(new ControllerHealth());
-const reconnectAttemptRef = useRef(0);
-const MAX_RECONNECT_ATTEMPTS = 3;
+  const sessionRef = useRef<ScrcpySession | null>(null);
+  const adbRef = useRef<Adb | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const displayConfigRef = useRef<DisplayConfig | undefined>(undefined);
+  // 与 ScrcpySession 共享的单一健康实例：flex-client 输入、LinkSupervisor 都读它。
+  const controlHealthRef = useRef<ControllerHealth>(new ControllerHealth());
+  const supervisorRef = useRef<LinkSupervisor | null>(null);
+  const flexClientRef = useRef<FlexDisplayClient | null>(null);
 
-const videoDecoder = useVideoDecoder();
-const audioDecoder = useAudioDecoder();
-const inputInjector = useInputInjector(controllerRef, healthRef.current);
-const appManager = useAppManager();
+  const appManager = useAppManager();
 
-  const startScrcpy = useCallback(async (adb: Adb, canvas: HTMLCanvasElement, displayConfig?: DisplayConfig, setCanvasSize?: (w: number, h: number) => void) => {
-    // 保存 canvas 供自动重连使用
+  const startScrcpy = useCallback(async (adb: Adb, canvas: HTMLCanvasElement, displayConfig?: DisplayConfig, _setCanvasSize?: (w: number, h: number) => void) => {
+    // 保存 canvas 与显示配置供自动重连使用（修复重连退回镜像模式）
     canvasRef.current = canvas;
-    // 重置重连状态
-    healthRef.current.reset();
-    reconnectAttemptRef.current = 0;
+    displayConfigRef.current = displayConfig;
+    // 重置链路监督（control-socket + 重连计数）
+    controlHealthRef.current.reset();
+    supervisorRef.current?.reset();
+    adbRef.current = adb;
+    // 应用管理依赖 adb 实例（设备端包解析 / IndexedDB 缓存）。
+    appManager.setAdb(adb);
 
-    // 防止并行调用
-    if (startingLockRef.current) {
-      console.warn('[Scrcpy] startScrcpy 被跳过：已有启动正在进行中');
-      return;
-    }
-    startingLockRef.current = true;
-
-    const startTime = Date.now();
-    console.log(`[Scrcpy] startScrcpy 开始, displayConfig:`, displayConfig ? `${displayConfig.width}x${displayConfig.height}` : 'mirror');
-    try {
-      displayIdRef.current = null;
-      setState(prev => ({ ...prev, isStarting: true, error: null, videoWidth: 0, videoHeight: 0 }));
-
-      const { AdbScrcpyClient } = await import('@yume-chan/adb-scrcpy');
-      const { AdbScrcpyOptions4_0 } = await import('@/lib/scrcpy4');
-      const { ReadableStream } = await import('@yume-chan/stream-extra');
-
-      const serverPath = '/data/local/tmp/scrcpy-server.jar';
-      console.log(`[Scrcpy] ${Date.now() - startTime}ms - 开始获取 scrcpy-server.jar`);
-      const response = await fetch(import.meta.env.BASE_URL + 'scrcpy-server.jar');
-      if (!response.ok) {
-        throw new Error(`获取 scrcpy-server.jar 失败: HTTP ${response.status}`);
-      }
-      const arrayBuffer = await response.arrayBuffer();
-      if (arrayBuffer.byteLength === 0) {
-        throw new Error('scrcpy-server.jar 文件为空');
-      }
-      console.log(`[Scrcpy] ${Date.now() - startTime}ms - 开始推送 scrcpy-server.jar (${arrayBuffer.byteLength} bytes)`);
-      await AdbScrcpyClient.pushServer(
-        adb,
-        new ReadableStream({
-          start(controller) {
-            controller.enqueue(new Uint8Array(arrayBuffer));
-            controller.close();
+    if (!sessionRef.current) {
+      sessionRef.current = new ScrcpySession(
+        `mirror-${Date.now()}`,
+        {
+          onStateChange: (s: SessionState) => {
+            setState((prev) => ({
+              ...prev,
+              isStarting: s.isStarting,
+              isRunning: s.isRunning,
+              error: s.error,
+              videoWidth: s.videoWidth,
+              videoHeight: s.videoHeight,
+              isVirtualDisplay: s.isVirtualDisplay,
+            }));
           },
-        }),
-        serverPath,
-      );
-      console.log(`[Scrcpy] ${Date.now() - startTime}ms - 推送完成，开始验证`);
-      // 验证文件已推送到设备
-      const verifyOutput = await runAdbCommand(adb, `ls -la ${serverPath} 2>&1`);
-      if (verifyOutput.includes('No such file') || verifyOutput.includes('not found')) {
-        throw new Error('scrcpy-server.jar 推送验证失败：设备上未找到文件');
-      }
-      console.log(`[Scrcpy] ${Date.now() - startTime}ms - 验证通过: ${verifyOutput}`);
-
-      const useVirtualDisplay = !!displayConfig;
-      const options = new AdbScrcpyOptions4_0({
-        video: true,
-        videoCodec: 'h264',
-        videoBitRate: displayConfig?.bitRate ?? 8000000,
-        maxFps: 60,
-        audio: true,
-        control: true,
-        stayAwake: true,
-        showTouches: false,
-        ...(useVirtualDisplay
-          ? {
-              newDisplay: new ScrcpyNewDisplay(displayConfig.width, displayConfig.height, displayConfig.dpi ?? 320),
-              captureOrientation: ScrcpyCaptureOrientation.Unlocked,
-              displayImePolicy: 'local' as const,
-              flexDisplay: true,
-              keepActive: true,
-            }
-          : { displayId: 0 }
-        ),
-      });
-      console.log(`[Scrcpy] ${Date.now() - startTime}ms - 开始 AdbScrcpyClient.start()`);
-      // T6：启动前记录已有 PID，用于启动后对比确定本次启动的 server PID
-      const pidsBefore = await getScrcpyServerPids(adb);
-      const client = await AdbScrcpyClient.start(adb, serverPath, options);
-      console.log(`[Scrcpy] ${Date.now() - startTime}ms - AdbScrcpyClient.start() 成功`);
-      clientRef.current = client;
-      adbRef.current = adb;
-      appManager.setAdb(adb);
-
-      // T6：确定本次 server PID（启动前后的 PID 差集），供 stop 时精确 kill
-      const pidsAfter = await getScrcpyServerPids(adb);
-      const newPids = pidsAfter.filter((p) => !pidsBefore.includes(p));
-      serverPidRef.current = newPids.length === 1 ? newPids[0]! : (pidsAfter[pidsAfter.length - 1] ?? null);
-      if (serverPidRef.current) {
-        console.log(`[Scrcpy] 记录 server PID: ${serverPidRef.current}`);
-      }
-
-      if (useVirtualDisplay) {
-        try {
-          const prevRotation = await getRotationState(adb);
-          rotationStateRef.current = prevRotation;
-          await setRotationLocked(adb);
-        } catch (e) {
-          console.warn('锁定旋转方向失败:', e);
-        }
-      }
-
-      const controller = client.controller;
-      if (controller) {
-        controllerRef.current = controller;
-        healthRef.current.markHealthy();
-      }
-
-      // RESIZE_DISPLAY 的 type 字节值 = 21（scrcpy 4.0 源码确认），直接用常量
-      const resizeTypeByte = RESIZE_DISPLAY_TYPE;
-
-      const flexClient = useVirtualDisplay ? new FlexDisplayClient({
-        sendResize: async (w, h) => {
-          const ctrl = healthRef.current.tryGetController(controllerRef);
-          if (!ctrl) {
-            console.warn(`[FlexResize] sendResize skipped: controller DEAD, pending=${w}x${h}`);
-            return;
-          }
-          try {
-            const bytes = serializeResizeDisplay(resizeTypeByte, w, h);
-            console.log(`[FlexResize] requestResize: sent RESIZE_DISPLAY type=${resizeTypeByte} bytes=${Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
-            await ctrl.write(bytes);
-            healthRef.current.markHealthy();
-          } catch (error) {
-            console.warn(`[FlexResize] sendResize failed: ${error instanceof Error ? error.message : String(error)}, controllerDead=${healthRef.current.isDead()}`);
-            healthRef.current.reportError(error);
-          }
+          onVideoSize: (w, h) => setState((prev) => ({ ...prev, videoWidth: w, videoHeight: h })),
+          onAudioStateChange: (a) => setAudioState(a),
+          onFlexClient: (fc) => { setFlexClient(fc); flexClientRef.current = fc; },
+          // 健康变化由 LinkSupervisor 直接订阅 controlHealthRef，这里无需处理。
         },
-        setCanvasSize: setCanvasSize ?? ((w, h) => { canvas.width = w; canvas.height = h; }),
-      }) : null;
-      flexClientRef.current = flexClient;
-      setFlexClient(flexClient); // 触发 re-render，Context 透传至 VirtualScreen
-
-      const { width, height } = await videoDecoder.setupVideoStream(
-        client,
-        canvas,
-        // videoStream.sizeChanged（从 configuration 包解析尺寸）：
-        // 既更新 state（供 CSS letterbox），也通知 flex-client 更新 canvas backing store
-        (w, h) => {
-          setState(prev => ({ ...prev, videoWidth: w, videoHeight: h }));
-          flexClient?.onDecoderSizeChanged(w, h);
-        },
-        // 4.0 session 包回调（反抖动状态机）
-        flexClient ? (w, h, clientResized) => flexClient.onSessionPacket(w, h, clientResized) : undefined,
+        controlHealthRef.current,
       );
-
-      if (flexClient && displayConfig) {
-        flexClient.setInitialDisplaySize(displayConfig.width, displayConfig.height);
-      }
-
-      audioDecoder.setupAudioStream(client, setAudioState);
-
-      if (useVirtualDisplay) {
-        const vid = await getVirtualDisplayId(adb);
-        displayIdRef.current = vid;
-      } else {
-        displayIdRef.current = 0;
-      }
-
-setState(prev => ({
-	        ...prev,
-	        isStarting: false,
-	        isRunning: true,
-	        // videoWidth/videoHeight 已由 sizeChanged 回调维护，
-	        // 这里不覆盖，避免被 setupVideoStream 返回的初始 0 冲掉
-	        isVirtualDisplay: useVirtualDisplay,
-	      }));
-
-      // 后台自动同步应用列表
-      appManager.syncWithDevice().then(async (syncResult) => {
-        if (syncResult.toParse.length > 0) {
-          console.log(`[ScrcpySession] 需要解析 ${syncResult.toParse.length} 个应用`);
-          // 执行完整 dex 解析
-          await appManager.parseAllApps();
-        } else {
-          console.log('[ScrcpySession] 缓存完全命中，跳过 dex 解析');
-        }
-      }).catch((err) => {
-        console.warn('[ScrcpySession] 后台同步应用列表失败:', err);
-      });
-    } catch (error) {
-      console.error(`[Scrcpy] ${Date.now() - startTime}ms - 启动失败:`, error);
-      let message = '启动屏幕镜像失败';
-      if (error instanceof AdbScrcpyExitedError) {
-        message = 'scrcpy server exited prematurely';
-        if (error.output.length > 0) {
-          message += ': ' + error.output.join('; ');
-        }
-        console.error(`[Scrcpy] server 输出:`, error.output);
-      } else if (error instanceof Error) {
-        message = error.message;
-      }
-      setState(prev => ({ ...prev, isStarting: false, error: message }));
-      console.error('Scrcpy 启动错误:', error);
-    } finally {
-      startingLockRef.current = false;
     }
-  }, [videoDecoder, audioDecoder, appManager]);
+
+    await sessionRef.current.start(adb, displayConfig, undefined, canvas);
+  }, [appManager]);
 
   const stopScrcpy = useCallback(async () => {
-    try {
-      const adb = adbRef.current;
-      if (adb && rotationStateRef.current) {
-        try {
-          await restoreRotation(adb, rotationStateRef.current);
-        } catch (e) {
-          console.warn('恢复旋转方向失败:', e);
-        }
-        rotationStateRef.current = null;
-      }
-
-      videoDecoder.dispose();
-      audioDecoder.dispose();
-
-      if (flexClientRef.current) {
-        flexClientRef.current.dispose();
-        flexClientRef.current = null;
-      }
-      setFlexClient(null);
-
-      if (controllerRef.current) {
-        controllerRef.current.close();
-        controllerRef.current = null;
-      }
-
-      if (clientRef.current) {
-        await clientRef.current.close();
-        clientRef.current = null;
-      }
-
-      // T6：优先按记录的 server PID 精确 kill（多实例安全，不误杀其它会话）。
-      // PID 未知（如崩溃后 serverPidRef 丢失）时降级为全局 pkill 兜底。
-      if (adb && serverPidRef.current !== null) {
-        await killScrcpyByPid(adb, serverPidRef.current).catch(() => {});
-        serverPidRef.current = null;
-      } else if (adb) {
-        await killScrcpyServer(adb, true).catch(() => {});
-      }
-
-      displayIdRef.current = null;
-
-      // 立即更新状态，不等待虚拟屏销毁
-      setState({
-        isStarting: false,
-        isRunning: false,
-        error: null,
-        videoWidth: 0,
-        videoHeight: 0,
-        isVirtualDisplay: false,
-      });
-    } catch (error) {
-      console.error('停止 Scrcpy 错误:', error);
-    }
-  }, [videoDecoder, audioDecoder, rotationStateRef]);
+    await sessionRef.current?.stop();
+  }, []);
 
   const showKeyboard = useCallback(async () => {
     const adb = adbRef.current;
     if (!adb) return;
-
     try {
       const ime = await getDefaultIme(adb);
       if (ime) {
         await setIme(adb, ime);
       }
-      await inputInjector.goHome();
+      await sessionRef.current?.goHome();
     } catch (error) {
       console.error('显示键盘错误:', error);
     }
-  }, [inputInjector]);
+  }, []);
 
   const hideKeyboard = useCallback(async () => {
     const adb = adbRef.current;
     if (!adb) return;
-
     try {
       await hideIme(adb);
     } catch (error) {
@@ -383,9 +167,7 @@ setState(prev => ({
   const togglePhysicalScreen = useCallback(async () => {
     const adb = adbRef.current;
     if (!adb) return;
-
     try {
-      const { toggleScreen } = await import('@/lib/adb-commands');
       await toggleScreen(adb);
     } catch (error) {
       console.error('切换物理屏幕状态错误:', error);
@@ -395,7 +177,6 @@ setState(prev => ({
   const turnOffPhysicalScreen = useCallback(async () => {
     const adb = adbRef.current;
     if (!adb) return;
-
     try {
       await turnOffScreen(adb);
     } catch (error) {
@@ -406,7 +187,6 @@ setState(prev => ({
   const turnOnPhysicalScreen = useCallback(async () => {
     const adb = adbRef.current;
     if (!adb) return;
-
     try {
       await turnOnScreen(adb);
     } catch (error) {
@@ -415,107 +195,122 @@ setState(prev => ({
   }, []);
 
   const resizeDisplay = useCallback(async (width: number, height: number, dpi: number) => {
-    // 已废弃：flex-client 接管了 resize（通过 RESIZE_DISPLAY 控制消息）。
-    // 保留作为 flex-client 失败时的 ADB shell 降级路径。
+    // flex-client 已接管运行时缩放；此处为 ADB shell 降级路径（改变设备端虚拟屏尺寸）。
     const adb = adbRef.current;
-    if (!adb) return;
-
+    const session = sessionRef.current;
+    if (!adb || !session) return;
     try {
-      await adbResizeDisplay(adb, 0, width, height, dpi);
-      controllerRef.current?.resetVideo();
+      await adbResizeDisplay(adb, session.displayId ?? 0, width, height, dpi);
     } catch (error) {
       console.error('调整虚拟屏尺寸错误:', error);
     }
   }, []);
 
-  const ensureDisplayId = useCallback(async (): Promise<number | null> => {
-    if (displayIdRef.current !== null) return displayIdRef.current;
-    const adb = adbRef.current;
-    if (!adb) return null;
-
-    for (let i = 0; i < 5; i++) {
-      await new Promise(r => setTimeout(r, 500));
-      const vid = await getVirtualDisplayId(adb);
-      if (vid !== null) {
-        displayIdRef.current = vid;
-        return vid;
-      }
-    }
-    return null;
-  }, []);
-
   const getForegroundApp = useCallback(async (): Promise<string | null> => {
     const adb = adbRef.current;
-    if (!adb) return null;
-    const displayId = await ensureDisplayId();
-    return getCurrentForegroundApp(adb, displayId ?? 0);
-  }, [ensureDisplayId]);
+    const session = sessionRef.current;
+    if (!adb || !session) return null;
+    let vid = session.displayId;
+    if (vid == null) vid = await getVirtualDisplayId(adb);
+    return getCurrentForegroundApp(adb, vid ?? 0);
+  }, []);
 
-  const reconnect = useCallback(async () => {
-    const adb = adbRef.current;
-    const canvas = canvasRef.current;
-    if (!adb || !canvas) {
-      console.warn('[Scrcpy] 无法重连：adb 或 canvas 不可用');
-      return;
-    }
+  // 输入注入：全部委托给 ScrcpySession（类内部已封装 ControllerHealth 门控）。
+  const injectTouch = useCallback(async (message: {
+    action: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
+    pointerId: bigint;
+    pointerX: number;
+    pointerY: number;
+    videoWidth: number;
+    videoHeight: number;
+    pressure: number;
+    actionButton: number;
+    buttons: number;
+  }) => {
+    await sessionRef.current?.injectTouch(message);
+  }, []);
 
-    if (reconnectAttemptRef.current >= MAX_RECONNECT_ATTEMPTS) {
-      console.error('[Scrcpy] 重连次数已达上限，停止自动重连');
-      setState(prev => ({ ...prev, isRunning: false, error: '连接已断开，请手动重连' }));
-      return;
-    }
+  const injectText = useCallback(async (text: string) => {
+    await sessionRef.current?.injectText(text);
+  }, []);
 
-    reconnectAttemptRef.current++;
-    console.log(`[Scrcpy] 自动重连尝试 ${reconnectAttemptRef.current}/${MAX_RECONNECT_ATTEMPTS}`);
+  const startApp = useCallback(async (appName: string) => {
+    await sessionRef.current?.startApp(appName);
+  }, []);
 
-    try {
-      // 清理旧会话
-      await stopScrcpy();
+  const goHome = useCallback(async () => {
+    await sessionRef.current?.goHome();
+  }, []);
 
-      // 退避等待
-      const delay = 500 * Math.pow(2, reconnectAttemptRef.current - 1);
-      console.log(`[Scrcpy] 重连退避 ${delay}ms`);
-      await new Promise(r => setTimeout(r, delay));
+  const goBack = useCallback(async () => {
+    await sessionRef.current?.goBack();
+  }, []);
 
-      // 重新启动（使用当前容器尺寸，由外部 displayConfig 管理）
-      await startScrcpy(adb, canvas);
+  const showRecentApps = useCallback(async () => {
+    await sessionRef.current?.showRecentApps();
+  }, []);
 
-      // 成功 → 重置计数
-      reconnectAttemptRef.current = 0;
-      console.log(`[Scrcpy] 自动重连成功`);
-    } catch (error) {
-      console.error(`[Scrcpy] 重连失败 (${reconnectAttemptRef.current}/${MAX_RECONNECT_ATTEMPTS}):`, error);
-    }
-  }, [startScrcpy, stopScrcpy]);
+  // 音频控制：委托给 ScrcpySession，并同步本地 audioState 以便 UI 展示。
+  const resumeAudio = useCallback(() => {
+    sessionRef.current?.resumeAudio();
+  }, []);
 
-  // 自动重连守护：监听 ControllerHealth DEAD 态
+  const setAudioRoute = useCallback((route: 'browser' | 'phone') => {
+    sessionRef.current?.setAudioRoute(route);
+    setAudioState((prev) => ({ ...prev, route }));
+  }, []);
+
+  const setMuted = useCallback((muted: boolean) => {
+    sessionRef.current?.setMuted(muted);
+    setAudioState((prev) => ({ ...prev, muted }));
+  }, []);
+
+  // 链路监督（LinkSupervisor）：统一 control-socket 健康、ADB 链路存活与会话级重连。
+  // 取代原先散落的 reconnectAttemptRef / MAX_RECONNECT_ATTEMPTS / DEAD→reconnect effect。
   useEffect(() => {
-    const health = healthRef.current;
-    return health.onStateChange((state) => {
-      if (state === 'DEAD') {
-        console.log('[CtrlHealth] DEAD → 触发自动重连');
-        setTimeout(() => {
-          reconnect();
-        }, 100);
-      }
+    const supervisor = new LinkSupervisor({
+      reconnect: async () => {
+        const adb = adbRef.current;
+        const canvas = canvasRef.current;
+        if (!adb || !canvas) throw new Error('reconnect: adb/canvas 不可用');
+        await stopScrcpy();
+        // 复用初始 displayConfig，避免虚拟屏会话重连后退回镜像模式
+        await startScrcpy(adb, canvas, displayConfigRef.current);
+      },
+      maxReconnectAttempts: 3,
+      backoffBaseMs: 500,
+      controlHealth: controlHealthRef.current,
     });
-  }, [reconnect]);
+    supervisorRef.current = supervisor;
+    // 把统一链路状态广播到总线，供 App overlay（provider 的父组件）与
+    // VirtualScreen 僵尸清理订阅，取代散落的 adb.disconnected 反应。
+    const unsubBus = supervisor.onLinkStateChange(publishLinkState);
+    const unsub = supervisor.attachAdbSignal({
+      subscribe: (onChange) =>
+        useAdbStore.subscribe((s) => onChange(s.connectionStatus !== 'disconnected')),
+    });
+    return () => {
+      unsub();
+      unsubBus();
+      supervisor.dispose();
+      supervisorRef.current = null;
+    };
+  }, []);
 
   return {
     ...state,
     startScrcpy,
     stopScrcpy,
-    reconnect,
     flexClient,
     flexClientRef,
-    injectTouch: inputInjector.injectTouch,
-    injectText: inputInjector.injectText,
+    injectTouch,
+    injectText,
     showKeyboard,
     hideKeyboard,
-    startApp: inputInjector.startApp,
-    goHome: inputInjector.goHome,
-    goBack: inputInjector.goBack,
-    showRecentApps: inputInjector.showRecentApps,
+    startApp,
+    goHome,
+    goBack,
+    showRecentApps,
     getAppList: appManager.getAppList,
     getAppIcon: appManager.getAppIcon,
     getAppLabel: appManager.getAppLabel,
@@ -531,11 +326,11 @@ setState(prev => ({
     turnOnPhysicalScreen,
     resizeDisplay,
     getForegroundApp,
-    resumeAudio: audioDecoder.resume,
+    resumeAudio,
     audioRoute: audioState.route,
-    setAudioRoute: audioDecoder.setRoute,
+    setAudioRoute,
     isMuted: audioState.muted,
-    setMuted: audioDecoder.setMuted,
+    setMuted,
     audioStatus: audioState.status,
     getAllDeviceApps: appManager.getAllDeviceApps,
     incrementLocalCount: appManager.incrementLocalCount,

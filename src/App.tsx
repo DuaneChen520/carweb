@@ -8,6 +8,7 @@ import { useAdbStore } from './hooks/useAdbStore';
 import { useRememberedDevices, type DisplayMode } from './hooks/useRememberedDevices';
 import { useDevicePin } from './hooks/useDevicePin';
 import { useUsbConnection } from './hooks/useUsbConnection';
+import { subscribeLinkState } from './lib/link-state-bus';
 
 type OverlayState =
   | 'auto-connecting'      // 首次尝试中
@@ -94,12 +95,25 @@ function App() {
     }
   }, [store.connectionStatus, store.deviceSerial, store.deviceName, overlayState, hasPin, finishConnect]);
 
-  // USB 异常断开：从桌面切到重连提示
+  // USB 异常断开（ADB 传输层）：从桌面切到重连提示。
+  // 这是路径无关的 ADB-down 信号，覆盖 virtual（DesktopScreen）与 mirror 两条路径。
   useEffect(() => {
     if (store.connectionStatus === 'disconnected' && overlayState === 'hidden') {
       setOverlayState('reconnecting');
     }
   }, [store.connectionStatus, overlayState]);
+
+  // 统一链路状态（仅镜像路径由 LinkSupervisor 监督）：disconnected / failed
+  // 触发重连提示。覆盖 ADB 层未暴露的 scrcpy 级状态（重连用尽 failed）。
+  // virtual 路径由上面的 connectionStatus 处理，避免重复订阅无监督方的总线。
+  useEffect(() => {
+    if (displayMode !== 'mirror') return;
+    return subscribeLinkState((s) => {
+      if ((s === 'disconnected' || s === 'failed') && overlayState === 'hidden') {
+        setOverlayState('reconnecting');
+      }
+    });
+  }, [displayMode, overlayState]);
 
   // 重连
   const handleReconnect = useCallback(() => {
