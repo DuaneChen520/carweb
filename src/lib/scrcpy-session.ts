@@ -238,7 +238,18 @@ export class ScrcpySession {
    * canvas 由 session 创建并持有，调用方通过 `session.canvas` 获取后插入 DOM。
    * 若 canvas 已存在（如重连场景），复用旧 canvas。
    */
-  async start(adb: Adb, displayConfig?: DisplayConfig): Promise<void> {
+  /**
+   * 启动 scrcpy 会话。
+   *
+   * canvas 由 session 创建并持有，调用方通过 `session.canvas` 获取后插入 DOM。
+   * 若 canvas 已存在（如重连场景），复用旧 canvas。
+   *
+   * @param attachDisplayId 可选。提供时以 attach 模式接管已有的虚拟屏
+   *   （沿用 resumeBackground 的 keepActive 屏，不 newDisplay、不重建），
+   *   而非创建新虚拟屏。用于 T5：后台 app resume 时复用原 displayId，
+   *   画面瞬间回前台、无「Launcher 闪→黑→app」重建跳动。
+   */
+  async start(adb: Adb, displayConfig?: DisplayConfig, attachDisplayId?: number): Promise<void> {
     // 复用或创建 canvas
     if (!this._canvas) {
       this._canvas = document.createElement('canvas');
@@ -278,9 +289,10 @@ export class ScrcpySession {
       }
 
       // 启动前记录已有 PID，用于启动后对比确定本次 PID
-      const pidsBefore = displayConfig ? await getScrcpyServerPids(adb) : [];
+      const attachMode = attachDisplayId != null;
+      const useVirtualDisplay = attachMode || !!displayConfig;
+      const pidsBefore = useVirtualDisplay ? await getScrcpyServerPids(adb) : [];
 
-      const useVirtualDisplay = !!displayConfig;
       // 每会话独立 scid：避免并发会话抢占同一 `localabstract:scrcpy` 隧道（见 generateScid）。
       const scid = generateScid();
       let client!: AdbScrcpyClient<AdbScrcpyOptions4_0Type<true>>;
@@ -304,18 +316,11 @@ export class ScrcpySession {
           throw new Error('scrcpy-server.jar 推送验证失败：设备上未找到文件');
         }
 
-        const options = new AdbScrcpyOptions4_0({
-          video: true,
-          videoCodec: 'h264',
-          videoBitRate: displayConfig?.bitRate ?? 8000000,
-          maxFps: 60,
-          audio: true,
-          control: true,
-          stayAwake: true,
-          showTouches: false,
-          // 每会话独立隧道端点（见 generateScid）：并发会话互不抢占
-          scid,
-          ...(useVirtualDisplay
+        // attach 模式：接管已有虚拟屏（沿用 resumeBackground 的 keepActive 屏），
+        // 用 { displayId: attachDisplayId } 直接 attach，不再 newDisplay / 重建。
+        const displayOptions = attachMode
+          ? { displayId: attachDisplayId }
+          : useVirtualDisplay
             ? {
                 newDisplay: new ScrcpyNewDisplay(displayConfig.width, displayConfig.height, displayConfig.dpi ?? 320),
                 captureOrientation: ScrcpyCaptureOrientation.Unlocked,
@@ -327,8 +332,20 @@ export class ScrcpySession {
                 // 「新屏首帧是 Launcher 桌面」这一跳（scrcpy --no-vd-system-decorations）。
                 vdSystemDecorations: false,
               }
-            : { displayId: 0 }
-          ),
+            : { displayId: 0 };
+
+        const options = new AdbScrcpyOptions4_0({
+          video: true,
+          videoCodec: 'h264',
+          videoBitRate: displayConfig?.bitRate ?? 8000000,
+          maxFps: 60,
+          audio: true,
+          control: true,
+          stayAwake: true,
+          showTouches: false,
+          // 每会话独立隧道端点（见 generateScid）：并发会话互不抢占
+          scid,
+          ...displayOptions,
         });
 
         // 超时保护：USB 断开时底层 transport 流被销毁，AdbScrcpyClient.start()
@@ -416,7 +433,10 @@ export class ScrcpySession {
       // 音频流 setup（内联自 useAudioDecoder）
       await this.setupAudioStream(client);
 
-      if (useVirtualDisplay) {
+      if (attachMode) {
+        // attach 模式：displayId 已知，无需再探测设备端新屏
+        this.displayId = attachDisplayId!;
+      } else if (useVirtualDisplay) {
         const vid = await getVirtualDisplayId(adb);
         this.displayId = vid;
       } else {

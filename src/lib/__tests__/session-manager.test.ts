@@ -169,6 +169,48 @@ describe('SessionManager 状态机', () => {
 
       expect(killScrcpyServer).not.toHaveBeenCalled();
     });
+
+    it('同包名 app 已在分屏运行时，全屏启动复用而非双开（去重）', async () => {
+      const paneId = await useSessionManager.getState().launchOnPane('com.test.dup', 'left', { width: 800, height: 600 });
+
+      const fullId = await useSessionManager.getState().launchFullscreen('com.test.dup', { width: 1920, height: 1080 });
+
+      const state = useSessionManager.getState();
+      // 关键：同一包名仅 1 个 app 实例（无第 2 个进程 / 虚拟屏）
+      const dupApps = state.apps.filter((a) => a.packageName === 'com.test.dup');
+      expect(dupApps).toHaveLength(1);
+      // 复用 pane session，被提升为全屏（未新建 session）
+      expect(fullId).toBe(paneId);
+      expect(state.fullscreenSessionId).toBe(paneId);
+      expect(state.apps.find((a) => a.sessionId === paneId)?.state).toBe('foreground-fullscreen');
+      // 原左 pane 引用已释放（app 已转全屏）
+      expect(state.paneLeft).toBeNull();
+    });
+
+    it('同包名 app 在 background 时，全屏启动走 resume 复用原 displayId（T5 协同）', async () => {
+      // 构造 background 场景：两 pane 占满 + 全屏 app 退回 background
+      await useSessionManager.getState().launchOnPane('com.test.a', 'left', { width: 800, height: 600 });
+      await useSessionManager.getState().launchOnPane('com.test.b', 'right', { width: 800, height: 600 });
+      const bgId = await useSessionManager.getState().launchFullscreen('com.test.dup', { width: 1920, height: 1080 });
+      await useSessionManager.getState().fullscreenToDesktop();
+      const bgBefore = useSessionManager.getState().getApp(bgId!);
+      expect(bgBefore?.state).toBe('background');
+      const displayIdBefore = bgBefore?.displayId ?? 100;
+
+      const fullId = await useSessionManager.getState().launchFullscreen('com.test.dup', { width: 1920, height: 1080 });
+
+      const state = useSessionManager.getState();
+      // 仍仅 1 个实例（复用 background session，未新建）
+      const dupApps = state.apps.filter((a) => a.packageName === 'com.test.dup');
+      expect(dupApps).toHaveLength(1);
+      expect(fullId).toBe(bgId);
+      expect(state.fullscreenSessionId).toBe(bgId);
+      expect(state.apps.find((a) => a.sessionId === bgId)?.state).toBe('foreground-fullscreen');
+
+      // T5：resume 到全屏时，start() 以 attach 模式传入原 displayId（不 newDisplay、不重建屏）
+      const bgSession = state.sessions[bgId!]!.session as unknown as { start: ReturnType<typeof vi.fn> };
+      expect(bgSession.start).toHaveBeenCalledWith(expect.anything(), expect.anything(), displayIdBefore);
+    });
   });
 
   describe('paneToFullscreen', () => {
@@ -338,6 +380,10 @@ describe('SessionManager 状态机', () => {
       const state = useSessionManager.getState();
       const app = state.apps.find((a) => a.sessionId === bgId);
       expect(app?.state).toBe('foreground-pane');
+
+      // T5：resume 时 start() 以 attach 模式传入原 displayId（复用原虚拟屏，不 newDisplay）
+      const bgSession = state.sessions[bgId!]!.session as unknown as { start: ReturnType<typeof vi.fn> };
+      expect(bgSession.start).toHaveBeenCalledWith(expect.anything(), expect.anything(), app?.displayId ?? 100);
     });
 
     it('非 background 状态的 app 调用 resumeBackground 安全返回', async () => {

@@ -75,11 +75,29 @@ Triage 标签：**ready-for-agent**（每条均可由 agent 独立领取）。
 
 **Blocked by:** T2, T3
 
-- [ ] `launchFullscreen` 去掉开头全局 `killScrcpyServer(pkill)` 与对两分屏的 `backgroundify`
-- [ ] 仅对「上一个全屏」做 `backgroundify`（按 PID 精确 kill，不误伤）
-- [ ] 新全屏 session 走 T2 的 `startApp` 路径
-- [ ] 若全屏覆盖某分屏，复用路径2 已有的「覆盖确认」提示
-- [ ] 验收：全屏启动新 app 后左/右分屏仍正常流；仅上一全屏被 backgroundify；覆盖分屏时仍有覆盖确认
+- [x] `launchFullscreen` 去掉开头全局 `killScrcpyServer(pkill)` 与对两分屏的 `backgroundify`
+- [x] 仅对「上一个全屏」做 `backgroundify`（按 PID 精确 kill，不误伤）
+- [x] 新全屏 session 走 T2 的 `startApp` 路径
+- [x] 若全屏覆盖某分屏，复用路径2 已有的「覆盖确认」提示
+- [x] 验收：全屏启动新 app 后左/右分屏仍正常流；仅上一全屏被 backgroundify；覆盖分屏时仍有覆盖确认
+
+**状态：已完成（代码 + 单测）** — 提交 `69eb3c5`（4 文件，+120/-40）。
+
+**落地偏差 / 新增前置（已确认并记录）：**
+
+1. **`scid` 每会话隧道隔离是 T4 目标成立的必要条件，原先未在清单列明。**
+   诊断中发现：@yume-chan 的 3_3_3/4_0 options 路径**未暴露 scid**，所有会话默认共用设备端 `localabstract:scrcpy` 隧道；后启动的会话在 `AdbScrcpyReverseConnection.initialize()` 中会 `reverse.remove(localabstract:scrcpy)`，**拆掉先启动会话已建立的隧道** → 先启动者 `AdbScrcpyExitedError`。这正是旧代码不得不用 `killScrcpyServer(pkill)` 先杀光其它会话的根因。
+   因此「全屏作为第 3 路并发、常驻分屏不杀」在真机上**物理上不可行**，除非先解决隧道隔离。实现方案：每个 `ScrcpySession.start()` 生成独立 8 位十六进制 `scid`（`generateScid()`），传入 `AdbScrcpyOptions4_0`，使各会话走各自的 `localabstract:scrcpy_<scid>`（连接层 `getSocketName` 已支持 scid，base `serialize()` 自动产出 `scid=<value>`，无需手动 push）。该改为**横切**（launchOnPane/resumeBackground 等所有路径均受益），blast radius 超出 launchFullscreen，但属 T4 验收项「左/右分屏仍正常流」的前提，故在此一并落地。scid 是否被正确接受由单测证明（`scrcpy4-options.test.ts` 断言 `scid=` 序列化、且不重复）；**真机验收待实机**（确认 scrcpy-server.jar 接受 `scid=` 参数，scrcpy 4.0 原生支持）。
+
+2. **「覆盖确认」在 launchFullscreen 路径为 N/A，非缺失。** fullscreen 是叠加在第 3 层的覆盖层，**不是分屏替换**；并发上限（§2.3 = 左+右+全屏）由启动顺序隐式保证（先 `backgroundify` 上一全屏释放 1 名额，再起新全屏，总数恒 ≤ 3），故 launchFullscreen **永远不会覆盖/替换某个分屏**，无需在该路径触发覆盖确认。覆盖确认仍由路径2（fullscreenToPane）的 `PaneSelector` 提示承担，未受影响。
+
+3. **修正 `fullscreenToDesktop` 情况3 的测试/注释旧假设。** 原测试依赖「launchFullscreen 会 backgroundify 两分屏」的旧行为来构造「两 pane 都占」场景；T4 下该前置不再成立。已改为用 `launchOnPane`×2 + `launchFullscreen` 直接构造「两 pane 都占 + 全屏无 sourcePane」的真实可达场景，并确认情况3 代码（已为 `_backgroundify(fullscreenSessionId)`）与该语义一致。
+
+**待办（真机验收）：**
+- [ ] 真机确认：全屏启动新 app 后左/右分屏画面继续流、不黑屏、不被杀
+- [ ] 真机确认：仅上一全屏被 backgroundify（画面退回常驻虚拟屏、不停流）
+- [ ] 真机确认：scrcpy-server.jar 接受 `scid=` 参数（隧道隔离生效，无 AdbScrcpyExitedError）
+
 
 ---
 
@@ -89,10 +107,33 @@ Triage 标签：**ready-for-agent**（每条均可由 agent 独立领取）。
 
 **Blocked by:** T2, T3
 
-- [ ] `resumeBackground/_restartSession` 让会话 start() 在传入已有 `displayId` 时「接管已有屏」而非 `newDisplay`
-- [ ] `keepActive` 保存的 `displayId` 真正被复用，旧屏不再孤立泄漏
-- [ ] teardown 按 PID 精确 kill
-- [ ] 验收：后台 app 恢复无重建跳动；复用原 displayId；仅该 session 的 server 被 PID 精确 kill
+- [x] `resumeBackground/_restartSession` 让会话 start() 在传入已有 `displayId` 时「接管已有屏」而非 `newDisplay`
+- [x] `keepActive` 保存的 `displayId` 真正被复用，旧屏不再孤立泄漏
+- [x] teardown 按 PID 精确 kill（沿用 T4 的 `killScrcpyByPid`）
+- [x] 验收（单测）：`resumeBackground` 后 `start()` 以 attach 模式传入原 displayId；仅该 session 的 server 被精确 kill
+
+**状态：已完成（与「同包名去重」bug 合并实现）** — 提交见下方。
+
+**落地说明（与去重 bug 合并，见 T5.1）：**
+- `ScrcpySession.start(adb, displayConfig?, attachDisplayId?)` 新增可选 `attachDisplayId`：提供时 options 用 `{ displayId: attachDisplayId }` 接管已有虚拟屏，`this.displayId` 直接取该值、不再 `newDisplay`/`getVirtualDisplayId`；PID 追踪与旋转锁定沿用 `useVirtualDisplay`（含 attach 模式）。
+- `resumeBackground` 新增 `target?: 'pane' | 'fullscreen'`：默认 `'pane'`（保留原 §7.4 落点规则）；`'fullscreen'` 强制落全屏覆盖层、复用原 displayId、不抢占 pane。供 `launchFullscreen` 去重路由调用。
+
+---
+
+## T5.1 — launchFullscreen 同包名去重（修复双实例 bug）
+
+**What to build:** 侧边栏对已运行中的 app 点「全屏启动」时，复用既有 session/屏/进程，不再拉起第 2 个实例（消除用户报告的「左分屏 + 全屏两个 minimap」双实例）。
+
+**联动 T5：** background 分支依赖 T5 的 attach 模式，否则 resume 会重建屏（跳转回归）。
+
+- [x] `launchFullscreen` 开头按 `packageName` 查找既有 app（优先级 foreground-pane > foreground-fullscreen > background）
+- [x] `foreground-pane` → `paneToFullscreen(pane)`（reparent，零重建，画面连续）
+- [x] `foreground-fullscreen` → no-op 返回（已在全屏，替代旧「backgroundify 旧全屏再新建」）
+- [x] `background` → `resumeBackground(sessionId, displayConfig, 'fullscreen')`（T5 attach 复用原屏）
+- [x] 未命中 → 走原有新建路径（T4 第 3 路并发不变）
+- [x] 单测：左分屏 launch 同包名后 launchFullscreen → 仅 1 实例且被提升为 fullscreen；background 同包名 launchFullscreen → 复用该 session、resume 到全屏、`start()` 以 attach 模式传原 displayId
+
+**范围外（可后续）：** `launchOnPane`/应用选择器 pane 路径同样无同包名去重（点同一 app 进另一 pane 也会双实例）；本期只修全屏路径。
 
 ---
 
@@ -110,10 +151,11 @@ Triage 标签：**ready-for-agent**（每条均可由 agent 独立领取）。
 
 ##  frontier 推进顺序
 
-1. T1（无阻塞，起始）
-2. T2（依赖 T1）
-3. T3（依赖 T1、T2）
-4. T4、T5 可并行（均依赖 T2、T3）
-5. T6（依赖 T4、T5）
+1. T1（无阻塞，起始）— 已完成 `29b6acf`
+2. T2（依赖 T1）— 已完成 `b4c43a8`
+3. T3（依赖 T1、T2）— 已完成 `c7c94ae`
+4. T4（依赖 T2、T3）— 已完成 `69eb3c5`
+5. T5 + T5.1（依赖 T2、T3）— 已完成（本次提交）
+6. T6（依赖 T4、T5）— 可领取
 
 每条工单用 `/implement` 单独领取，工单间清空上下文。

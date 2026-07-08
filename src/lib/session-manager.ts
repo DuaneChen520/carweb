@@ -115,7 +115,7 @@ interface SessionManagerState {
   switchPaneApp: (pane: PaneSlot, packageName: string, displayConfig: DisplayConfig, appLabel?: string) => Promise<void>;
   closeApp: (sessionId: string) => Promise<void>;
   closeAll: () => Promise<void>;
-  resumeBackground: (sessionId: string, displayConfig: DisplayConfig) => Promise<void>;
+  resumeBackground: (sessionId: string, displayConfig: DisplayConfig, target?: 'pane' | 'fullscreen') => Promise<void>;
 
   // ===== 只读访问器（供 UI 层使用）=====
   getSession: (sessionId: string) => ScrcpySession | null;
@@ -278,8 +278,10 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
     const adb = state.adb;
     if (!adb) return;
 
-    // start 会复用 session 的 canvas（如果存在）
-    await session.start(adb, displayConfig);
+    // start 会复用 session 的 canvas（如果存在）。
+    // T5：若 app 已记录 displayId（keepActive 保住的虚拟屏），以 attach 模式
+    // 接管原屏而非 newDisplay，画面瞬间回前台、无重建跳动。
+    await session.start(adb, displayConfig, app.displayId ?? undefined);
 
     // 重新在 displayId 上启动 app
     if (app.displayId !== null) {
@@ -391,6 +393,30 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
     if (!adb) {
       console.error('[SessionManager] launchFullscreen 失败：adb 未连接');
       return null;
+    }
+
+    // 同包名去重（修复「分屏运行中的 app 从侧边栏再全屏 → 双实例」bug）：
+    // 若同一 packageName 已在某状态运行，走状态转换路径复用既有 session/屏/进程，
+    // 而非新建第 2 个实例。优先级：foreground-pane > foreground-fullscreen > background。
+    // background 分支依赖 T5 的 attach 模式（resumeBackground 复用原 displayId，不重建屏）。
+    const samePkgApps = get().apps.filter((a) => a.packageName === packageName);
+    const existingApp =
+      samePkgApps.find((a) => a.state === 'foreground-pane') ??
+      samePkgApps.find((a) => a.state === 'foreground-fullscreen') ??
+      samePkgApps.find((a) => a.state === 'background');
+    if (existingApp) {
+      if (existingApp.state === 'foreground-pane' && existingApp.pane) {
+        // 复用现有 pane session，直接 reparent 到全屏（零重建，画面连续）
+        await get().paneToFullscreen(existingApp.pane);
+        return existingApp.sessionId;
+      }
+      if (existingApp.state === 'foreground-fullscreen') {
+        // 已在全屏，无需动作（替代旧「backgroundify 旧全屏再新建」）
+        return existingApp.sessionId;
+      }
+      // background → resume 到全屏（T5 使其复用原 displayId，无重建跳转）
+      await get().resumeBackground(existingApp.sessionId, displayConfig, 'fullscreen');
+      return existingApp.sessionId;
     }
 
     // T4：全屏是第 3 路并发叠加层（设计 §2.3 并发上限 = 左 + 右 + 全屏），
@@ -635,11 +661,27 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
   },
 
   // ===== resumeBackground（§7.4 落点规则）=====
-  resumeBackground: async (sessionId, displayConfig) => {
+  resumeBackground: async (sessionId, displayConfig, target = 'pane') => {
     const { fullscreenSessionId, paneLeft, paneRight } = get();
     const app = get().apps.find((a) => a.sessionId === sessionId);
     if (!app || app.state !== 'background') {
       console.warn('[SessionManager] resumeBackground: app 不是 background 状态');
+      return;
+    }
+
+    // target === 'fullscreen'（来自 launchFullscreen 同包名去重）：强制落全屏覆盖层，
+    // 复用原 displayId（T5 attach 模式，不重建屏），不抢占 pane。
+    if (target === 'fullscreen') {
+      if (fullscreenSessionId && fullscreenSessionId !== sessionId) {
+        await get()._backgroundify(fullscreenSessionId);
+      }
+      await get()._restartSession(sessionId, displayConfig);
+      get()._updateAppState(sessionId, {
+        state: 'foreground-fullscreen',
+        sourcePane: undefined,
+        pane: undefined,
+      });
+      set({ fullscreenSessionId: sessionId });
       return;
     }
 
