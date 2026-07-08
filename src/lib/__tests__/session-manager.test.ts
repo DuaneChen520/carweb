@@ -1,6 +1,17 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useSessionManager, type AppInstance } from '@/lib/session-manager';
 import type { ScrcpySession, SessionState } from '@/lib/scrcpy-session';
+import { killScrcpyServer } from '@/lib/adb-commands';
+
+// mock adb-commands 中的副作用命令，便于断言 launchFullscreen 不再调用全局 killScrcpyServer。
+vi.mock('@/lib/adb-commands', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/adb-commands')>();
+  return {
+    ...actual,
+    killScrcpyServer: vi.fn(async () => {}),
+    forceStopPackage: vi.fn(async () => {}),
+  };
+});
 
 /**
  * SessionManager 状态机测试。
@@ -133,15 +144,30 @@ describe('SessionManager 状态机', () => {
       expect(oldApp?.state).toBe('background');
     });
 
-    it('两 pane 的 app 进入 background', async () => {
-      const paneId = await useSessionManager.getState().launchOnPane('com.test.a', 'left', { width: 800, height: 600 });
-      await useSessionManager.getState().launchOnPane('com.test.b', 'right', { width: 800, height: 600 });
+    it('常驻分屏不被 backgroundify（T4：全屏是第 3 路并发）', async () => {
+      const paneIdL = await useSessionManager.getState().launchOnPane('com.test.a', 'left', { width: 800, height: 600 });
+      const paneIdR = await useSessionManager.getState().launchOnPane('com.test.b', 'right', { width: 800, height: 600 });
 
       await useSessionManager.getState().launchFullscreen('com.test.c', { width: 1920, height: 1080 });
 
       const state = useSessionManager.getState();
-      const paneApp = state.apps.find((a) => a.sessionId === paneId);
-      expect(paneApp?.state).toBe('background');
+      const leftApp = state.apps.find((a) => a.sessionId === paneIdL);
+      const rightApp = state.apps.find((a) => a.sessionId === paneIdR);
+      // 左/右常驻分屏保持 streaming，不被静默杀死
+      expect(leftApp?.state).toBe('foreground-pane');
+      expect(rightApp?.state).toBe('foreground-pane');
+      expect(state.paneLeft).toBe(paneIdL);
+      expect(state.paneRight).toBe(paneIdR);
+    });
+
+    it('launchFullscreen 不调用全局 killScrcpyServer（T4）', async () => {
+      await useSessionManager.getState().launchOnPane('com.test.a', 'left', { width: 800, height: 600 });
+      await useSessionManager.getState().launchOnPane('com.test.b', 'right', { width: 800, height: 600 });
+      (killScrcpyServer as ReturnType<typeof vi.fn>).mockClear();
+
+      await useSessionManager.getState().launchFullscreen('com.test.c', { width: 1920, height: 1080 });
+
+      expect(killScrcpyServer).not.toHaveBeenCalled();
     });
   });
 
@@ -208,38 +234,33 @@ describe('SessionManager 状态机', () => {
     });
 
     it('情况 2：来自侧边栏 + 有空 pane，放进空 pane', async () => {
-      // launchFullscreen 会 backgroundify 两 pane（§5.1），所以全屏后两 pane 都空
-      // 左 pane 先有 app
+      // T4：launchFullscreen 不再 backgroundify 分屏，故全屏后左 pane 仍被 com.test.a 占，
+      // 右 pane 为空，全屏 app 无 sourcePane。
       await useSessionManager.getState().launchOnPane('com.test.a', 'left', { width: 800, height: 600 });
       const fullId = await useSessionManager.getState().launchFullscreen('com.test.b', { width: 1920, height: 1080 });
-      // 此时两 pane 都空（被 backgroundify），全屏 app 无 sourcePane
+      // 此时左 pane 占（com.test.a foreground-pane），右 pane 空，全屏 app 无 sourcePane
 
       await useSessionManager.getState().fullscreenToDesktop();
 
       const state = useSessionManager.getState();
       expect(state.fullscreenSessionId).toBeNull();
-      // 两 pane 都空，emptyPane = 'left'（优先左），全屏 app 进左 pane
-      expect(state.paneLeft).toBe(fullId);
+      // 左 pane 已占，emptyPane 优先右 → 全屏 app 进右 pane
+      expect(state.paneRight).toBe(fullId);
     });
 
     it('情况 3：两 pane 都占 + 全屏 app 无 sourcePane，全屏 app 进 background', async () => {
-      // 构造场景：两 pane 有 app + 全屏 app 无 sourcePane
-      // 通过 launchFullscreen（清空两 pane）后，用 resumeBackground 填充两 pane
+      // 构造场景：两 pane 有 app（常驻）+ 全屏 app 无 sourcePane（直接来自应用抽屉）。
+      // T4 下 launchFullscreen 保留两 pane，故这是「两 pane 都占 + 全屏无 sourcePane」的真实可达场景。
       await useSessionManager.getState().launchOnPane('com.test.a', 'left', { width: 800, height: 600 });
       await useSessionManager.getState().launchOnPane('com.test.b', 'right', { width: 800, height: 600 });
       const fullId = await useSessionManager.getState().launchFullscreen('com.test.c', { width: 1920, height: 1080 });
-      // 此时两 pane 空，com.test.a 和 com.test.b 是 background
-
-      // 恢复两个 background app 到 pane（§7.4 规则 2 填空 pane）
-      const bgApps = useSessionManager.getState().apps.filter((a) => a.state === 'background');
-      await useSessionManager.getState().resumeBackground(bgApps[0]!.sessionId, { width: 800, height: 600 });
-      await useSessionManager.getState().resumeBackground(bgApps[1]!.sessionId, { width: 800, height: 600 });
-      // 此时两 pane 都占，全屏 app 仍是 foreground-fullscreen
+      // 此时两 pane 都占（foreground-pane），全屏 app 无 sourcePane
 
       await useSessionManager.getState().fullscreenToDesktop();
 
       const state = useSessionManager.getState();
       expect(state.fullscreenSessionId).toBeNull();
+      // 两 pane 都满、全屏 app 无 sourcePane → 回到 background（保留虚拟屏，供后续 resume）
       const fullApp = state.apps.find((a) => a.sessionId === fullId);
       expect(fullApp?.state).toBe('background');
     });
@@ -369,8 +390,8 @@ describe('SessionManager 状态机', () => {
       expect(useSessionManager.getState().getStreamingCount()).toBe(2);
 
       await useSessionManager.getState().launchFullscreen('com.test.c', { width: 1920, height: 1080 });
-      // 两 pane 进 background，全屏 1 个 streaming
-      expect(useSessionManager.getState().getStreamingCount()).toBe(1);
+      // T4：左 + 右常驻分屏保持 streaming，全屏为第 3 路，共 3 个 streaming
+      expect(useSessionManager.getState().getStreamingCount()).toBe(3);
     });
   });
 });

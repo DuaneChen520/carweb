@@ -387,32 +387,23 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
 
   // ===== launchFullscreen（§5 启动入口）=====
   launchFullscreen: async (packageName, displayConfig, appLabel) => {
-    const { adb, fullscreenSessionId, paneLeft, paneRight } = get();
+    const { adb, fullscreenSessionId } = get();
     if (!adb) {
       console.error('[SessionManager] launchFullscreen 失败：adb 未连接');
       return null;
     }
 
-    // 清理设备端可能残留的 scrcpy server（与 launchOnPane 对齐：
-    // 共享 socket localabstract:scrcpy 在 USB 异常断开 / 后台化竞态后可能未释放，
-    // 导致新建全屏会话启动时 socket 冲突 → scrcpy server exited prematurely）。
-    // 必须在 backgroundify 之前执行，确保新建会话拿到的是干净的反向隧道。
-    try {
-      await killScrcpyServer(adb);
-    } catch {
-      // ignore
-    }
-
-    // 当前全屏 app（如有）→ background（§5.1）
+    // T4：全屏是第 3 路并发叠加层（设计 §2.3 并发上限 = 左 + 右 + 全屏），
+    // 不再 pkill 设备端 scrcpy server，也不再 backgroundify 常驻分屏——
+    // 否则常驻分屏会被静默杀死（路径3 缺陷，违反「全屏是第3个 streaming 叠加层」）。
+    //
+    // 并发上限（§2.3）由启动顺序隐式保证：先 backgroundify「上一个全屏」释放 1 个名额，
+    // 再启动新全屏作为第 3 路叠加，因此总数恒 ≤ 3，左/右常驻分屏始终 streaming、互不影响。
+    // （getStreamingCount 仅用于侧边栏显示/断言，不在此处做硬性上限拦截。）
+    // 各会话已通过独立 scid 走各自的 localabstract:scrcpy_<scid> 隧道（scrcpy-session.ts），
+    // 互不抢占，因此此处无需全局 pkill（其 PID 精确 kill 由 session.stop 负责）。
     if (fullscreenSessionId) {
       await get()._backgroundify(fullscreenSessionId);
-    }
-
-    // 两 pane 的 app → background（§5.1）
-    for (const paneId of [paneLeft, paneRight]) {
-      if (paneId) {
-        await get()._backgroundify(paneId);
-      }
     }
 
     const sessionId = get()._generateSessionId();

@@ -62,3 +62,41 @@ describe('AdbScrcpyOptions4_0 — T1 vdSystemDecorations', () => {
     expect(serialized.some((s) => s.startsWith('vd_system_decorations'))).toBe(false);
   });
 });
+
+/**
+ * T4 验证：每会话独立 scid，使各 scrcpy 会话走各自的 localabstract:scrcpy_<scid>
+ * 隧道，互不抢占（否则并发会话会被后启动者 reverse.remove 拆掉隧道）。
+ * 这是 launchFullscreen 能作为「第 3 路并发叠加层而不 pkill 常驻分屏」的前提。
+ */
+describe('AdbScrcpyOptions4_0 — T4 每会话 scid', () => {
+  it('虚拟屏分支序列化包含 scid=<value>', () => {
+    const opts = new AdbScrcpyOptions4_0({
+      ...baseOptions(),
+      newDisplay: new ScrcpyNewDisplay(1080, 1920, 320),
+      captureOrientation: ScrcpyCaptureOrientation.Unlocked,
+      displayImePolicy: 'local' as const,
+      flexDisplay: true,
+      keepActive: true,
+      vdSystemDecorations: false,
+      scid: 'abc12345',
+    });
+    const serialized = opts.serialize();
+    expect(serialized).toContain('scid=abc12345');
+    // 不重复（base serialize 已包含 scid，override 不应再 push）
+    expect(serialized.filter((s) => s.startsWith('scid='))).toHaveLength(1);
+  });
+
+  it('物理屏分支同样序列化 scid（统一隧道隔离）', () => {
+    const opts = new AdbScrcpyOptions4_0({
+      ...baseOptions(),
+      displayId: 0,
+      scid: 'def67890',
+    });
+    expect(opts.serialize()).toContain('scid=def67890');
+  });
+
+  it('未设置 scid 时不产出 scid 参数', () => {
+    const serialized = buildVirtualDisplayOptions().serialize();
+    expect(serialized.some((s) => s.startsWith('scid='))).toBe(false);
+  });
+});

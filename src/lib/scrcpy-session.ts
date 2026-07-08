@@ -84,6 +84,32 @@ function withLaunchMutex<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
+/**
+ * 为每个 scrcpy 会话生成唯一 scid（8 位十六进制）。
+ *
+ * scrcpy server 在设备端绑定 `localabstract:scrcpy_<scid>` 作为反向隧道端点。
+ * 不给 scid 时所有会话共用 `localabstract:scrcpy`，并发启动时后启动的会话会
+ * `reverse.remove` 拆掉先启动会话已建立的隧道（AdbScrcpyExitedError），因此
+ * 历史上只能靠 `killScrcpyServer(pkill)` 先杀光其它会话，常驻分屏被误杀。
+ *
+ * 给每个会话独立的 scid，各会话走各自的 `localabstract:scrcpy_<scid>`，
+ * 互不抢占隧道，从而支持「左+右+全屏」真正并发（设计 §2.3 并发上限 3），
+ * 也使 launchFullscreen 不再需要 pkill 常驻分屏（T4）。
+ *
+ * scid 必须 ≤ 8 字符（@yume-chan 连接层 `getSocketName` 用 `padStart(8,'0')`）。
+ */
+function generateScid(): string {
+  const buf = new Uint8Array(4);
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    crypto.getRandomValues(buf);
+  } else {
+    for (let i = 0; i < buf.length; i += 1) {
+      buf[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  return Array.from(buf, (b) => b.toString(16).padStart(2, '0')).join('').slice(0, 8);
+}
+
 export class ScrcpySession {
   public readonly id: string;
   public displayId: number | null = null;
@@ -255,6 +281,8 @@ export class ScrcpySession {
       const pidsBefore = displayConfig ? await getScrcpyServerPids(adb) : [];
 
       const useVirtualDisplay = !!displayConfig;
+      // 每会话独立 scid：避免并发会话抢占同一 `localabstract:scrcpy` 隧道（见 generateScid）。
+      const scid = generateScid();
       let client!: AdbScrcpyClient<AdbScrcpyOptions4_0Type<true>>;
 
       // 串行化「pushServer + start」临界区，避免并发会话在设备端争夺同一
@@ -285,6 +313,8 @@ export class ScrcpySession {
           control: true,
           stayAwake: true,
           showTouches: false,
+          // 每会话独立隧道端点（见 generateScid）：并发会话互不抢占
+          scid,
           ...(useVirtualDisplay
             ? {
                 newDisplay: new ScrcpyNewDisplay(displayConfig.width, displayConfig.height, displayConfig.dpi ?? 320),
