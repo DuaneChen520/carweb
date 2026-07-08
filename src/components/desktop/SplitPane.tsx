@@ -28,6 +28,7 @@ import { PaneEmptyState } from './PaneEmptyState';
 import { useSessionManager } from '@/lib/session-manager';
 import type { AppInstance, PaneSlot } from '@/lib/session-manager';
 import type { ScrcpySession } from '@/lib/scrcpy-session';
+import { useCanvasPointerInput } from '@/hooks/scrcpy/useCanvasPointerInput';
 
 interface SplitPaneProps {
   pane: PaneSlot;
@@ -57,6 +58,9 @@ export function SplitPane({ pane, app, session, onOpenAppPicker, dropdown, resiz
     const managed = s.sessions[app.sessionId];
     return managed?.state.isRunning ?? false;
   });
+
+  // 触控输入：为 reparent 进来的原生 canvas 绑定指针事件（桌面分屏缺省无触控层）
+  const handlePointer = useCanvasPointerInput(session);
 
   // 1. 同步 flexClientRef —— 每次 re-render 都执行（非 effect），确保拿到最新值
   flexClientRef.current = session?.flexClientInstance ?? null;
@@ -127,6 +131,11 @@ export function SplitPane({ pane, app, session, onOpenAppPicker, dropdown, resiz
           <div
             ref={containerRef}
             className="absolute inset-0 w-full h-full"
+            style={{ touchAction: 'none' }}
+            onPointerDown={handlePointer}
+            onPointerMove={handlePointer}
+            onPointerUp={handlePointer}
+            onPointerCancel={handlePointer}
           />
           {/* 顶部下拉悬浮控件（透明悬浮，不占画面尺寸） */}
           {dropdown}

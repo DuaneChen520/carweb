@@ -6,7 +6,7 @@ function computeSw(w: number, h: number, dpi: number): number {
 }
 
 describe('calculateDpi', () => {
-  it('所有分辨率下 sw 均接近目标值 (840dp)，量化误差 < 15dp', () => {
+  it('所有分辨率下 sw 均接近目标值 (600dp)，量化误差 < 15dp', () => {
     const cases = [
       { w: 1920, h: 1080 },
       { w: 800, h: 600 },
@@ -39,11 +39,11 @@ describe('calculateDpi', () => {
   });
 
   it('DPR 翻倍时 sw 变化在量化误差范围内', () => {
-    // DPR=1: 800×600 → dpi=114, sw≈842
+    // DPR=1: 800×600 → dpi=160, sw=600
     const dpi1 = calculateDpi(800, 600);
     const sw1 = computeSw(800, 600, dpi1);
 
-    // DPR=2: 1600×1200 → dpi=229, sw≈838
+    // DPR=2: 1600×1200 → dpi=320, sw=600
     const dpi2 = calculateDpi(1600, 1200);
     const sw2 = computeSw(1600, 1200, dpi2);
 

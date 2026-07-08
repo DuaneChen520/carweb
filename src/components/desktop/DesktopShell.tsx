@@ -105,7 +105,7 @@ export function DesktopShell({
       )}
 
       {/* DesktopArea：侧边栏右侧剩余区域 */}
-      <div className="flex-1 flex relative overflow-hidden">
+      <div className="flex-1 flex relative overflow-hidden" data-desktop-area>
         {/* 分屏桌面布局：左 pane | 间隔 | 右 pane */}
         <div className="flex-1 flex gap-1 p-1">
           <SplitPane

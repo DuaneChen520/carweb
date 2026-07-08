@@ -123,6 +123,15 @@ interface ControlSidebarProps {
   onOpenAppPickerFullscreen?: () => void;
   /** 活动进程数量（用于按钮角标显示） */
   activityCount?: number;
+  /**
+   * 音频状态（可选，分屏桌面模式由 SessionManager 提供，否则回退到 scrcpy context 单例）。
+   * 桌面模式下实际音频由 SessionManager 多 session 承载，context 单例无音频状态。
+   */
+  audioStatus?: 'idle' | 'starting' | 'playing' | 'disabled' | 'errored';
+  /** 静音状态（可选，分屏桌面模式由 SessionManager 提供） */
+  isMuted?: boolean;
+  /** 静音切换（可选，分屏桌面模式由 SessionManager 提供） */
+  setMuted?: (muted: boolean) => void;
 }
 
 export function ControlSidebar({
@@ -130,9 +139,14 @@ export function ControlSidebar({
   keyboardMode, setKeyboardMode,
   currentPreset, resolutionPreset, changeResolutionPreset,
   onDesktopClick, onActivityManagerClick, onLaunchFullscreen, onOpenAppPickerFullscreen, activityCount,
+  audioStatus: propAudioStatus, isMuted: propIsMuted, setMuted: propSetMuted,
 }: ControlSidebarProps) {
   const scrcpy = useScrcpyContext();
-  const { goBack, goHome, startApp, getAppIcon, getCachedAppLabels, parseAllApps, turnOffPhysicalScreen, turnOnPhysicalScreen, getAllDeviceApps, incrementLocalCount, togglePin, getPinnedApps, syncWithDevice, audioStatus, isMuted, setMuted, audioRoute, setAudioRoute } = scrcpy;
+  const { goBack, goHome, startApp, getAppIcon, getCachedAppLabels, parseAllApps, turnOffPhysicalScreen, turnOnPhysicalScreen, getAllDeviceApps, incrementLocalCount, togglePin, getPinnedApps, syncWithDevice, audioStatus: ctxAudioStatus, isMuted: ctxIsMuted, setMuted: ctxSetMuted, audioRoute, setAudioRoute } = scrcpy;
+  // 桌面模式：优先使用 SessionManager 提供的音频状态；单屏模式回退到 context 单例
+  const audioStatus = propAudioStatus ?? ctxAudioStatus;
+  const isMuted = propIsMuted ?? ctxIsMuted;
+  const setMuted = propSetMuted ?? ctxSetMuted;
   const adbStore = useAdbStore();
   const { hasPin } = useDevicePin();
   const rememberedDevices = useRememberedDevices();
@@ -371,7 +385,7 @@ export function ControlSidebar({
 
   return (
     <>
-      <div className="w-13 flex flex-col items-center py-2 gap-1 bg-white border-r border-black/10">
+      <div className="w-13 h-full flex flex-col items-center py-2 gap-1 bg-white border-r border-black/10">
         <button
           onClick={() => {
             // §10 全部应用双模式：侧边栏触发全屏模式

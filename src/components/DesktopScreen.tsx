@@ -28,22 +28,56 @@ import { useAdbStore } from '@/hooks/useAdbStore';
 import { DesktopStateStore } from '@/lib/desktop-state-store';
 import { calculateDpi } from '@/utils/display';
 import type { PaneSlot } from '@/lib/session-manager';
+import type { DisplayConfig } from '@/lib/scrcpy-session';
 
-// 默认 pane 显示配置（800×600 虚拟屏）
-const PANE_DISPLAY_CONFIG = {
-  width: 800,
-  height: 600,
-  dpi: calculateDpi(800, 600),
-  bitRate: 8000000,
-};
+// 兜底尺寸：DOM 尚未就绪（如极端 SSR/测试场景）时使用，避免以 0×0 创建虚拟屏。
+const FALLBACK_PANE = { width: 800, height: 600 };
+const FALLBACK_FULLSCREEN = { width: 1920, height: 1080 };
 
-// 全屏显示配置
-const FULLSCREEN_DISPLAY_CONFIG = {
-  width: 1920,
-  height: 1080,
-  dpi: calculateDpi(1920, 1080),
-  bitRate: 8000000,
-};
+/**
+ * 从真实 pane 容器尺寸推导初始 displayConfig，使虚拟屏创建即正确尺寸，
+ * 消除硬编码 800×600 带来的瞬态旋转/闪烁风险（ADR-0001）。
+ * 像素尺寸公式对齐 VirtualScreen：width/height = CSS 尺寸 × scale × dpr。
+ */
+function buildPaneDisplayConfig(pane: PaneSlot, scale = 1.0): DisplayConfig {
+  const el = typeof document !== 'undefined'
+    ? document.querySelector<HTMLElement>(`[data-pane="${pane}"]`)
+    : null;
+  const cssW = el?.clientWidth ?? 0;
+  const cssH = el?.clientHeight ?? 0;
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+  const w = Math.round((cssW > 0 ? cssW : FALLBACK_PANE.width) * scale * dpr);
+  const h = Math.round((cssH > 0 ? cssH : FALLBACK_PANE.height) * scale * dpr);
+  const pixelRatio = (w * h) / (1920 * 1080);
+  return {
+    width: w,
+    height: h,
+    dpi: calculateDpi(w, h),
+    bitRate: Math.max(1000000, Math.min(40000000, Math.round(8000000 * pixelRatio))),
+  };
+}
+
+/**
+ * 全屏虚拟屏初始尺寸 = DesktopArea 真实尺寸（覆盖侧边栏右侧区域）。
+ * 同样消除硬编码 1920×1080 与真实全屏区域不符的瞬态。
+ */
+function buildFullscreenDisplayConfig(scale = 1.0): DisplayConfig {
+  const el = typeof document !== 'undefined'
+    ? document.querySelector<HTMLElement>('[data-desktop-area]')
+    : null;
+  const cssW = el?.clientWidth ?? 0;
+  const cssH = el?.clientHeight ?? 0;
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+  const w = Math.round((cssW > 0 ? cssW : FALLBACK_FULLSCREEN.width) * scale * dpr);
+  const h = Math.round((cssH > 0 ? cssH : FALLBACK_FULLSCREEN.height) * scale * dpr);
+  const pixelRatio = (w * h) / (1920 * 1080);
+  return {
+    width: w,
+    height: h,
+    dpi: calculateDpi(w, h),
+    bitRate: Math.max(1000000, Math.min(40000000, Math.round(8000000 * pixelRatio))),
+  };
+}
 
 interface DesktopScreenProps {
   /** 断开连接回调 */
@@ -61,11 +95,37 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
   const fullscreenToDesktop = useSessionManager((s) => s.fullscreenToDesktop);
   const closeAll = useSessionManager((s) => s.closeAll);
   const apps = useSessionManager((s) => s.apps);
+  const audioStatus = useSessionManager((s) => s.audioStatus);
+  const isMuted = useSessionManager((s) => s.isMuted);
+  const setMuted = useSessionManager((s) => s.setMuted);
 
   // 浮窗状态
   const [showActivityManager, setShowActivityManager] = useState(false);
   const [appPickerMode, setAppPickerMode] = useState<'pane' | 'fullscreen' | null>(null);
   const [appPickerTargetPane, setAppPickerTargetPane] = useState<PaneSlot>('left');
+
+  // 浏览器全屏（§9.2 保留按钮）
+  const fullscreenRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      if (!isFullscreen) {
+        await fullscreenRef.current?.requestFullscreen();
+        setIsFullscreen(true);
+      } else {
+        await document.exitFullscreen();
+        setIsFullscreen(false);
+      }
+    } catch (error) {
+      console.error('全屏切换失败:', error);
+    }
+  }, [isFullscreen]);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
 
   const desktopStateStoreRef = useRef(new DesktopStateStore());
   const hasRestoredRef = useRef(false);
@@ -110,15 +170,22 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
         }
 
         console.log('[DesktopScreen] 恢复分屏状态:', state);
-        // 并行恢复两 pane
-        const promises: Promise<unknown>[] = [];
+        // 串行恢复两 pane：避免两个 AdbScrcpyClient 同时绑定设备端
+        // localabstract:scrcpy 反向隧道导致第二个 server exited prematurely（socket 冲突）。
+        const paneTasks: Array<{ slot: PaneSlot; pkg: string }> = [];
         if (state.paneLeft) {
-          promises.push(launchOnPane(state.paneLeft, 'left', PANE_DISPLAY_CONFIG));
+          paneTasks.push({ slot: 'left', pkg: state.paneLeft });
         }
         if (state.paneRight) {
-          promises.push(launchOnPane(state.paneRight, 'right', PANE_DISPLAY_CONFIG));
+          paneTasks.push({ slot: 'right', pkg: state.paneRight });
         }
-        await Promise.all(promises);
+        for (const task of paneTasks) {
+          try {
+            await launchOnPane(task.pkg, task.slot, buildPaneDisplayConfig(task.slot));
+          } catch (e) {
+            console.error(`[DesktopScreen] 启动 ${task.slot} pane (${task.pkg}) 失败:`, e);
+          }
+        }
       } catch (e) {
         console.warn('[DesktopScreen] 恢复分屏状态失败:', e);
       }
@@ -151,11 +218,11 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
   }, []);
 
   const handleLaunchOnPane = useCallback(async (pkg: string, pane: PaneSlot) => {
-    await launchOnPane(pkg, pane, PANE_DISPLAY_CONFIG);
+    await launchOnPane(pkg, pane, buildPaneDisplayConfig(pane));
   }, [launchOnPane]);
 
   const handleLaunchFullscreen = useCallback(async (pkg: string) => {
-    await launchFullscreen(pkg, FULLSCREEN_DISPLAY_CONFIG);
+    await launchFullscreen(pkg, buildFullscreenDisplayConfig());
   }, [launchFullscreen]);
 
   const handleDesktopClick = useCallback(() => {
@@ -179,11 +246,16 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
   const activityCount = apps.length;
 
   return (
-    <>
+    <div ref={fullscreenRef} className="flex w-full h-screen bg-slate-900">
       <DesktopShell
         sidebar={
           <ControlSidebar
             handleStop={onStop}
+            isFullscreen={isFullscreen}
+            toggleFullscreen={toggleFullscreen}
+            audioStatus={audioStatus}
+            isMuted={isMuted}
+            setMuted={setMuted}
             onDesktopClick={handleDesktopClick}
             onActivityManagerClick={handleActivityManagerClick}
             onLaunchFullscreen={(pkg) => { void handleLaunchFullscreen(pkg); }}
@@ -193,14 +265,14 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
         }
         onOpenAppPicker={handleOpenAppPicker}
         onSwitchPaneApp={handleSwitchPaneApp}
-        displayConfig={PANE_DISPLAY_CONFIG}
+        displayConfig={buildFullscreenDisplayConfig()}
       />
 
       {/* 活动进程管理浮窗 */}
       {showActivityManager && (
         <ActivityManagerPanel
           onClose={() => setShowActivityManager(false)}
-          displayConfig={PANE_DISPLAY_CONFIG}
+          getDisplayConfig={buildPaneDisplayConfig}
         />
       )}
 
@@ -217,6 +289,6 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
 
       {/* 隐藏的 closeAllPanels 引用，避免 lint 警告 */}
       <span hidden onClick={closeAllPanels} />
-    </>
+    </div>
   );
 }

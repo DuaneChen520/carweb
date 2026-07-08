@@ -21,7 +21,18 @@
 import { create } from 'zustand';
 import { ScrcpySession, type DisplayConfig, type SessionState } from './scrcpy-session';
 import type { Adb } from '@yume-chan/adb';
-import { forceStopPackage } from './adb-commands';
+import { forceStopPackage, killScrcpyServer } from './adb-commands';
+import type { AudioState } from '@/hooks/scrcpy/audio/types';
+
+/** 聚合多个 session 的音频状态，决定侧边栏音频/静音按钮的显示 */
+function aggregateAudioStatus(states: AudioState[]): AudioState['status'] {
+  if (states.length === 0) return 'idle';
+  if (states.some((s) => s.status === 'playing')) return 'playing';
+  if (states.some((s) => s.status === 'starting')) return 'starting';
+  if (states.some((s) => s.status === 'disabled')) return 'disabled';
+  if (states.some((s) => s.status === 'errored')) return 'errored';
+  return 'idle';
+}
 
 export type PaneSlot = 'left' | 'right';
 export type AppRuntimeState = 'foreground-pane' | 'foreground-fullscreen' | 'background' | 'closed';
@@ -62,6 +73,12 @@ interface SessionManagerState {
   adb: Adb | null;
   /** displayId 池：已分配的 displayId 集合，用于避免冲突 */
   allocatedDisplayIds: Set<number>;
+  /** 每个 session 的音频状态（供侧边栏音频/静音按钮聚合） */
+  audioStatusBySession: Record<string, AudioState>;
+  /** 全局桌面静音（作用于所有 streaming session） */
+  isMuted: boolean;
+  /** 聚合后的音频状态（供侧边栏显示） */
+  audioStatus: AudioState['status'];
 
   // ===== 持久化回调（由外部设置，避免循环依赖）=====
   _persistCallback: ((left: string | null, right: string | null) => void) | null;
@@ -80,10 +97,14 @@ interface SessionManagerState {
   _backgroundify: (sessionId: string) => Promise<void>;
   /** 重启 background app 的 scrcpy session（恢复 streaming，复用原 displayId） */
   _restartSession: (sessionId: string, displayConfig: DisplayConfig) => Promise<void>;
+  /** 更新某个 session 的音频状态并重新聚合全局 audioStatus */
+  _setSessionAudio: (sessionId: string, audioState: AudioState) => void;
 
   // ===== actions =====
   setAdb: (adb: Adb | null) => void;
   setPersistCallback: (cb: ((left: string | null, right: string | null) => void) | null) => void;
+  /** 全局静音切换（作用于所有 streaming session） */
+  setMuted: (muted: boolean) => void;
   launchOnPane: (packageName: string, pane: PaneSlot, displayConfig: DisplayConfig, appLabel?: string) => Promise<string | null>;
   launchFullscreen: (packageName: string, displayConfig: DisplayConfig, appLabel?: string) => Promise<string | null>;
   paneToFullscreen: (pane: PaneSlot) => Promise<void>;
@@ -115,6 +136,9 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
   fullscreenSessionId: null,
   adb: null,
   allocatedDisplayIds: new Set(),
+  audioStatusBySession: {},
+  isMuted: false,
+  audioStatus: 'idle',
   _persistCallback: null,
 
   // ===== 内部辅助实现 =====
@@ -139,7 +163,7 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
         });
       },
       onVideoSize: () => {},
-      onAudioStateChange: () => {},
+      onAudioStateChange: (state) => { get()._setSessionAudio(sessionId, state); },
       onHealthChange: () => {},
     });
   },
@@ -192,8 +216,28 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
     set((state) => {
       const newSessions = { ...state.sessions };
       delete newSessions[sessionId];
-      return { sessions: newSessions };
+      const audioStatusBySession = { ...state.audioStatusBySession };
+      delete audioStatusBySession[sessionId];
+      return {
+        sessions: newSessions,
+        audioStatusBySession,
+        audioStatus: aggregateAudioStatus(Object.values(audioStatusBySession)),
+      };
     });
+  },
+
+  _setSessionAudio: (sessionId, audioState) => {
+    set((state) => {
+      const audioStatusBySession = { ...state.audioStatusBySession, [sessionId]: audioState };
+      return {
+        audioStatusBySession,
+        audioStatus: aggregateAudioStatus(Object.values(audioStatusBySession)),
+      };
+    });
+    // 新开始播放的 session 继承全局静音
+    if (audioState.status === 'playing' && get().isMuted) {
+      get()._getSession(sessionId)?.setMuted(true);
+    }
   },
 
   _backgroundify: async (sessionId) => {
@@ -205,6 +249,9 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
     const session = managed.session;
     // 断开 scrcpy（stop 会断开 client/controller，虚拟屏由 keepActive 保住）
     await session.stop();
+
+    // 音频随 scrcpy 断开而停止，显式重置防止聚合状态残留导致静音按钮误显示
+    get()._setSessionAudio(sessionId, { status: 'idle', route: 'browser', muted: false });
 
     get()._updateAppState(sessionId, {
       state: 'background',
@@ -242,9 +289,21 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
 
   // ===== actions =====
 
-  setAdb: (adb) => set({ adb }),
+  setAdb: (adb) => {
+    // 设备断开（adb 置空）时，各 session 缓存的 this.adb 已失效，
+    // 置空避免后续 stop() 在已死的连接上执行 adb 命令 / kill server。
+    if (!adb) {
+      Object.values(get().sessions).forEach(({ session }) => session.invalidateAdb());
+    }
+    set({ adb });
+  },
 
   setPersistCallback: (cb) => set({ _persistCallback: cb }),
+
+  setMuted: (muted) => {
+    set({ isMuted: muted });
+    Object.values(get().sessions).forEach(({ session }) => session.setMuted(muted));
+  },
 
   getSession: (sessionId) => get()._getSession(sessionId),
 
@@ -275,6 +334,14 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
     if (!adb) {
       console.error('[SessionManager] launchOnPane 失败：adb 未连接');
       return null;
+    }
+
+    // 清理设备端可能残留的 scrcpy server（USB 异常断开后旧进程可能未释放，
+    // 占用 localabstract:scrcpy 导致新会话启动失败 / socket 冲突）。
+    try {
+      await killScrcpyServer(adb);
+    } catch {
+      // ignore
     }
 
     // 若 pane 已占用，先关闭旧 app
@@ -324,6 +391,16 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
     if (!adb) {
       console.error('[SessionManager] launchFullscreen 失败：adb 未连接');
       return null;
+    }
+
+    // 清理设备端可能残留的 scrcpy server（与 launchOnPane 对齐：
+    // 共享 socket localabstract:scrcpy 在 USB 异常断开 / 后台化竞态后可能未释放，
+    // 导致新建全屏会话启动时 socket 冲突 → scrcpy server exited prematurely）。
+    // 必须在 backgroundify 之前执行，确保新建会话拿到的是干净的反向隧道。
+    try {
+      await killScrcpyServer(adb);
+    } catch {
+      // ignore
     }
 
     // 当前全屏 app（如有）→ background（§5.1）

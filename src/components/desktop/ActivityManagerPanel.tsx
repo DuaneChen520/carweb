@@ -21,14 +21,14 @@
 
 import { useMemo } from 'react';
 import { X, LogIn, Trash2, Monitor, SplitSquareHorizontal, Moon } from 'lucide-react';
-import { useSessionManager, type AppInstance } from '@/lib/session-manager';
+import { useSessionManager, type AppInstance, type PaneSlot } from '@/lib/session-manager';
 import type { DisplayConfig } from '@/lib/scrcpy-session';
 
 interface ActivityManagerPanelProps {
   /** 关闭浮窗回调 */
   onClose: () => void;
-  /** 显示配置（用于 resumeBackground） */
-  displayConfig: DisplayConfig;
+  /** 显示配置构建函数（按 app 落点 pane 从真实容器尺寸推导，用于 resumeBackground） */
+  getDisplayConfig: (pane: PaneSlot) => DisplayConfig;
 }
 
 // 状态排序权重（§7.2）
@@ -63,7 +63,7 @@ function getStateLabel(app: AppInstance): { text: string; color: string; icon: R
   }
 }
 
-export function ActivityManagerPanel({ onClose, displayConfig }: ActivityManagerPanelProps) {
+export function ActivityManagerPanel({ onClose, getDisplayConfig }: ActivityManagerPanelProps) {
   const apps = useSessionManager((s) => s.apps);
   const resumeBackground = useSessionManager((s) => s.resumeBackground);
   const closeApp = useSessionManager((s) => s.closeApp);
@@ -80,7 +80,7 @@ export function ActivityManagerPanel({ onClose, displayConfig }: ActivityManager
 
   const handleEnter = (app: AppInstance) => {
     if (app.state === 'background') {
-      void resumeBackground(app.sessionId, displayConfig);
+      void resumeBackground(app.sessionId, getDisplayConfig(app.pane ?? 'left'));
     }
     // foreground-fullscreen / foreground-pane 已在前台，进入操作仅关闭浮窗
     onClose();

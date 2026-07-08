@@ -66,6 +66,27 @@ const PTS_CONFIG = 1n << 63n;
 const PTS_CONFIG_4 = 1n << 62n;
 const PTS_MASK = (1n << 61n) - 1n;
 
+/**
+ * 模块级启动互斥锁。
+ *
+ * 同一设备并发启动多个 scrcpy 会话时，AdbScrcpyClient.start 内部会执行
+ * `adb reverse remove localabstract:scrcpy` + `adb reverse add ...` 来建立反向隧道。
+ * 由于 scrcpy 2.3 不支持 scid，所有会话共用同一个 socket 名 localabstract:scrcpy，
+ * 并发时一个会话的 reverse.remove 会拆除另一个会话正在建立的反向隧道，
+ * 导致设备端 scrcpy server 提前退出（AdbScrcpyExitedError: scrcpy server exited prematurely）。
+ * 串行化「pushServer + start」这一段临界区即可彻底消除竞争，而各会话启动后依旧并发运行。
+ */
+let launchMutexChain: Promise<unknown> = Promise.resolve();
+function withLaunchMutex<T>(fn: () => Promise<T>): Promise<T> {
+  const run = launchMutexChain.then(fn, fn);
+  // 无论成功或失败都接续链，避免单次失败阻塞后续启动
+  launchMutexChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
 export class ScrcpySession {
   public readonly id: string;
   public displayId: number | null = null;
@@ -160,6 +181,18 @@ export class ScrcpySession {
   }
 
   /**
+   * 使本 session 缓存的 adb 引用失效。
+   *
+   * 设备断开（setAdb(null)）时调用：底层 ADB 传输已关闭，
+   * 若不清空，后续 stop() 会在已死的连接上尝试写命令 / kill server，
+   * 从而抛 "Cannot write to a CLOSED writable stream"。
+   * 失效后 stop() 会跳过所有依赖 adb 的步骤，仅做本地资源清理。
+   */
+  invalidateAdb(): void {
+    this.adb = null;
+  }
+
+  /**
    * controller ref 适配器。
    *
    * ControllerHealth.tryGetController 期望 { current: T | null } 形态（原 React ref）。
@@ -224,45 +257,64 @@ export class ScrcpySession {
       // 启动前记录已有 PID，用于启动后对比确定本次 PID
       const pidsBefore = displayConfig ? await getScrcpyServerPids(adb) : [];
 
-      await AdbScrcpyClient.pushServer(
-        adb,
-        new ReadableStream({
-          start(controller) {
-            controller.enqueue(new Uint8Array(arrayBuffer));
-            controller.close();
-          },
-        }),
-        serverPath,
-      );
-
-      const verifyOutput = await runAdbCommand(adb, `ls -la ${serverPath} 2>&1`);
-      if (verifyOutput.includes('No such file') || verifyOutput.includes('not found')) {
-        throw new Error('scrcpy-server.jar 推送验证失败：设备上未找到文件');
-      }
-
       const useVirtualDisplay = !!displayConfig;
-      const options = new AdbScrcpyOptions4_0({
-        video: true,
-        videoCodec: 'h264',
-        videoBitRate: displayConfig?.bitRate ?? 8000000,
-        maxFps: 60,
-        audio: true,
-        control: true,
-        stayAwake: true,
-        showTouches: false,
-        ...(useVirtualDisplay
-          ? {
-              newDisplay: new ScrcpyNewDisplay(displayConfig.width, displayConfig.height, displayConfig.dpi ?? 320),
-              captureOrientation: ScrcpyCaptureOrientation.Unlocked,
-              displayImePolicy: 'local' as const,
-              flexDisplay: true,
-              keepActive: true,
-            }
-          : { displayId: 0 }
-        ),
-      });
+      let client!: AdbScrcpyClient<AdbScrcpyOptions4_0Type<true>>;
 
-      const client = await AdbScrcpyClient.start(adb, serverPath, options);
+      // 串行化「pushServer + start」临界区，避免并发会话在设备端争夺同一
+      // localabstract:scrcpy 反向隧道（详见文件顶部 withLaunchMutex 注释）。
+      await withLaunchMutex(async () => {
+        await AdbScrcpyClient.pushServer(
+          adb,
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new Uint8Array(arrayBuffer));
+              controller.close();
+            },
+          }),
+          serverPath,
+        );
+
+        const verifyOutput = await runAdbCommand(adb, `ls -la ${serverPath} 2>&1`);
+        if (verifyOutput.includes('No such file') || verifyOutput.includes('not found')) {
+          throw new Error('scrcpy-server.jar 推送验证失败：设备上未找到文件');
+        }
+
+        const options = new AdbScrcpyOptions4_0({
+          video: true,
+          videoCodec: 'h264',
+          videoBitRate: displayConfig?.bitRate ?? 8000000,
+          maxFps: 60,
+          audio: true,
+          control: true,
+          stayAwake: true,
+          showTouches: false,
+          ...(useVirtualDisplay
+            ? {
+                newDisplay: new ScrcpyNewDisplay(displayConfig.width, displayConfig.height, displayConfig.dpi ?? 320),
+                captureOrientation: ScrcpyCaptureOrientation.Unlocked,
+                displayImePolicy: 'local' as const,
+                flexDisplay: true,
+                keepActive: true,
+              }
+            : { displayId: 0 }
+          ),
+        });
+
+        // 超时保护：USB 断开时底层 transport 流被销毁，AdbScrcpyClient.start()
+        // 内部的 ADB 调用可能既不 resolve 也不 reject，导致会话永久卡死（zombie session）。
+        // 用 Promise.race 兜底，超时后主动抛错，交由外层 catch 统一清理。
+        const START_TIMEOUT_MS = 15000;
+        const startWithTimeout = Promise.race([
+          AdbScrcpyClient.start(adb, serverPath, options),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(new Error(`[ScrcpySession:${this.id}] AdbScrcpyClient.start 超时 (${START_TIMEOUT_MS}ms)，可能 USB 已断开)`)),
+              START_TIMEOUT_MS,
+            ),
+          ),
+        ]);
+        client = await startWithTimeout;
+      });
       this.client = client;
       this.adb = adb;
 
@@ -464,7 +516,7 @@ export class ScrcpySession {
       );
 
       if (this.audioDisposed) {
-        audioCtx.close();
+        audioCtx.close().catch(() => {});
         return;
       }
 
@@ -623,12 +675,22 @@ export class ScrcpySession {
       }
 
       if (this.controller) {
-        this.controller.close();
+        try {
+          // 连接断开时 controller 的底层流可能已处于 errored 状态，
+          // close() 会 reject（Cannot close a ERRORED writable stream），接住即可。
+          await this.controller.close();
+        } catch {
+          // 忽略：本地清理不依赖该结果。
+        }
         this.controller = null;
       }
 
       if (this.client) {
-        await this.client.close();
+        try {
+          await this.client.close();
+        } catch {
+          // 设备已断开时 scrcpy server 进程不存在，close 可能失败，忽略。
+        }
         this.client = null;
       }
 

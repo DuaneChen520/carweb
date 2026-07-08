@@ -22,6 +22,7 @@
 import { useEffect, useRef } from 'react';
 import { useSessionManager } from '@/lib/session-manager';
 import { FullscreenDropdown } from './FullscreenDropdown';
+import { useCanvasPointerInput } from '@/hooks/scrcpy/useCanvasPointerInput';
 import type { DisplayConfig } from '@/lib/scrcpy-session';
 
 interface FullscreenOverlayProps {
@@ -112,6 +113,12 @@ export function FullscreenOverlay({ displayConfig, resizeScale = 1.0 }: Fullscre
     };
   }, [fullscreenSessionId, session, sessionIsRunning, resizeScale]);
 
+  // 触控输入：为 reparent 进来的原生 canvas 绑定指针事件（全屏模式缺省无触控层）
+  // 必须在 early return 之前调用，遵守 React Rules of Hooks——
+  // 否则 session 就绪前后两次 render 的 hook 数量不一致，会令整棵
+  // FullscreenOverlay 子树崩溃（"Rendered more hooks than during the previous render"）。
+  const handlePointer = useCanvasPointerInput(session);
+
   if (!fullscreenSessionId || !session || !app) {
     return null;
   }
@@ -125,6 +132,11 @@ export function FullscreenOverlay({ displayConfig, resizeScale = 1.0 }: Fullscre
       <div
         ref={containerRef}
         className="absolute inset-0 w-full h-full"
+        style={{ touchAction: 'none' }}
+        onPointerDown={handlePointer}
+        onPointerMove={handlePointer}
+        onPointerUp={handlePointer}
+        onPointerCancel={handlePointer}
       />
 
       {/* 顶部下拉菜单 */}
