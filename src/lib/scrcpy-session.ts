@@ -295,6 +295,10 @@ export class ScrcpySession {
                 displayImePolicy: 'local' as const,
                 flexDisplay: true,
                 keepActive: true,
+                // T1: 禁用虚拟屏系统装饰（状态栏/导航栏/Launcher）。
+                // 关闭后虚拟屏只渲染 app，空屏不出 home 帧，从根上消除
+                // 「新屏首帧是 Launcher 桌面」这一跳（scrcpy --no-vd-system-decorations）。
+                vdSystemDecorations: false,
               }
             : { displayId: 0 }
           ),

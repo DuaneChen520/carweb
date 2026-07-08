@@ -1,0 +1,108 @@
+# Tickets: 虚拟屏应用启动「瞬间打开、无多次跳转」
+
+修复虚拟屏中启动/恢复应用时出现的「多次跳转启动动画」。根因（详见诊断对话）：每次启动都重建虚拟屏 + 事后强杀 Launcher（H1，必现）；ROM 忽略 `am --display` 时走「主屏启动→move-to-display」搬运（H2）；`launchFullscreen` 用全局 `pkill` 误杀常驻分屏（路径3 缺陷）；`resumeBackground` 重建屏而非复用（路径4 缺陷）；全局 `pkill -f scrcpy` 造成黑屏停顿与分屏误杀（H3）。
+
+官方 scrcpy 4.0 已原生支持 `--start-app`（等价 `controller.startApp`）与 `--no-vd-system-decorations`（禁用虚拟屏 Launcher），@yume-chan 层均已具备对应能力。本组工单即用官方机制替换 carweb 当前绕路的 `am` + `forceStopPackage` 方案。
+
+Triage 标签：**ready-for-agent**（每条均可由 agent 独立领取）。
+
+---
+
+## 范围说明（已确认排除）
+
+- **路径2（全屏→另一分屏覆盖旧 app）**：用户明确认可为「带覆盖确认的有意行为」，不在本组工单内。
+- **路径1（分屏→全屏，已运行 app）**：`reparentCanvas` 不重启，已平滑，无需改动。
+
+---
+
+## T1 — 关闭虚拟屏 Launcher（vdSystemDecorations:false）
+
+**What to build:** 新建的虚拟屏默认不再渲染任何 Launcher/桌面，从根上消除「新屏首帧是 home」这一跳。
+
+**Blocked by:** None — 可立即开始
+
+**状态：已完成（代码 + 单测）** — 提交于 `master`。两条真机验收因沙箱无真实设备，待实机验证（机制已由单测证明 `vd_system_decorations=false` 正确序列化）。
+
+- [x] 选项层 `AdbScrcpyOptions4_0` 虚拟屏分支注入 `vdSystemDecorations:false`（scrcpy-session.ts:291-304 的 `useVirtualDisplay` 分支；物理屏分支 `{displayId:0}` 不受影响）
+- [ ] 真实设备确认：新建虚拟屏后视频流首帧不是 Launcher 桌面（待实机）
+- [ ] 真实设备确认：空屏（未启动 app）时不渲染 home 帧（仅黑/空）（待实机）
+
+**交付物：**
+- `src/lib/scrcpy-session.ts`：虚拟屏 options 注入 `vdSystemDecorations: false`
+- `src/lib/__tests__/scrcpy4-options.test.ts`（新增）：断言虚拟屏分支 `serialize()` 含 `vd_system_decorations=false`，且物理屏分支不含（作用域不被误扩）
+
+---
+
+## T2 — 用原生 startApp 把 app 直接落到虚拟屏（替换 am 分支）
+
+**What to build:** 启动 app 直接出现在虚拟屏，不再有「主屏启动 → move-to-display 搬运」跳转，也不再依赖 ROM 是否支持 `am --display`。
+
+**Blocked by:** T1
+
+- [ ] 会话 start() 拿到 controller 后调用 `controller.startApp(pkg)` 把目标 app 拉到新屏
+- [ ] 移除 adb-commands 中 `am start --display` 的虚拟屏分支及「策略2」回退
+- [ ] 移除启动路径中的三个 `sleep`（2000/2500/1500ms）
+- [ ] 真实设备验证：新屏无 home 闪、目标 app 直接显示、不再发送 `am task move-to-display`
+
+---
+
+## T3 — 移除 forceStopPackage(homePkg) 与冗余 sleep（清理死代码）
+
+**What to build:** 不再事后全局强杀 Launcher，启动路径干净。home 已由 T1 根本禁用、由 T2 直接启动取代，强杀逻辑成为死代码。
+
+**Blocked by:** T1, T2
+
+- [ ] 删除会话 start() 与 legacy hook 中的 `forceStopPackage(homePkg)` 调用
+- [ ] 删除 T2 已去除的 sleep 残留
+- [ ] 代码库检索确认无遗留的 `forceStopPackage(homePkg)` 与启动 sleep
+
+---
+
+## T4 — launchFullscreen 改为叠加第 3 路并发，不再 pkill 常驻分屏
+
+**What to build:** 应用抽屉「全屏启动」新 app 时，左/右常驻分屏继续流，不再被静默杀死（消除路径3 缺陷，并补上用户「覆盖需提示」原则在该路径的缺口）。
+
+**Blocked by:** T2, T3
+
+- [ ] `launchFullscreen` 去掉开头全局 `killScrcpyServer(pkill)` 与对两分屏的 `backgroundify`
+- [ ] 仅对「上一个全屏」做 `backgroundify`（按 PID 精确 kill，不误伤）
+- [ ] 新全屏 session 走 T2 的 `startApp` 路径
+- [ ] 若全屏覆盖某分屏，复用路径2 已有的「覆盖确认」提示
+- [ ] 验收：全屏启动新 app 后左/右分屏仍正常流；仅上一全屏被 backgroundify；覆盖分屏时仍有覆盖确认
+
+---
+
+## T5 — resumeBackground 复用原 displayId，不再重建虚拟屏
+
+**What to build:** 后台常驻 app 恢复时画面瞬间回前台，无「Launcher 闪→黑→app」重建跳动（消除路径4 缺陷）。
+
+**Blocked by:** T2, T3
+
+- [ ] `resumeBackground/_restartSession` 让会话 start() 在传入已有 `displayId` 时「接管已有屏」而非 `newDisplay`
+- [ ] `keepActive` 保存的 `displayId` 真正被复用，旧屏不再孤立泄漏
+- [ ] teardown 按 PID 精确 kill
+- [ ] 验收：后台 app 恢复无重建跳动；复用原 displayId；仅该 session 的 server 被 PID 精确 kill
+
+---
+
+## T6 — 将「按 PID 精确 kill」推广到所有启动/销毁路径
+
+**What to build:** 全局 `pkill -f scrcpy` 退出历史舞台；任何会话销毁/替换只杀自身 server PID，不再误伤同屏其它 streaming 会话（消除 H3 黑屏停顿 + 分屏误杀）。
+
+**Blocked by:** T4, T5
+
+- [ ] 以 T4/T5 建立的 PID 精确 kill 为样板，统一 `launchOnPane` 等其余路径的销毁逻辑
+- [ ] 移除 `killScrcpyServer` 的全局 `pkill` 实现，或仅保留为兜底
+- [ ] 验收：无全局 `pkill -f scrcpy`；单会话销毁不影响其它 streaming 会话
+
+---
+
+##  frontier 推进顺序
+
+1. T1（无阻塞，起始）
+2. T2（依赖 T1）
+3. T3（依赖 T1、T2）
+4. T4、T5 可并行（均依赖 T2、T3）
+5. T6（依赖 T4、T5）
+
+每条工单用 `/implement` 单独领取，工单间清空上下文。
