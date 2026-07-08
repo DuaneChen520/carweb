@@ -29,8 +29,6 @@ import {
   setRotationLocked,
   restoreRotation,
   getVirtualDisplayId,
-  getDefaultHomePackage,
-  forceStopPackage,
   killScrcpyServer,
   killScrcpyByPid,
   getScrcpyServerPids,
@@ -391,13 +389,6 @@ export class ScrcpySession {
       if (useVirtualDisplay) {
         const vid = await getVirtualDisplayId(adb);
         this.displayId = vid;
-
-        try {
-          const homePkg = await getDefaultHomePackage(adb);
-          if (homePkg) await forceStopPackage(adb, homePkg);
-        } catch (e) {
-          console.warn('关闭虚拟屏 Launcher 失败:', e);
-        }
       } else {
         this.displayId = 0;
       }

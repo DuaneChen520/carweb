@@ -59,11 +59,13 @@ Triage 标签：**ready-for-agent**（每条均可由 agent 独立领取）。
 
 **Blocked by:** T1, T2
 
-- [ ] 删除会话 `start()`（scrcpy-session.ts:392-401）与 legacy hook（useScrcpySession.ts:248-249）中的 `forceStopPackage(homePkg)` 调用
-- [ ] 删除 `adb-commands.startAppOnDisplay` 的 am 分支（含 `am start --display` 直投、策略2「主屏启动 + `am task move-to-display` 搬运」回退、三个 `sleep` 2000/2500/1500ms）
-- [ ] 迁移/下线 legacy `useScrcpySession` hook 对 am 分支的引用（改为 `controller.startApp`，或随兼容壳一并下线）
-- [ ] 移除 `scrcpy-session.ts` 中已无用的 `getDefaultHomePackage` / `forceStopPackage` import
-- [ ] 代码库检索确认无遗留的 `forceStopPackage(homePkg)` 与启动 sleep
+- [x] 删除会话 `start()`（scrcpy-session.ts）与 legacy hook（useScrcpySession.ts）中的 `forceStopPackage(homePkg)` 调用（Launcher 强杀）
+- [x] 删除 `adb-commands.startAppOnDisplay` 的 am 分支（含 `am start --display` 直投、策略2「主屏启动 + `am task move-to-display` 搬运」回退、三个 `sleep` 2000/2500/1500ms）+ 其辅助函数（isPackageRunning / getAppDisplayLocations / resolveLauncherComponent / getAppTaskId）+ 局部 `sleep` 辅助
+- [x] 下线 legacy `useScrcpySession` hook 对 am 分支的引用（连同 `startAppOnDisplayFn` 与 `ScrcpyContext.startAppOnDisplay` 字段一并移除；该接口无 UI 消费者，属「接线保留但未调用」的兼容壳）
+- [x] 移除 `scrcpy-session.ts` / `useScrcpySession.ts` 中已无用的 `getDefaultHomePackage` / `forceStopPackage` import（注意：`forceStopPackage` 函数本身保留——`session-manager.ts` 仍用它强杀目标 app）
+- [x] 代码库检索确认无遗留的 `forceStopPackage(homePkg)` 与启动 sleep
+
+**状态：已完成。** 双轴代码审查无违规/异味；tsc 无 scrcpy 相关新增错误；44 个 scrcpy 相关单测全绿；全量套件 5 个失败文件均为预存在的 `app-info-*`/`adb-media-commands`/`user-preferences-store` 问题，无新增回归。
 
 ---
 

@@ -23,7 +23,6 @@ interface ScrcpyContextValue extends ScrcpyState {
   showKeyboard: () => Promise<void>;
   hideKeyboard: () => Promise<void>;
   startApp: (appName: string) => Promise<void>;
-  startAppOnDisplay: (packageName: string) => Promise<void>;
   goHome: () => Promise<void>;
   goBack: () => Promise<void>;
   showRecentApps: () => Promise<void>;
@@ -83,7 +82,6 @@ export function ScrcpyProvider({ children }: { children: ReactNode }) {
     session.showKeyboard,
     session.hideKeyboard,
     session.startApp,
-    session.startAppOnDisplay,
     session.goHome,
     session.goBack,
     session.showRecentApps,

@@ -23,9 +23,6 @@ import {
   resizeDisplay as adbResizeDisplay,
   getCurrentForegroundApp,
   getVirtualDisplayId,
-  startAppOnDisplay,
-  getDefaultHomePackage,
-  forceStopPackage,
   killScrcpyServer,
 } from '@/lib/adb-commands';
 import type { RotationState } from '@/lib/adb-commands';
@@ -243,13 +240,6 @@ const appManager = useAppManager();
       if (useVirtualDisplay) {
         const vid = await getVirtualDisplayId(adb);
         displayIdRef.current = vid;
-
-        try {
-          const homePkg = await getDefaultHomePackage(adb);
-          if (homePkg) await forceStopPackage(adb, homePkg);
-        } catch (e) {
-          console.warn('关闭虚拟屏 Launcher 失败:', e);
-        }
       } else {
         displayIdRef.current = 0;
       }
@@ -443,15 +433,6 @@ setState(prev => ({
     return getCurrentForegroundApp(adb, displayId ?? 0);
   }, [ensureDisplayId]);
 
-  const startAppOnDisplayFn = useCallback(async (packageName: string) => {
-    const adb = adbRef.current;
-    if (!adb) return;
-    const displayId = await ensureDisplayId();
-    if (displayId !== null) {
-      await startAppOnDisplay(adb, packageName, displayId);
-    }
-  }, [ensureDisplayId]);
-
   const reconnect = useCallback(async () => {
     const adb = adbRef.current;
     const canvas = canvasRef.current;
@@ -532,7 +513,6 @@ setState(prev => ({
     turnOnPhysicalScreen,
     resizeDisplay,
     getForegroundApp,
-    startAppOnDisplay: startAppOnDisplayFn,
     resumeAudio: audioDecoder.resume,
     audioRoute: audioState.route,
     setAudioRoute: audioDecoder.setRoute,
