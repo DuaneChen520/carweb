@@ -21,7 +21,7 @@
 import { create } from 'zustand';
 import { ScrcpySession, type DisplayConfig, type SessionState } from './scrcpy-session';
 import type { Adb } from '@yume-chan/adb';
-import { forceStopPackage, killScrcpyServer } from './adb-commands';
+import { forceStopPackage } from './adb-commands';
 import type { AudioState } from '@/hooks/scrcpy/audio/types';
 
 /** 聚合多个 session 的音频状态，决定侧边栏音频/静音按钮的显示 */
@@ -338,15 +338,14 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
       return null;
     }
 
-    // 清理设备端可能残留的 scrcpy server（USB 异常断开后旧进程可能未释放，
-    // 占用 localabstract:scrcpy 导致新会话启动失败 / socket 冲突）。
-    try {
-      await killScrcpyServer(adb);
-    } catch {
-      // ignore
-    }
+    // T6：不再于每次启动前全局 pkill 设备端 scrcpy server。
+    // 原因：T4 已为各会话分配独立 scid，分别走各自的 localabstract:scrcpy_<scid>
+    // 隧道，旧会话的残留 server 不再占用同一 socket、不会阻塞新会话启动；
+    // 而全局 pkill 会误杀同屏其它正在 streaming 的分屏/全屏（H3 黑屏停顿）。
+    // 设备端孤儿 server（如浏览器崩溃导致 serverPid 丢失）的清理，
+    // 已由 useUsbConnection 在 USB 连接引导时统一执行（killScrcpyServer 兜底）。
 
-    // 若 pane 已占用，先关闭旧 app
+    // 若 pane 已占用，先关闭旧 app（closeApp 走 session.stop 的 PID 精确 kill，不误伤）
     const existingPaneId = pane === 'left' ? get().paneLeft : get().paneRight;
     if (existingPaneId) {
       await get().closeApp(existingPaneId);

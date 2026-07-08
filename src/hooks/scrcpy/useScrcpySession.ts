@@ -24,6 +24,8 @@ import {
   getCurrentForegroundApp,
   getVirtualDisplayId,
   killScrcpyServer,
+  killScrcpyByPid,
+  getScrcpyServerPids,
 } from '@/lib/adb-commands';
 import type { RotationState } from '@/lib/adb-commands';
 
@@ -84,6 +86,8 @@ const controllerRef = useRef<ScrcpyControlMessageWriter | null>(null);
 const adbRef = useRef<Adb | null>(null);
 const rotationStateRef = useRef<RotationState | null>(null);
 const displayIdRef = useRef<number | null>(null);
+// T6：记录本次启动的 scrcpy server PID，用于 stop 时精确 kill（避免误杀其它会话）
+const serverPidRef = useRef<number | null>(null);
 const startingLockRef = useRef<boolean>(false);
 const flexClientRef = useRef<FlexDisplayClient | null>(null);
 const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -171,11 +175,21 @@ const appManager = useAppManager();
         ),
       });
       console.log(`[Scrcpy] ${Date.now() - startTime}ms - 开始 AdbScrcpyClient.start()`);
+      // T6：启动前记录已有 PID，用于启动后对比确定本次启动的 server PID
+      const pidsBefore = await getScrcpyServerPids(adb);
       const client = await AdbScrcpyClient.start(adb, serverPath, options);
       console.log(`[Scrcpy] ${Date.now() - startTime}ms - AdbScrcpyClient.start() 成功`);
       clientRef.current = client;
       adbRef.current = adb;
       appManager.setAdb(adb);
+
+      // T6：确定本次 server PID（启动前后的 PID 差集），供 stop 时精确 kill
+      const pidsAfter = await getScrcpyServerPids(adb);
+      const newPids = pidsAfter.filter((p) => !pidsBefore.includes(p));
+      serverPidRef.current = newPids.length === 1 ? newPids[0]! : (pidsAfter[pidsAfter.length - 1] ?? null);
+      if (serverPidRef.current) {
+        console.log(`[Scrcpy] 记录 server PID: ${serverPidRef.current}`);
+      }
 
       if (useVirtualDisplay) {
         try {
@@ -315,8 +329,12 @@ setState(prev => ({
         clientRef.current = null;
       }
 
-      // 确保设备上的 scrcpy server 进程被杀掉，并清理 jar 文件
-      if (adb) {
+      // T6：优先按记录的 server PID 精确 kill（多实例安全，不误杀其它会话）。
+      // PID 未知（如崩溃后 serverPidRef 丢失）时降级为全局 pkill 兜底。
+      if (adb && serverPidRef.current !== null) {
+        await killScrcpyByPid(adb, serverPidRef.current).catch(() => {});
+        serverPidRef.current = null;
+      } else if (adb) {
         await killScrcpyServer(adb, true).catch(() => {});
       }
 

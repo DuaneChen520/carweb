@@ -170,6 +170,20 @@ describe('SessionManager 状态机', () => {
       expect(killScrcpyServer).not.toHaveBeenCalled();
     });
 
+    it('launchOnPane 不调用全局 killScrcpyServer（T6：启动期 pkill 会误杀同屏其它分屏）', async () => {
+      await useSessionManager.getState().launchOnPane('com.test.a', 'left', { width: 800, height: 600 });
+      // 第二次启动（另一个 pane）是全局 pkill 最可能的误杀点：旧实现会 pkill 掉左分屏 server
+      (killScrcpyServer as ReturnType<typeof vi.fn>).mockClear();
+
+      await useSessionManager.getState().launchOnPane('com.test.b', 'right', { width: 800, height: 600 });
+
+      expect(killScrcpyServer).not.toHaveBeenCalled();
+      // 同屏两分屏均正常存在（未被静默杀死）
+      const state = useSessionManager.getState();
+      expect(state.paneLeft).not.toBeNull();
+      expect(state.paneRight).not.toBeNull();
+    });
+
     it('同包名 app 已在分屏运行时，全屏启动复用而非双开（去重）', async () => {
       const paneId = await useSessionManager.getState().launchOnPane('com.test.dup', 'left', { width: 800, height: 600 });
 

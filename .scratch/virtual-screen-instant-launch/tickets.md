@@ -143,9 +143,19 @@ Triage 标签：**ready-for-agent**（每条均可由 agent 独立领取）。
 
 **Blocked by:** T4, T5
 
-- [ ] 以 T4/T5 建立的 PID 精确 kill 为样板，统一 `launchOnPane` 等其余路径的销毁逻辑
-- [ ] 移除 `killScrcpyServer` 的全局 `pkill` 实现，或仅保留为兜底
-- [ ] 验收：无全局 `pkill -f scrcpy`；单会话销毁不影响其它 streaming 会话
+- [x] 以 T4/T5 建立的 PID 精确 kill 为样板，统一 `launchOnPane` 等其余路径的销毁逻辑
+- [x] 移除 `killScrcpyServer` 的全局 `pkill` 实现，或仅保留为兜底
+- [x] 验收：无全局 `pkill -f scrcpy`；单会话销毁不影响其它 streaming 会话
+
+**已落地（提交见 T6 完成 SHA）：**
+- `session-manager.ts` `launchOnPane` 移除启动期 `killScrcpyServer(adb)` 全局 pkill（根因：启动右分屏会 `pkill` 掉左分屏 server，即 T6 要消除的「分屏误杀 / H3 黑屏」）。理由：T4 的 scid 隧道隔离已使各会话走独立 `localabstract:scrcpy_<scid>`，旧 server 不再阻塞新会话 socket；孤儿清理由 `useUsbConnection` 在 USB 连接引导时统一执行。
+- `useScrcpySession.ts`（mirror 模式旧单会话路径）`stopScrcpy` 精确化：新增 `serverPidRef`，`startScrcpy` 经 `getScrcpyServerPids` 记录本次 PID；`stopScrcpy` 优先 `killScrcpyByPid(adb, pid)`，`serverPidRef===null` 时降级 `killScrcpyServer(adb, true)` 兜底。复用 T4 PID 追踪样板。
+- `killScrcpyServer` 仅保留为兜底：现仅 3 处调用——`scrcpy-session.ts:747`（null-pid 兜底）、`useScrcpySession.ts`（null-pid 兜底）、`useUsbConnection.ts:24`（连接引导孤儿清理）。正常销毁路径均走 PID 精确 kill。
+
+**偏差 / 备注：**
+- 范围略扩：spec 字面写「统一 `launchOnPane` 等其余路径」，本期同时精确化了 legacy `useScrcpySession.stopScrcpy`（mirror 模式，与 split 互斥）。该路径本就在「销毁路径的全局 pkill」之列，精确化符合 T6「任何会话销毁只杀自身 PID」意图，属合理扩展。
+- `useScrcpySession.stopScrcpy` 的 PID 精确 kill 无独立单测（legacy hook 难以脱离真机 adb 单测）；已由 code-review 双轴确认结构正确，与 T4 样板逐字节一致。
+- Standards 轴建议：PID 记录块（`pidsBefore`/`pidsAfter` 差集）在 `useScrcpySession` 与 `scrcpy-session` 两处重复，可抽 `captureNewScrcpyPid(adb, before)` helper。判为 judgement call，因会跨 T4/T6 提交边界，本 tracer-bullet 不提取，留作后续清理。
 
 ---
 
@@ -156,6 +166,6 @@ Triage 标签：**ready-for-agent**（每条均可由 agent 独立领取）。
 3. T3（依赖 T1、T2）— 已完成 `c7c94ae`
 4. T4（依赖 T2、T3）— 已完成 `69eb3c5`
 5. T5 + T5.1（依赖 T2、T3）— 已完成（本次提交）
-6. T6（依赖 T4、T5）— 可领取
+6. T6（依赖 T4、T5）— 已完成（本次提交）
 
 每条工单用 `/implement` 单独领取，工单间清空上下文。
