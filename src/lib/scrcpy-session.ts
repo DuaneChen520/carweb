@@ -29,7 +29,6 @@ import {
   setRotationLocked,
   restoreRotation,
   getVirtualDisplayId,
-  startAppOnDisplay,
   getDefaultHomePackage,
   forceStopPackage,
   killScrcpyServer,
@@ -842,27 +841,18 @@ export class ScrcpySession {
 
   // ===== 虚拟屏应用管理 =====
 
-  async ensureDisplayId(): Promise<number | null> {
-    if (this.displayId !== null) return this.displayId;
-    if (!this.adb) return null;
-
-    for (let i = 0; i < 5; i++) {
-      await new Promise((r) => setTimeout(r, 500));
-      const vid = await getVirtualDisplayId(this.adb);
-      if (vid !== null) {
-        this.displayId = vid;
-        return vid;
-      }
-    }
-    return null;
-  }
-
+  /**
+   * 在虚拟屏启动指定 app（原生 scrcpy startApp 控制消息）。
+   *
+   * T2：改用 scrcpy server 原生的 startApp（控制消息 type 16）直接在本次会话
+   * 附着的虚拟屏上启动 app，替代 adb-commands 的 `am start --display` + 策略2
+   * 「主屏启动 + move-to-display 搬运」回退 + 三个 sleep。
+   *
+   * 本 session 已通过 newDisplay 附着到虚拟屏，controller.startApp 即落到该屏，
+   * 不再有「先在主屏出现再被搬进虚拟屏」的跳转，也不依赖 ROM 是否支持 `am --display`。
+   */
   async startAppOnDisplay(packageName: string): Promise<void> {
-    if (!this.adb) return;
-    const displayId = await this.ensureDisplayId();
-    if (displayId !== null) {
-      await startAppOnDisplay(this.adb, packageName, displayId);
-    }
+    await this.startApp(packageName);
   }
 
   // ===== 音频控制 =====

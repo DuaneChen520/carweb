@@ -39,21 +39,30 @@ Triage 标签：**ready-for-agent**（每条均可由 agent 独立领取）。
 
 **Blocked by:** T1
 
-- [ ] 会话 start() 拿到 controller 后调用 `controller.startApp(pkg)` 把目标 app 拉到新屏
-- [ ] 移除 adb-commands 中 `am start --display` 的虚拟屏分支及「策略2」回退
-- [ ] 移除启动路径中的三个 `sleep`（2000/2500/1500ms）
-- [ ] 真实设备验证：新屏无 home 闪、目标 app 直接显示、不再发送 `am task move-to-display`
+**状态：已完成（主路径）** — 提交于 `master`。
+- [x] `ScrcpySession.startAppOnDisplay` 改为委托 `controller.startApp(pkg)`（原生 type-16 控制消息），主路径（SessionManager→ScrcpySession→launchOnPane/launchFullscreen/resumeBackground）不再走 `am`
+- [x] 移除 `ScrcpySession` 中 `ensureDisplayId` 死代码（轮询 + 500ms×5 sleep）
+- [x] 单测：断言 `startAppOnDisplay` 调用原生 `controller.startApp`，不再走 adb-commands 的 am 分支
+- [x] 类型修复：`scrcpy4-options.test.ts` 的 `videoCodec: 'h264' as const`（T1 遗留）
+- [ ] 真实设备验证：新屏无 home 闪、目标 app 直接显示、不再发送 `am task move-to-display`（待实机）
+
+**范围说明（落地偏差，已确认）：** 验收「移除 adb-commands 中 am 分支 + 三个 sleep」**只在主路径成立**。
+`adb-commands.startAppOnDisplay`（am + 策略2 回退 + 三个 sleep）**未删除**，因为 legacy `useScrcpySession` hook（经 `ScrcpyContext` 仍接线）仍引用它。
+该 hook 的 `startAppOnDisplay` 经核实**未被任何 UI 组件调用**（现代多屏路径统一走 session-manager），属「接线保留但未被调用」的兼容壳。
+遵循 tracer-bullet 纪律（不越界、可独立验证），am 函数的删除折入 **T3**（本身即「清理死代码」），与 `forceStopPackage` 一并清理，并迁移/下线 legacy hook 的 am 调用。
 
 ---
 
-## T3 — 移除 forceStopPackage(homePkg) 与冗余 sleep（清理死代码）
+## T3 — 清理启动路径死代码（forceStopPackage + am 分支 + sleep）
 
-**What to build:** 不再事后全局强杀 Launcher，启动路径干净。home 已由 T1 根本禁用、由 T2 直接启动取代，强杀逻辑成为死代码。
+**What to build:** 启动路径干净：不再事后全局强杀 Launcher，且彻底移除 adb-commands 中的 am 分支与三个 sleep。home 已由 T1 根本禁用、由 T2 直接启动取代，强杀/搬运逻辑均成为死代码。
 
 **Blocked by:** T1, T2
 
-- [ ] 删除会话 start() 与 legacy hook 中的 `forceStopPackage(homePkg)` 调用
-- [ ] 删除 T2 已去除的 sleep 残留
+- [ ] 删除会话 `start()`（scrcpy-session.ts:392-401）与 legacy hook（useScrcpySession.ts:248-249）中的 `forceStopPackage(homePkg)` 调用
+- [ ] 删除 `adb-commands.startAppOnDisplay` 的 am 分支（含 `am start --display` 直投、策略2「主屏启动 + `am task move-to-display` 搬运」回退、三个 `sleep` 2000/2500/1500ms）
+- [ ] 迁移/下线 legacy `useScrcpySession` hook 对 am 分支的引用（改为 `controller.startApp`，或随兼容壳一并下线）
+- [ ] 移除 `scrcpy-session.ts` 中已无用的 `getDefaultHomePackage` / `forceStopPackage` import
 - [ ] 代码库检索确认无遗留的 `forceStopPackage(homePkg)` 与启动 sleep
 
 ---

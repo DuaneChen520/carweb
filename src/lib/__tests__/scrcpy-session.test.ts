@@ -98,17 +98,20 @@ describe('ScrcpySession', () => {
     await expect(session.goBack()).resolves.not.toThrow();
   });
 
-  it('ensureDisplayId 在未启动时返回 null', async () => {
-    const { session } = createSession('test-13');
-    // displayId 初始为 null，但 adb 也为 null，立即返回 null（不进入轮询）
-    // 注意：displayId === null 且 adb === null 时，直接返回 null
-    const result = await session.ensureDisplayId();
-    expect(result).toBeNull();
-  });
-
   it('startAppOnDisplay 在未启动时安全返回', async () => {
     const { session } = createSession('test-14');
     await expect(session.startAppOnDisplay('com.test.app')).resolves.not.toThrow();
+  });
+
+  it('startAppOnDisplay 通过原生 controller.startApp 在虚拟屏启动（不再走 am）', async () => {
+    const { session } = createSession('test-native');
+    const startAppSpy = vi.fn().mockResolvedValue(undefined);
+    // 注入 mock controller；health 初始为 IDLE，tryGetController 返回 ref.current
+    (session as unknown as { controller: { startApp: typeof startAppSpy } }).controller = {
+      startApp: startAppSpy,
+    };
+    await session.startAppOnDisplay('com.test.app');
+    expect(startAppSpy).toHaveBeenCalledWith('com.test.app');
   });
 
   it('setAudioRoute / setMuted / resumeAudio 在未启动时安全调用', () => {

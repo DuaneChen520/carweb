@@ -13,7 +13,7 @@ import { ScrcpyNewDisplay, ScrcpyCaptureOrientation } from '@yume-chan/scrcpy';
 function baseOptions() {
   return {
     video: true,
-    videoCodec: 'h264',
+    videoCodec: 'h264' as const,
     videoBitRate: 8000000,
     maxFps: 60,
     audio: true,
