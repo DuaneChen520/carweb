@@ -146,3 +146,21 @@ Android 概念：`sw(dp) = min(width_px, height_px) × 160 / dpi`。标准大屏
 - **启动超时保护**：`AdbScrcpyClient.start()` 外包 15s `Promise.race` 超时，防止 USB 断开时永久卡死（zombie session）。
 - **启动前清理**：`connectOnce` 中 `killScrcpyServer` 清旧 server；启动后按 PID 精确 `killScrcpyByPid`。
 - **USB 重置恢复**：`restoreDevice` 优先做总线级 `reset()`（~250ms 重新枚举），用于页面刷新后接口处于「半开」的恢复。
+
+## 断开信号语义（2026-07-09，ADR-0007 提案）
+
+`connectionStatus` 的 `disconnected` 既是「应用层有意关闭」也是「物理/传输真掉线」的**共用信号**，
+二者在 `useAdbStore.disconnect()` → `adb.close()` → `adb.disconnected` 回调链中被混写，
+且 `App.tsx:101` 在 `overlay=hidden` 时**无条件**将 `disconnected` 解读为「使用中真掉线」并弹
+“USB 连接已断开” overlay。这是「已绑定设备连接时误弹断线」的根因。
+
+- **有意断开（intentional disconnect）**：由代码主动发起的关闭——`tryAutoConnectUsb` 开头的前置
+  `store.disconnect()`（`useUsbConnection.ts:82`）、`handleStop`（`App.tsx:164`）、
+  `beforeunload` 的 `adb.close()`（`App.tsx:39`）。**不应**触发“使用中掉线”overlay。
+- **真实掉线（real drop）**：用户拔线 / USB 传输异常导致 `adb.disconnected` 在**无有意关闭标记**下触发。
+  **应**触发“使用中掉线”overlay（由 `App.tsx:101` 承接）。
+- **修复不变量（提案）**：`adb.disconnected` 回调需按「是否有意关闭标记」分流——
+  有意 → 置 `idle` 且不写 `disconnected`；真实 → 写 `disconnected`。细节见 `docs/adr/0007-isolate-intentional-vs-real-disconnect.md`。
+- **`reconnecting` overlay**：`ConnectionOverlay.tsx:113-121` 的“USB 连接已断开”提示，
+  唯一由 `App.tsx:101`（`disconnected` + `overlay=hidden`）触发；mirror 路径另由 `LinkSupervisor`
+  的 `disconnected/failed` 经 `subscribeLinkState` 承接（`App.tsx:109-116`）。
