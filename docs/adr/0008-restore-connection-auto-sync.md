@@ -160,10 +160,14 @@ appManager.syncAndParseIfNeeded().catch((err) => {
   - `syncAndParseIfNeeded` 注释「同步自带重入守卫」措辞模糊 → 精确为
     「syncWithDevice 自带重入守卫（syncing 标志）」。
   - 新增「设备端能力约束」说明，澄清真实增量语义与 ADR 中 `parseAllApps(toParse)` 简写记号。
-- **残留局限（已知，受测试基建限制）**：当前无 `@testing-library/react`，端到端断言
-  「`startScrcpy` 仍调用 `syncAndParseIfNeeded`」（即 9afad53 被删的**调用点**）需渲染 hook，
-  暂未覆盖；现有测试守护的是该方法的行为（删除方法才会红，删除调用点不会红）。
-  未来若引入 hook 测试基建，应补一条 `startScrcpy` → `appManager.syncAndParseIfNeeded` 的调用断言。
+- **残留局限已解决（2026-07-13 跟进）**：已在 `src/hooks/scrcpy/useScrcpySession.sync-guard.test.tsx`
+  引入 `@testing-library/react` + `jsdom` 基建，渲染 `useScrcpySession` 并断言 `startScrcpy`
+  触发 `appManager.syncAndParseIfNeeded`（含重连重入两次调用）。该端到端断言守护「调用点」本身——
+  若有人删除 `startScrcpy` 内的 `syncAndParseIfNeeded()` 调用（即 9afad53 式回归），测试将变红。
+  同时清理了 5 个过期测试文件的既有技术债（`app-info-cache`/`app-info-integration`/
+  `app-info-service`/`user-preferences-store` 的复合键 API 重写、`adb-media-commands` 因
+  `getMediaSession`/`dispatchMediaKey` 被过度删除导致的 build 断链——已还原到新
+  `media-commands.ts` 并修正导入），全量 `tsc -b --noEmit` 与 `vitest run` 均 0 失败。
 
 ## Open Questions（grilling 待决议）
 

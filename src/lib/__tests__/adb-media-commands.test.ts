@@ -1,9 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  runAdbCommand,
-  getMediaSession,
-  dispatchMediaKey,
-} from '../adb-commands';
+import { runAdbCommand } from '../adb-commands';
+import { getMediaSession, dispatchMediaKey } from '../media-commands';
 
 /**
  * 构造一个 fake adb：记录传入命令，并按队列返回 stdout。

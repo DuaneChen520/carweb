@@ -1,5 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { AppInfoCache } from './app-info-cache';
+import { AppInfoCache, type AppInfo } from './app-info-cache';
+
+const SERIAL = 'integration-serial';
+
+function makeInfo(pkg: string, versionCode = 1): AppInfo {
+  return {
+    deviceSerial: SERIAL,
+    packageName: pkg,
+    label: `label-${pkg}`,
+    iconBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==',
+    versionCode,
+    lastParsed: Date.now(),
+  };
+}
 
 describe('AppInfo Integration', () => {
   let cache: AppInfoCache;
@@ -9,47 +22,35 @@ describe('AppInfo Integration', () => {
   });
 
   afterEach(async () => {
-    await cache.clear();
+    await cache.clearAll();
   });
 
   it('cache stores and retrieves app info correctly', async () => {
-    const appInfo = {
-      packageName: 'com.example.test',
-      label: 'Test App',
-      iconBase64: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==',
-      versionCode: 42,
-      lastParsed: Date.now(),
-    };
+    const appInfo = makeInfo('com.example.test', 42);
 
-    await cache.set(appInfo.packageName, appInfo);
-    const result = await cache.get(appInfo.packageName);
+    await cache.set(SERIAL, appInfo.packageName, appInfo);
+    const result = await cache.get(SERIAL, appInfo.packageName);
 
     expect(result).toEqual(appInfo);
   });
 
-  it('cache invalidation works', async () => {
-    const appInfo = {
-      packageName: 'com.example.invalidate',
-      label: 'To Invalidate',
-      iconBase64: null,
-      versionCode: 1,
-      lastParsed: Date.now(),
-    };
+  it('cache invalidation works (clearForDevice removes entries)', async () => {
+    const appInfo = makeInfo('com.example.invalidate');
+    await cache.set(SERIAL, appInfo.packageName, appInfo);
 
-    await cache.set(appInfo.packageName, appInfo);
-    await cache.invalidate(appInfo.packageName);
-    const result = await cache.get(appInfo.packageName);
+    await cache.clearForDevice(SERIAL);
+    const result = await cache.get(SERIAL, appInfo.packageName);
 
     expect(result).toBeNull();
   });
 
   it('clear removes all entries', async () => {
-    await cache.set('app1', { packageName: 'app1', label: 'App 1', iconBase64: null, versionCode: 1, lastParsed: Date.now() });
-    await cache.set('app2', { packageName: 'app2', label: 'App 2', iconBase64: null, versionCode: 2, lastParsed: Date.now() });
+    await cache.set(SERIAL, 'app1', makeInfo('app1', 1));
+    await cache.set(SERIAL, 'app2', makeInfo('app2', 2));
 
-    await cache.clear();
+    await cache.clearAll();
 
-    expect(await cache.get('app1')).toBeNull();
-    expect(await cache.get('app2')).toBeNull();
+    expect(await cache.get(SERIAL, 'app1')).toBeNull();
+    expect(await cache.get(SERIAL, 'app2')).toBeNull();
   });
 });

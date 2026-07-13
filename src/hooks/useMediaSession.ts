@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Adb } from '@yume-chan/adb';
-import { getMediaSession, dispatchMediaKey, type MediaInfo } from '@/lib/adb-commands';
+import { getMediaSession, dispatchMediaKey } from '@/lib/media-commands';
+import type { MediaInfo } from '@/lib/media-session-parser';
 
 export interface UseMediaSessionResult {
   media: MediaInfo | null;

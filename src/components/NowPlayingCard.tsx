@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Play, Pause, SkipBack, SkipForward, Music } from 'lucide-react';
-import type { MediaInfo } from '@/lib/adb-commands';
+import type { MediaInfo } from '@/lib/media-session-parser';
 
 interface NowPlayingCardProps {
   media: MediaInfo | null;

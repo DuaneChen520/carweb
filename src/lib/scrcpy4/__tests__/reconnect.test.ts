@@ -1,16 +1,16 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { ControllerHealth } from '../controller-health';
 
 describe('reconnect integration', () => {
   let health: ControllerHealth;
-  let reconnectFn: ReturnType<typeof vi.fn>;
-  let stopFn: ReturnType<typeof vi.fn>;
+  let reconnectFn: Mock<() => Promise<void>>;
+  let stopFn: Mock<() => Promise<void>>;
 
   beforeEach(() => {
     vi.useFakeTimers();
     health = new ControllerHealth({ maxRetries: 3 });
-    stopFn = vi.fn().mockResolvedValue(undefined);
-    reconnectFn = vi.fn().mockImplementation(async () => {
+    stopFn = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    reconnectFn = vi.fn<() => Promise<void>>().mockImplementation(async () => {
       // 模拟重连流程：stop → 退避 → reset → markHealthy
       await stopFn();
       health.reset();
