@@ -4,6 +4,7 @@ import { DesktopScreen } from './components/DesktopScreen';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { PinDialog } from './components/PinDialog';
 import { ScrcpyProvider } from './contexts/ScrcpyContext';
+import { AppPickerProvider } from './contexts/AppPickerContext';
 import { useAdbStore } from './hooks/useAdbStore';
 import { useRememberedDevices, type DisplayMode } from './hooks/useRememberedDevices';
 import { useDevicePin } from './hooks/useDevicePin';
@@ -186,7 +187,8 @@ function App() {
 
   return (
     <ScrcpyProvider>
-      <div className="w-full h-dvh bg-slate-900">
+      <AppPickerProvider>
+        <div className="w-full h-dvh bg-slate-900">
         {displayMode === 'mirror' ? (
           // mirror 模式仍使用 VirtualScreen（向后兼容）
           <VirtualScreen
@@ -239,6 +241,7 @@ function App() {
           />
         )}
       </div>
+      </AppPickerProvider>
     </ScrcpyProvider>
   );
 }

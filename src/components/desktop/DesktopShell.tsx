@@ -39,12 +39,8 @@ interface DesktopShellProps {
   sidebar?: ReactNode;
   /** 活动管理面板（Task 7 实现后注入） */
   activityManagerPanel?: ReactNode;
-  /** 全部应用浮窗（Task 9 实现后注入） */
-  appPickerOverlay?: ReactNode;
-  /** 打开应用选择器回调（pane 模式，来自空 pane 点击） */
+  /** 打开应用选择器回调（pane 模式，来自空 pane 点击 / dropdown 切换） */
   onOpenAppPicker?: (pane: 'left' | 'right') => void;
-  /** 打开应用选择器回调（全屏模式，来自侧边栏） */
-  onOpenAppPickerFullscreen?: () => void;
   /** 切换 pane 应用回调（弹应用选择器 pane 模式） */
   onSwitchPaneApp?: (pane: 'left' | 'right') => void;
   /** 显示配置（由 App.tsx 传入，用于 paneToFullscreen 等） */
@@ -54,7 +50,6 @@ interface DesktopShellProps {
 export function DesktopShell({
   sidebar,
   activityManagerPanel,
-  appPickerOverlay,
   onOpenAppPicker,
   onSwitchPaneApp,
   displayConfig,
@@ -128,9 +123,8 @@ export function DesktopShell({
             FullscreenOverlay 内置 Canvas Reparenting，自动管理 canvas 移动 */}
         <FullscreenOverlay displayConfig={displayConfig} />
 
-        {/* 活动管理浮窗 / 全部应用浮窗：fixed 定位，可覆盖整个区域（Task 7/9） */}
+        {/* 活动管理浮窗（fixed 定位，可覆盖整个区域，Task 7） */}
         {activityManagerPanel}
-        {appPickerOverlay}
       </div>
     </div>
   );

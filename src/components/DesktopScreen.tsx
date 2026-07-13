@@ -22,10 +22,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { DesktopShell } from './desktop/DesktopShell';
 import { ControlSidebar } from './ControlSidebar';
 import { ActivityManagerPanel } from './desktop/ActivityManagerPanel';
-import { AppPickerOverlay } from './desktop/AppPickerOverlay';
 import { useSessionManager } from '@/lib/session-manager';
 import { useAdbStore } from '@/hooks/useAdbStore';
 import { useScrcpyContext } from '@/contexts/ScrcpyContext';
+import { useAppPicker } from '@/contexts/AppPickerContext';
 import { DesktopStateStore } from '@/lib/desktop-state-store';
 import { calculateDpi } from '@/utils/display';
 import type { PaneSlot } from '@/lib/session-manager';
@@ -104,8 +104,6 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
 
   // 浮窗状态
   const [showActivityManager, setShowActivityManager] = useState(false);
-  const [appPickerMode, setAppPickerMode] = useState<'pane' | 'fullscreen' | null>(null);
-  const [appPickerTargetPane, setAppPickerTargetPane] = useState<PaneSlot>('left');
 
   // 浏览器全屏（§9.2 保留按钮）
   const fullscreenRef = useRef<HTMLDivElement>(null);
@@ -223,21 +221,9 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
   }, [closeAll]);
 
   // ===== 回调处理 =====
+  const { openAppPicker } = useAppPicker();
 
-  const handleOpenAppPicker = useCallback((pane: PaneSlot) => {
-    setAppPickerTargetPane(pane);
-    setAppPickerMode('pane');
-  }, []);
-
-  const handleOpenAppPickerFullscreen = useCallback(() => {
-    setAppPickerMode('fullscreen');
-  }, []);
-
-  const handleSwitchPaneApp = useCallback((pane: PaneSlot) => {
-    setAppPickerTargetPane(pane);
-    setAppPickerMode('pane');
-  }, []);
-
+  // 桌面分屏/全屏启动（投送回调由调用方在 AppPicker config 中提供，ADR-0010 D1/D3）
   const handleLaunchOnPane = useCallback(async (pkg: string, pane: PaneSlot) => {
     await launchOnPane(pkg, pane, buildPaneDisplayConfig(pane));
   }, [launchOnPane]);
@@ -248,20 +234,12 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
 
   const handleDesktopClick = useCallback(() => {
     void fullscreenToDesktop();
-    // 点击桌面时关闭所有浮窗
+    // 点击桌面时关闭活动进程面板（§12.4）；AppPicker 由 context 独立管理
     setShowActivityManager(false);
-    setAppPickerMode(null);
   }, [fullscreenToDesktop]);
 
   const handleActivityManagerClick = useCallback(() => {
     setShowActivityManager((v) => !v);
-    setAppPickerMode(null);
-  }, []);
-
-  // 关闭浮窗当点击侧边栏其他按钮（§12.4）
-  const closeAllPanels = useCallback(() => {
-    setShowActivityManager(false);
-    setAppPickerMode(null);
   }, []);
 
   const activityCount = apps.length;
@@ -280,12 +258,12 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
             onDesktopClick={handleDesktopClick}
             onActivityManagerClick={handleActivityManagerClick}
             onLaunchFullscreen={(pkg) => { void handleLaunchFullscreen(pkg); }}
-            onOpenAppPickerFullscreen={handleOpenAppPickerFullscreen}
+            onOpenAppPicker={() => openAppPicker({ mode: 'fullscreen', onLaunch: (pkg) => { void handleLaunchFullscreen(pkg); } })}
             activityCount={activityCount}
           />
         }
-        onOpenAppPicker={handleOpenAppPicker}
-        onSwitchPaneApp={handleSwitchPaneApp}
+        onOpenAppPicker={(pane) => openAppPicker({ mode: 'pane', targetPane: pane, onLaunch: (pkg) => { void handleLaunchOnPane(pkg, pane); } })}
+        onSwitchPaneApp={(pane) => openAppPicker({ mode: 'pane', targetPane: pane, onLaunch: (pkg) => { void handleLaunchOnPane(pkg, pane); } })}
         displayConfig={buildFullscreenDisplayConfig()}
       />
 
@@ -296,20 +274,6 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
           getDisplayConfig={buildPaneDisplayConfig}
         />
       )}
-
-      {/* 全部应用浮窗（双模式） */}
-      {appPickerMode && (
-        <AppPickerOverlay
-          mode={appPickerMode}
-          targetPane={appPickerTargetPane}
-          onLaunchOnPane={(pkg, pane) => { void handleLaunchOnPane(pkg, pane); }}
-          onLaunchFullscreen={(pkg) => { void handleLaunchFullscreen(pkg); }}
-          onClose={() => setAppPickerMode(null)}
-        />
-      )}
-
-      {/* 隐藏的 closeAllPanels 引用，避免 lint 警告 */}
-      <span hidden onClick={closeAllPanels} />
     </div>
   );
 }

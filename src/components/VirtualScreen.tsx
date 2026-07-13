@@ -6,6 +6,7 @@ import type { ResolutionPresetKey } from '../hooks/scrcpy';
 import { calculateDpi } from '../utils/display';
 import { useAdbStore } from '../hooks/useAdbStore';
 import { useScrcpyContext } from '../contexts/ScrcpyContext';
+import { useAppPicker } from '../contexts/AppPickerContext';
 import { subscribeLinkState } from '../lib/link-state-bus';
 import { ControlSidebar } from './ControlSidebar';
 
@@ -36,7 +37,8 @@ export function VirtualScreen({ active = false, displayMode = 'virtual', onStop 
   const initialStartTimerRef = useRef<NodeJS.Timeout | null>(null);
   const initialStartDoneRef = useRef(false);
 
-  const { startScrcpy, stopScrcpy, injectTouch, injectText, resumeAudio, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay, flexClient, flexClientRef } = useScrcpyContext();
+  const { startScrcpy, stopScrcpy, injectTouch, injectText, resumeAudio, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay, flexClient, flexClientRef, startApp } = useScrcpyContext();
+  const { openAppPicker } = useAppPicker();
   const store = useAdbStore();
 
   useEffect(() => {
@@ -325,6 +327,7 @@ currentPresetRef.current = currentPreset;
         currentPreset={currentPreset}
         resolutionPreset={resolutionPreset}
         changeResolutionPreset={changeResolutionPreset}
+        onOpenAppPicker={() => openAppPicker({ mode: 'single', onLaunch: (pkg) => { void startApp(pkg); } })}
       />
 
       <div

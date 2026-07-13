@@ -14,12 +14,18 @@ export interface AppGridHandle {
 
 interface AppGridProps {
   onLaunchApp: (pkg: string) => void;
+  /** 搜索过滤（匹配包名或已缓存标签），可选 */
+  searchText?: string;
+  /** 置顶模式：开启后点击应用 = 切换置顶而非启动 */
+  pinMode?: boolean;
+  /** 置顶模式下的切换回调 */
+  onTogglePin?: (pkg: string) => void;
 }
 
 const COLS = 4;
 
 export const AppGrid = forwardRef<AppGridHandle, AppGridProps>(function AppGrid(
-  { onLaunchApp },
+  { onLaunchApp, searchText, pinMode, onTogglePin },
   ref,
 ) {
   const scrcpy = useScrcpyContext();
@@ -61,6 +67,18 @@ export const AppGrid = forwardRef<AppGridHandle, AppGridProps>(function AppGrid(
     counts.set(a.packageName, { localCount: a.localCount, dexBaseline: a.launchCount });
   }
   const sortedPkgs = sortApps(allPkgs, pinned, counts);
+  const pinnedMap = new Map<string, boolean>();
+  for (const a of deviceApps) pinnedMap.set(a.packageName, a.pinned);
+
+  // 搜索过滤（包名或已缓存标签），可选
+  const query = (searchText ?? '').toLowerCase().trim();
+  const filteredPkgs = query
+    ? sortedPkgs.filter((pkg) => {
+        if (pkg.toLowerCase().includes(query)) return true;
+        const label = labels.get(pkg) || '';
+        return label.toLowerCase().includes(query);
+      })
+    : sortedPkgs;
 
   // 计算每页容量（4 列 × 行数）
   const [perPage, setPerPage] = useState(12);
@@ -74,12 +92,16 @@ export const AppGrid = forwardRef<AppGridHandle, AppGridProps>(function AppGrid(
     return () => window.removeEventListener('resize', calc);
   }, []);
 
-  const pages = paginateApps(sortedPkgs, perPage);
+  const pages = paginateApps(filteredPkgs, perPage);
 
   const handleLaunch = useCallback((pkg: string) => {
+    if (pinMode && onTogglePin) {
+      onTogglePin(pkg);
+      return;
+    }
     incrementLocalCount(pkg).then(() => refresh()).catch(() => {});
     onLaunchApp(pkg);
-  }, [incrementLocalCount, refresh, onLaunchApp]);
+  }, [pinMode, onTogglePin, incrementLocalCount, refresh, onLaunchApp]);
 
   // 暴露回第一页 + 手动刷新
   useImperativeHandle(ref, () => ({
@@ -95,8 +117,16 @@ export const AppGrid = forwardRef<AppGridHandle, AppGridProps>(function AppGrid(
 
   if (deviceApps.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center text-white/40 text-sm py-12">
+      <div className="flex-1 flex items-center justify-center text-slate-400 text-sm py-12">
         正在加载应用列表...
+      </div>
+    );
+  }
+
+  if (filteredPkgs.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-slate-400 text-sm py-12">
+        无匹配应用
       </div>
     );
   }
@@ -125,6 +155,8 @@ export const AppGrid = forwardRef<AppGridHandle, AppGridProps>(function AppGrid(
                   name={labels.get(pkg) || pkg.split('.').pop() || pkg}
                   getAppIcon={getAppIcon}
                   onLaunch={handleLaunch}
+                  pinMode={pinMode}
+                  isPinned={pinnedMap.get(pkg) ?? false}
                   cacheVersion={appListVersion}
                 />
               ))}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Home, Loader2, X, MonitorOff, Monitor, Maximize2, Minimize2, Power, Settings, Trash2, Search, Pin, RefreshCw, Volume2, VolumeX, AppWindow, Smartphone, Keyboard } from 'lucide-react';
+import { ArrowLeft, Home, MonitorOff, Monitor, Maximize2, Minimize2, Power, Settings, Trash2, Volume2, VolumeX, AppWindow, Smartphone, Keyboard } from 'lucide-react';
 import { AppGridIcon } from './AppGridIcon';
+import { AppIcon } from './AppIcon';
 import { NeumorphicButton, ICON_SIZE } from './NeumorphicButton';
 import type { ResolutionPresetKey } from '../hooks/scrcpy';
 import { RESOLUTION_PRESETS } from '../hooks/scrcpy';
@@ -15,85 +16,6 @@ function formatCacheSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-interface AppIconProps {
-  pkg: string;
-  name: string;
-  getAppIcon: (pkg: string) => Promise<string | null>;
-  onLaunch: (pkg: string) => void;
-  compact?: boolean;
-  pinMode?: boolean;
-  isPinned?: boolean;
-  cacheVersion?: number;
-}
-
-function AppIcon({ pkg, name, getAppIcon, onLaunch, compact, pinMode, isPinned, cacheVersion }: AppIconProps) {
-  const [iconUrl, setIconUrl] = useState<string | null>(null);
-  const [isVisible, setIsVisible] = useState(false);
-  const btnRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    const el = btnRef.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setIsVisible(true);
-          observer.disconnect();
-        }
-      },
-      { threshold: 0.1 }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    if (!isVisible) return;
-    let cancelled = false;
-    setIconUrl(null);
-    getAppIcon(pkg).then((url) => {
-      if (!cancelled) setIconUrl(url);
-    });
-    return () => { cancelled = true; };
-  }, [pkg, getAppIcon, isVisible, cacheVersion]);
-
-  const displayName = name || pkg.split('.').pop() || pkg;
-  const firstLetter = displayName.charAt(0).toUpperCase();
-  const hue = pkg.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) % 360;
-
-  return (
-    <button
-      ref={btnRef}
-      onClick={() => onLaunch(pkg)}
-      className="flex flex-col items-center gap-1 p-1.5 rounded-lg hover:bg-black/10 transition-colors group relative"
-      title={name}
-    >
-      {iconUrl ? (
-        <img src={iconUrl} alt={name} className="w-9 h-9 rounded-lg object-cover" />
-      ) : (
-        <div
-          className="w-9 h-9 rounded-lg flex items-center justify-center text-white font-medium text-sm"
-          style={{ backgroundColor: `hsl(${hue}, 45%, 35%)` }}
-        >
-          {firstLetter}
-        </div>
-      )}
-      {pinMode && (
-        <div className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${
-          isPinned ? 'bg-accent-500' : 'bg-white/20'
-        }`}>
-          <Pin className={`w-2.5 h-2.5 ${isPinned ? 'text-white fill-white' : 'text-white/60'}`} />
-        </div>
-      )}
-      {!compact && (
-        <span className="text-[10px] text-black/50 truncate w-full text-center group-hover:text-black/80 transition-colors">
-          {displayName}
-        </span>
-      )}
-    </button>
-  );
 }
 
 interface ControlSidebarProps {
@@ -115,12 +37,15 @@ interface ControlSidebarProps {
    * - onDesktopClick 替代 goHome（§9.1 桌面按钮语义变更）
    * - onActivityManagerClick 触发活动进程面板（§9.1 新增按钮）
    * - onLaunchFullscreen 替代 startApp 全屏启动（§9.3 pinned app 统一全屏启动）
-   * - onOpenAppPickerFullscreen 触发全部应用浮窗（全屏模式，§10）
    */
   onDesktopClick?: () => void;
   onActivityManagerClick?: () => void;
   onLaunchFullscreen?: (pkg: string) => void;
-  onOpenAppPickerFullscreen?: () => void;
+  /**
+   * 打开统一「全部应用」浮窗（ADR-0010）。由父组件绑定具体 mode + onLaunch，
+   * 侧栏只负责触发，不再各自维护浮窗。
+   */
+  onOpenAppPicker?: () => void;
   /** 活动进程数量（用于按钮角标显示） */
   activityCount?: number;
   /**
@@ -138,11 +63,11 @@ export function ControlSidebar({
   isVirtualDisplay, isRunning, useMirrorMode, isFullscreen, toggleFullscreen, toggleDisplayMode, handleStop,
   keyboardMode, setKeyboardMode,
   currentPreset, resolutionPreset, changeResolutionPreset,
-  onDesktopClick, onActivityManagerClick, onLaunchFullscreen, onOpenAppPickerFullscreen, activityCount,
+  onDesktopClick, onActivityManagerClick, onLaunchFullscreen, onOpenAppPicker, activityCount,
   audioStatus: propAudioStatus, isMuted: propIsMuted, setMuted: propSetMuted,
 }: ControlSidebarProps) {
   const scrcpy = useScrcpyContext();
-  const { goBack, goHome, startApp, getAppIcon, getCachedAppLabels, parseAllApps, turnOffPhysicalScreen, turnOnPhysicalScreen, getAllDeviceApps, incrementLocalCount, togglePin, getPinnedApps, syncWithDevice, audioStatus: ctxAudioStatus, isMuted: ctxIsMuted, setMuted: ctxSetMuted, audioRoute, setAudioRoute } = scrcpy;
+  const { goBack, goHome, startApp, getAppIcon, getCachedAppLabels, parseAllApps, turnOffPhysicalScreen, turnOnPhysicalScreen, getAllDeviceApps, incrementLocalCount, syncWithDevice, audioStatus: ctxAudioStatus, isMuted: ctxIsMuted, setMuted: ctxSetMuted, audioRoute, setAudioRoute } = scrcpy;
   // 桌面模式：优先使用 SessionManager 提供的音频状态；单屏模式回退到 context 单例
   const audioStatus = propAudioStatus ?? ctxAudioStatus;
   const isMuted = propIsMuted ?? ctxIsMuted;
@@ -151,36 +76,15 @@ export function ControlSidebar({
   const appListVersion = useAdbStore((s) => s.appListVersion);
   const { hasPin } = useDevicePin();
   const rememberedDevices = useRememberedDevices();
-  const [panelMode, setPanelMode] = useState<'closed' | 'search' | 'apps'>('closed');
-  const [searchText, setSearchText] = useState('');
-  const [apps, setApps] = useState<string[] | null>(null);
   const [appLabels, setAppLabels] = useState<Map<string, string>>(new Map());
-  const [loading, setLoading] = useState(false);
-  const [pinMode, setPinMode] = useState(false);
-  const [pinnedSet, setPinnedSet] = useState<Set<string>>(new Set());
-
-  const [floatingPanelPosition, setFloatingPanelPosition] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
   const [pinnedApps, setPinnedApps] = useState<string[]>([]);
   const [sidebarApps, setSidebarApps] = useState<string[]>([]);
   const [physicalScreenOn, setPhysicalScreenOn] = useState(true);
-  const [parseProgress, setParseProgress] = useState<{ total: number; parsed: number; skipped: number; current: string } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [cacheInfo, setCacheInfo] = useState<{ count: number; size: number } | null>(null);
   const [showCacheSettings, setShowCacheSettings] = useState(false);
   const [cacheDevices, setCacheDevices] = useState<DeviceCacheInfo[]>([]);
   const [showPinSetup, setShowPinSetup] = useState(false);
-  const searchRef = useRef<HTMLInputElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const dragStartRef = useRef({ x: 0, y: 0 });
-
-  const query = searchText.toLowerCase().trim();
-
-  useEffect(() => {
-    if (panelMode !== 'closed') {
-      searchRef.current?.focus();
-    }
-  }, [panelMode]);
 
   // 按「置顶 > 常用 > 其他」分类并写入侧栏状态（纯数据整理，不触发同步/解析）。
   const classifyAndSetSidebarApps = useCallback(
@@ -246,170 +150,25 @@ export function ControlSidebar({
     reloadSidebarApps();
   }, [reloadSidebarApps, appListVersion]);
 
-  const filteredPinned = pinnedApps.filter(
-    (pkg) => !query || pkg.toLowerCase().includes(query) || (appLabels.get(pkg) || '').toLowerCase().includes(query),
-  );
-
-  const filteredAll = apps
-    ? apps.filter((p) => {
-        if (!query) return true;
-        const label = appLabels.get(p) || '';
-        return (
-          p.toLowerCase().includes(query) ||
-          label.toLowerCase().includes(query)
-        );
-      })
-    : [];
-
-  const sortDeviceApps = useCallback(async () => {
-    const deviceApps = await getAllDeviceApps();
-    const pinned: typeof deviceApps = [];
-    const frequent: typeof deviceApps = [];
-    const other: typeof deviceApps = [];
-    for (const app of deviceApps) {
-      if (app.pinned) pinned.push(app);
-      else if (app.localCount > 0) frequent.push(app);
-      else other.push(app);
-    }
-    pinned.sort((a, b) => b.pinOrder - a.pinOrder);
-    frequent.sort((a, b) => b.localCount - a.localCount);
-    other.sort((a, b) => b.launchCount - a.launchCount);
-    return [...pinned, ...frequent, ...other].map(a => a.packageName);
-  }, [getAllDeviceApps]);
-
-  const loadApps = useCallback(async () => {
-    setLoading(true);
-    setPanelMode('apps');
-    try {
-      const deviceApps = await getAllDeviceApps();
-      if (deviceApps.length > 0) {
-        const sorted = await sortDeviceApps();
-        setApps(sorted);
-        const labels = await scrcpy.getCachedAppLabels(sorted);
-        setAppLabels(labels);
-        setLoading(false);
-        return;
-      }
-
-      await parseAllApps((p) => setParseProgress(p));
-
-      const sorted = await sortDeviceApps();
-      setApps(sorted);
-      const labels = await scrcpy.getCachedAppLabels(sorted);
-      setAppLabels(labels);
-      setParseProgress(null);
-    } catch {
-      setParseProgress(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [parseAllApps, scrcpy, getAllDeviceApps, sortDeviceApps]);
-
-  const handleLaunchApp = useCallback(
-    (pkg: string) => {
-      if (pinMode && panelMode === 'apps') {
-        togglePin(pkg).then(async (isNowPinned) => {
-          setPinnedSet(prev => {
-            const next = new Set(prev);
-            if (isNowPinned) {
-              next.add(pkg);
-            } else {
-              next.delete(pkg);
-            }
-            return next;
-          });
-          const sorted = await sortDeviceApps();
-          setApps(sorted);
-          refreshSidebarApps();
-        });
-      } else {
-        // §9.3 pinned app 点击行为变更：从 startApp（全屏 startApp intent）
-        // 改为统一全屏启动语义（launchFullscreen）
-        if (onLaunchFullscreen) {
-          onLaunchFullscreen(pkg);
-        } else {
-          startApp(pkg);
-        }
-        incrementLocalCount(pkg).then(() => {
-          refreshSidebarApps();
-        }).catch(() => {});
-        setSearchText('');
-        setPanelMode('closed');
-      }
-    },
-    [pinMode, panelMode, togglePin, startApp, incrementLocalCount, refreshSidebarApps, sortDeviceApps, onLaunchFullscreen],
-  );
-
-  const togglePinMode = useCallback(async () => {
-    if (pinMode) {
-      setPinMode(false);
-      setPinnedSet(new Set());
+  // 侧栏 dock 启动：桌面模式优先 onLaunchFullscreen（§9.3 统一全屏启动语义），否则 startApp。
+  const handleDockLaunch = useCallback((pkg: string) => {
+    if (onLaunchFullscreen) {
+      onLaunchFullscreen(pkg);
     } else {
-      const pinned = await getPinnedApps();
-      setPinnedSet(new Set(pinned.map(a => a.packageName)));
-      setPinMode(true);
+      startApp(pkg);
     }
-  }, [pinMode, getPinnedApps]);
-
-  const closePanel = useCallback(() => {
-    setPanelMode('closed');
-    setSearchText('');
-    setPinMode(false);
-    setPinnedSet(new Set());
-  }, []);
-
-  const togglePanel = useCallback((mode: 'search' | 'apps') => {
-    if (panelMode === mode) {
-      setPanelMode('closed');
-    } else {
-      setPanelMode(mode);
-      setSearchText('');
-      if (mode === 'apps') {
-        if (!apps) {
-          loadApps();
-        } else {
-          // Refresh labels from cache (fast) — parseAllApps may have finished
-          scrcpy.getCachedAppLabels(apps).then(setAppLabels).catch(() => {});
-        }
-      }
-      if (panelRef.current) {
-        const rect = panelRef.current.getBoundingClientRect();
-        setFloatingPanelPosition({ x: rect.left, y: rect.top });
-      }
-    }
-  }, [panelMode, apps, loadApps, scrcpy]);
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.target === panelRef.current || (e.target as HTMLElement).closest('.drag-handle')) {
-      setIsDragging(true);
-      dragStartRef.current = { x: e.clientX - floatingPanelPosition.x, y: e.clientY - floatingPanelPosition.y };
-    }
-  }, [floatingPanelPosition]);
-
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (isDragging) {
-      setFloatingPanelPosition({
-        x: e.clientX - dragStartRef.current.x,
-        y: e.clientY - dragStartRef.current.y,
-      });
-    }
-  }, [isDragging]);
-
-  const handleMouseUp = useCallback(() => {
-    setIsDragging(false);
-  }, []);
+    incrementLocalCount(pkg).then(() => {
+      refreshSidebarApps();
+    }).catch(() => {});
+  }, [onLaunchFullscreen, startApp, incrementLocalCount, refreshSidebarApps]);
 
   return (
     <>
       <div className="w-13 h-full flex flex-col items-center py-2 gap-1 bg-white border-r border-black/10">
         <button
           onClick={() => {
-            // §10 全部应用双模式：侧边栏触发全屏模式
-            if (onOpenAppPickerFullscreen) {
-              onOpenAppPickerFullscreen();
-            } else {
-              togglePanel('apps');
-            }
+            // §10 / ADR-0010：侧栏「全部应用」统一触发 AppPickerContext 浮窗
+            onOpenAppPicker?.();
           }}
           className="flex items-center justify-center w-13 h-[52px]"
           title="应用列表"
@@ -426,10 +185,8 @@ export function ControlSidebar({
               pkg={pkg}
               name={appLabels.get(pkg) || pkg.split('.').pop() || pkg}
               getAppIcon={getAppIcon}
-              onLaunch={handleLaunchApp}
+              onLaunch={handleDockLaunch}
               compact
-              pinMode={pinMode}
-              isPinned={pinnedSet.has(pkg)}
               cacheVersion={appListVersion}
             />
           ))}
@@ -444,10 +201,8 @@ export function ControlSidebar({
                 pkg={pkg}
                 name={appLabels.get(pkg) || pkg.split('.').pop() || pkg}
                 getAppIcon={getAppIcon}
-                onLaunch={handleLaunchApp}
+                onLaunch={handleDockLaunch}
                 compact
-                pinMode={pinMode}
-                isPinned={pinnedSet.has(pkg)}
                 cacheVersion={appListVersion}
               />
             ))}
@@ -477,6 +232,7 @@ export function ControlSidebar({
         >
           <Home size={ICON_SIZE} />
         </NeumorphicButton>
+
         {/* §9.1 新增活动进程按钮 */}
         {onActivityManagerClick && (
           <NeumorphicButton
@@ -704,147 +460,6 @@ export function ControlSidebar({
         />
       </div>
       </div>
-
-      {panelMode !== 'closed' && (
-        <div
-          ref={panelRef}
-          className="fixed w-72 max-h-[calc(100vh-2rem)] bg-white/95 backdrop-blur-xl border border-slate-200 flex flex-col z-50 shadow-float rounded-2xl overflow-hidden animate-scale-in"
-          style={{
-            left: `${floatingPanelPosition.x}px`,
-            top: `${floatingPanelPosition.y}px`,
-          }}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-        >
-          <div className="drag-handle flex items-center justify-between px-4 pt-3 pb-2 cursor-move select-none bg-slate-50 hover:bg-slate-100 transition-colors border-b border-slate-200">
-            <span className="text-slate-700 text-sm font-medium">
-              {panelMode === 'search' ? '搜索应用' : '全部应用'}
-              {panelMode === 'apps' && apps && ` (${filteredAll.length})`}
-            </span>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={togglePinMode}
-                className={`p-1 rounded-lg transition-colors ${pinMode ? 'text-accent-600 bg-accent-50' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-200'}`}
-                title={pinMode ? '退出置顶模式' : '置顶模式'}
-              >
-                <Pin className="w-4 h-4" />
-              </button>
-              {panelMode === 'apps' && (
-                <button
-                  onClick={() => {
-                    if (loading) return;
-                    setLoading(true);
-                    refreshSidebarApps(true).then(async () => {
-                      const sorted = await sortDeviceApps();
-                      setApps(sorted);
-                      setLoading(false);
-                    }).catch(() => {
-                      setLoading(false);
-                    });
-                  }}
-                  disabled={loading}
-                  className={`p-1 rounded-lg transition-colors ${loading ? 'text-slate-300' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-200'}`}
-                  title="更新应用列表"
-                >
-                  <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                </button>
-              )}
-              <button
-                onClick={closePanel}
-                className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-lg transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-
-          <div className="px-3 pb-2">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-              <input
-                ref={searchRef}
-                type="text"
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-                placeholder="搜索应用..."
-                className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-100 rounded-lg border border-slate-200 text-slate-900 placeholder-slate-400 outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-400/30 transition-colors"
-              />
-            </div>
-          </div>
-
-          {parseProgress && (
-            <div className="px-4 pb-2">
-              <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
-                <span>{parseProgress.current ? `解析 ${parseProgress.current}...` : '解析应用中...'}</span>
-                <span className="tabular-nums">{parseProgress.parsed}/{parseProgress.total}</span>
-              </div>
-              <div className="h-1 bg-slate-200 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-accent-500 rounded-full transition-all duration-300"
-                  style={{ width: `${(parseProgress.parsed / Math.max(parseProgress.total, 1)) * 100}%` }}
-                />
-              </div>
-            </div>
-          )}
-
-          <div className="flex-1 overflow-y-auto px-2 space-y-1">
-            {panelMode === 'search' ? (
-              filteredPinned.length > 0 ? (
-                <>
-                  <div className="text-slate-400 text-[10px] uppercase tracking-wider px-1 pt-1 pb-0.5">
-                    常用
-                  </div>
-                  <div className="grid grid-cols-3 gap-0.5">
-                    {filteredPinned.map((pkg) => (
-                      <AppIcon
-                        key={pkg}
-                        pkg={pkg}
-                        name={appLabels.get(pkg) || pkg.split('.').pop() || pkg}
-                        getAppIcon={getAppIcon}
-                        onLaunch={handleLaunchApp}
-                        pinMode={pinMode}
-                        isPinned={pinnedSet.has(pkg)}
-                        cacheVersion={appListVersion}
-                      />
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <div className="text-slate-400 text-xs text-center py-4">
-                  无匹配应用
-                </div>
-              )
-            ) : apps ? (
-              filteredAll.length > 0 ? (
-                <div className="grid grid-cols-3 gap-0.5 py-1">
-                  {filteredAll.map((pkg) => (
-                    <AppIcon
-                      key={pkg}
-                      pkg={pkg}
-                      name={appLabels.get(pkg) || pkg.split('.').pop() || pkg}
-                      getAppIcon={getAppIcon}
-                      onLaunch={handleLaunchApp}
-                      pinMode={pinMode}
-                      isPinned={pinnedSet.has(pkg)}
-                      cacheVersion={appListVersion}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="text-slate-400 text-xs text-center py-4">
-                  无匹配应用
-                </div>
-              )
-            ) : (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="w-5 h-5 text-accent-400 animate-spin" />
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </>
   );
 }
