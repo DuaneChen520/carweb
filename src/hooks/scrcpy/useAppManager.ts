@@ -121,6 +121,14 @@ export function useAppManager() {
     return serviceRef.current.syncWithDevice(adb, deviceSerial, signal);
   }, [deviceSerial]);
 
+  const syncAndParseIfNeeded = useCallback(async (signal?: AbortSignal): Promise<SyncResult> => {
+    const adb = adbRef.current;
+    if (!adb || !deviceSerial) {
+      return { toParse: [], deviceApps: new Map() };
+    }
+    return serviceRef.current.syncAndParseIfNeeded(adb, deviceSerial, signal);
+  }, [deviceSerial]);
+
   const getAllDeviceApps = useCallback(async () => {
     if (!deviceSerial) return [];
     return serviceRef.current.getAllDeviceApps(deviceSerial);
@@ -182,6 +190,7 @@ export function useAppManager() {
     clearAppInfoCache,
     getCacheInfo,
     syncWithDevice,
+    syncAndParseIfNeeded,
     getAllDeviceApps,
     incrementLocalCount,
     togglePin,
@@ -205,6 +214,7 @@ export function useAppManager() {
     clearAppInfoCache,
     getCacheInfo,
     syncWithDevice,
+    syncAndParseIfNeeded,
     getAllDeviceApps,
     incrementLocalCount,
     togglePin,

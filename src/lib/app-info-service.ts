@@ -168,6 +168,31 @@ export class AppInfoService {
     }
   }
 
+  /**
+   * 连接/重连时的「同步并按需解析」入口：先轻量比对设备列表与缓存
+   * （syncWithDevice），仅当 toParse>0（存在新增 / versionCode 变更包）时才跑全量 dex。
+   *
+   * 注意：设备端 fetcher（deviceParser.parseAllApps）经 app_process 一次性 dump
+   * 全部应用元数据，不支持「只取 toParse 子集」；parseAllApps 内部已对每个包做
+   * versionCode 比对、仅把变更项写入缓存（app-info-service.ts:58-77）。因此「增量」
+   * 的语义是——仅在有变更时跑一次全量 dex，且只写差异到缓存，而非每次都重写。
+   *
+   * 这是「连接级自动同步」的单一调用点（恢复 f7391bb，被 9afad53 误删）：
+   * 调用方（startScrcpy）在握有 live adb 句柄后 fire-and-forget 调用即可；
+   * syncWithDevice 自带重入守卫（syncing 标志），重复/重连调用安全。
+   */
+  async syncAndParseIfNeeded(
+    adb: Adb,
+    deviceSerial: string,
+    signal?: AbortSignal,
+  ): Promise<SyncResult> {
+    const result = await this.syncWithDevice(adb, deviceSerial, signal);
+    if (result.toParse.length > 0) {
+      await this.parseAllApps(adb, deviceSerial, undefined);
+    }
+    return result;
+  }
+
   async clearDeviceAppCache(deviceSerial: string): Promise<void> {
     await this.cache.clearForDevice(deviceSerial);
   }

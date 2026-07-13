@@ -109,6 +109,15 @@ export function useScrcpySession() {
     // 应用管理依赖 adb 实例（设备端包解析 / IndexedDB 缓存）。
     appManager.setAdb(adb);
 
+    // 连接即后台同步应用列表（恢复 f7391bb，被 9afad53 误删）。
+    // 此处紧接 setAdb，adbRef.current 已就位，增量校验（syncWithDevice 的
+    // versionCode 比对）能真实计算 toParse；仅 toParse>0 才跑全量 dex。
+    // 重连时 LinkSupervisor.reconnect 会重入 startScrcpy，故重连亦自动重校验。
+    // fire-and-forget：不阻塞会话启动；失败仅记日志，不影响镜像/虚拟屏。
+    appManager.syncAndParseIfNeeded().catch((err) => {
+      console.warn('[ScrcpySession] 后台同步应用列表失败:', err);
+    });
+
     if (!sessionRef.current) {
       sessionRef.current = new ScrcpySession(
         `mirror-${Date.now()}`,
