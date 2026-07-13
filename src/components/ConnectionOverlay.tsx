@@ -5,6 +5,7 @@ import { useWifiConnection } from '../hooks/useWifiConnection';
 import { useNetworkCheck } from '../hooks/useNetworkCheck';
 import { useAdbStore } from '../hooks/useAdbStore';
 import type { RememberedDevice, DisplayMode } from '../hooks/useRememberedDevices';
+import { forgetDeviceCache } from '@/lib/forget-device-cache';
 
 interface ConnectionOverlayProps {
   overlayState: 'auto-connecting' | 'auto-reconnecting' | 'auto-failed' | 'manual' | 'reconnecting';
@@ -230,7 +231,10 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
                     <div className="text-slate-500 text-xs">{formatRelativeTime(device.lastConnected)}</div>
                   </button>
                   <button
-                    onClick={() => onForget(device.id)}
+                    onClick={() => {
+                      forgetDeviceCache(device.serial || device.id);
+                      onForget(device.id);
+                    }}
                     className="p-2 rounded-lg text-slate-600 hover:text-red-400 hover:bg-slate-800 transition-colors"
                     title="忘记此设备"
                   >

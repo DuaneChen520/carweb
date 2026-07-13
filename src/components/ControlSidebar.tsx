@@ -666,8 +666,14 @@ export function ControlSidebar({
           open={showCacheSettings}
           onClose={() => setShowCacheSettings(false)}
           devices={cacheDevices}
-          onClearDeviceAppCache={scrcpy.clearDeviceAppCache}
-          onClearDevicePreferences={scrcpy.clearDevicePreferences}
+          onClearDeviceAppCache={async (serial) => {
+            await scrcpy.clearDeviceAppCache(serial);
+            refreshSidebarApps();
+          }}
+          onClearDevicePreferences={async (serial) => {
+            await scrcpy.clearDevicePreferences(serial);
+            refreshSidebarApps();
+          }}
           onClearAll={async () => {
             await scrcpy.clearAll();
             setCacheDevices([]);

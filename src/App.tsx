@@ -10,6 +10,7 @@ import { useDevicePin } from './hooks/useDevicePin';
 import { useUsbConnection } from './hooks/useUsbConnection';
 import { subscribeLinkState } from './lib/link-state-bus';
 import { markIntentionalClose } from '@/lib/adb-intent';
+import { forgetDeviceCache } from '@/lib/forget-device-cache';
 
 type OverlayState =
   | 'auto-connecting'      // 首次尝试中
@@ -155,6 +156,7 @@ function App() {
     if (shouldRemember) {
       remember({
         id: device.id,
+        serial: device.id,
         name: device.name,
         type: device.type,
         address: device.address,
@@ -228,6 +230,7 @@ function App() {
             }}
             onForgot={() => {
               removePin(pinGuard.deviceId);
+              forgetDeviceCache(pinGuard.deviceId);
               forget(pinGuard.deviceId);
               store.disconnect();
               setPinGuard({ type: 'none' });

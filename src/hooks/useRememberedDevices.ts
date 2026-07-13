@@ -4,6 +4,8 @@ export type DisplayMode = 'virtual' | 'mirror';
 
 export interface RememberedDevice {
   id: string;
+  /** adb serial；forget 时据此失效按 serial 索引的 dex 缓存（见 ADR-0009 D2）。旧记录可能缺失，调用处应回退到 id。 */
+  serial: string;
   name: string;
   type: 'usb' | 'wifi';
   address: string;
