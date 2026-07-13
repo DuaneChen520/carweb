@@ -37,6 +37,12 @@
 - **统一过渡占位（transition placeholder）**：ADR-0011 的 D2——浅色背景 + 居中应用图标，作为**启动**与**尺寸变化**两类过渡的统一动画（参考 HyperOS 分屏 resize 占位）；canvas 无有效帧/过渡中显示，有效帧到达淡出。由 `AppTransitionPlaceholder.tsx` 实现，取代已删除的零引用死代码 `AppLaunchingOverlay.tsx`。
 - **setRotationLocked(adb)**：Android 层旋转锁（`scrcpy-session.ts:392`，`try/catch` 防护），阻止虚拟屏被 app 转走，使方向不符 app 正立留黑边；`LockedInitial` 为其采集层双保险。
 
+## 音频（ADR-0013）
+
+- **AudioContext 手势唤醒**：浏览器自动播放策略要求 `AudioContext.resume()` 必须在用户手势内同步调用。`VirtualScreen` 在其 pointer 处理器内调 `resumeAudio()`（单屏镜像模式出声）；分屏桌面由 `DesktopScreen` 顶层持久化 `pointerdown`/`keydown` 监听统一唤醒 `SessionManager` 所有 session 的 `AudioContext`（ADR-0013）。
+- **resumeAudio()**：`ScrcpySession` 方法（`scrcpy-session.ts:934`），仅当 `AudioContext` 为 `suspended` 时调用 `resume()`，幂等；音频流不可用（`audioCtx` 未建）时为 no-op。
+- **useCanvasPointerInput**：分屏/全屏桌面的触控 hook，把容器 div 的 pointer 事件路由到对应 session 的 `injectTouch`；本身不负责音频唤醒（音频唤醒交由 `DesktopScreen` 的全局监听统一处理，ADR-0013）。
+
 ## 应用显示名解析（ADR-0012）
 
 - **displayName（应用显示名）**：顶部下拉（`PaneDropdown`/`FullscreenDropdown`）、分屏选择（`PaneSelector`）、活动进程（`ActivityManagerPanel`）、启动占位（`AppTransitionPlaceholder`）、应用网格（`AppGrid`）、侧栏 dock（`ControlSidebar`）中展示给用户的应用名称。

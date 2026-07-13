@@ -220,6 +220,27 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
     };
   }, [closeAll]);
 
+  // 5. 用户手势唤醒所有 session 的 AudioContext（修复分屏桌面浏览器端无声，ADR-0013）
+  // 根因：分屏桌面的触控 handler（useCanvasPointerInput）只调 session.injectTouch()，
+  // 从不调 resumeAudio()，而每个 ScrcpySession 的 AudioContext 创建时处于 suspended
+  // （浏览器自动播放策略），必须由用户手势内同步调用 resume() 才出声。
+  // 故在此挂持久化的全局 pointerdown/keydown 监听，任意交互即唤醒 SessionManager
+  // 中所有活跃 session 的 AudioContext（含稍后启动、用户尚未触控的 pane）。
+  useEffect(() => {
+    const resumeAllAudio = () => {
+      const { sessions } = useSessionManager.getState();
+      for (const entry of Object.values(sessions)) {
+        entry.session.resumeAudio();
+      }
+    };
+    document.addEventListener('pointerdown', resumeAllAudio);
+    document.addEventListener('keydown', resumeAllAudio);
+    return () => {
+      document.removeEventListener('pointerdown', resumeAllAudio);
+      document.removeEventListener('keydown', resumeAllAudio);
+    };
+  }, []);
+
   // ===== 回调处理 =====
   const { openAppPicker } = useAppPicker();
 
