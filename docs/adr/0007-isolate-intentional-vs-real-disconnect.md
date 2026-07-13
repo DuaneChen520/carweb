@@ -1,7 +1,7 @@
 # ADR-0007: 隔离「有意断开」与「真实掉线」信号，修复已绑定设备连接时误弹“USB 连接已断开”
 
 - 日期：2026-07-09
-- 状态：**提案（待确认）**
+- 状态：**已接受并实施（2026-07-09）**
 
 ## 背景
 
@@ -100,3 +100,36 @@
 - 单测：对“有意 `disconnect` 后 `adb.disconnected` 触发”断言状态为 `idle` 而非 `disconnected`；
   对“未标记的 `adb.disconnected`”断言为 `disconnected`。
 - 手动：dev + 已绑定设备加载 → 不再弹“USB 连接已断开”；物理拔线 → 仍弹。
+
+## 实施记录（2026-07-09）
+
+按推荐方案落地，并做了一处实现细化（用 WeakSet 替代 `(adb as any).__intentionalClose`，类型安全、随对象 GC、无泄漏）。
+
+新增 / 修改文件：
+
+- `src/lib/adb-intent.ts`（新增）：`markIntentionalClose(adb)` / `consumeIntentionalClose(adb)`，
+  基于 `WeakSet<Adb>`，同步写入、读取后清除（标记一次、消费一次）。
+- `src/lib/adb-disconnect.ts`（新增，可单测）：`handleAdbDisconnected(store, adb, error?)` ——
+  成为 `adb.disconnected` 正常/异常两个分支的统一入口。
+  - 有意断开 → 清理引用并置 `idle`（**不写 `disconnected`、不写 error**）；
+  - 真实掉线 → 维持写 `disconnected`（异常分支写 error），由 `App.tsx` 正常弹 overlay。
+- `src/hooks/useUsbConnection.ts`：`connectOnce` 的 `adb.disconnected` 回调改为调用 `handleAdbDisconnected`
+  （替换原内联双分支）；业务其余逻辑不变。
+- `src/hooks/useAdbStore.ts`：`disconnect()` 在 `adb.close()` **之前**同步 `markIntentionalClose(adb)`。
+- `src/App.tsx`：
+  - `handleBeforeUnload` 同样 `markIntentionalClose(adb)`（页面卸载属有意关闭，保持语义一致）；
+  - 自动连接 mount effect 增加 `autoConnectRanRef` 守卫，避免 StrictMode 双调用导致两次并发
+    `tryAutoConnectUsb`（ADR「关联修复（次要）」项，dev 路径的触发面）。
+
+测试：
+
+- `src/lib/__tests__/adb-disconnect.test.ts`（新增，4 用例全过）：
+  有意断开→idle；真实掉线→disconnected；异常分支→disconnected+error；标记只读一次。
+
+验证结果：
+
+- `npm run test -- adb-disconnect`：4 passed。
+- `npm run check`（tsc）改动文件零类型错误。
+- 全量 `npm run test`：报告 43 失败，但全部落在 `app-info-*` / `user-preferences-store` /
+  `adb-media-commands` 等**与本次无关的既有文件**；已通过 `git stash` 基线对照确认这些失败为预先存在，
+  非本改动引入。本改动未导致任何回归。

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Adb } from '@yume-chan/adb';
 import type { AdbDaemonWebUsbDevice } from '@yume-chan/adb-daemon-webusb';
+import { markIntentionalClose } from '@/lib/adb-intent';
 
 export type ConnectionType = 'usb' | 'wifi' | null;
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
@@ -56,6 +57,10 @@ export const useAdbStore = create<AdbStore>((set, get) => ({
     try {
       const adb = get().adb;
       if (adb) {
+        // 同步打标：声明本次关闭是应用层有意发起（须先于异步的 adb.close()），
+        // 使 adb.disconnected 回调降级为 idle 而非 disconnected，避免误弹断线 overlay。
+        // 见 docs/adr/0007。
+        markIntentionalClose(adb);
         await adb.close();
       }
     } catch (error) {

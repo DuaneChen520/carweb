@@ -6,6 +6,7 @@ import { useAdbStore, type AdbStore } from './useAdbStore';
 import { killScrcpyServer } from '@/lib/adb-commands';
 import { retryConnectUsb, type RetryProgress } from '@/lib/usb-connect';
 import { restoreDevice } from '@/lib/usb-device-restore';
+import { handleAdbDisconnected } from '@/lib/adb-disconnect';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -27,22 +28,11 @@ async function connectOnce(store: AdbStore, device: AdbDaemonWebUsbDevice): Prom
     store.setDeviceInfo(device.name || '未知设备', device.serial);
     store.setConnectionStatus('connected');
 
-adb.disconnected.then(() => {
-		      console.log('[USB] adb.disconnected resolved — 正常断开');
-		      // 先清空 adb/设备引用，再置 status：避免「adb 仍非空但连接已死」的窗口，
-		      // 防止上层在死连接上启动 scrcpy（AdbScrcpyExitedError）。见 2026-07-09 诊断。
-		      store.setAdb(null);
-		      store.setUsbDevice(null);
-		      store.setDeviceInfo(null, null);
-		      store.setConnectionStatus('disconnected');
-		    }, (error) => {
-		      console.warn('[USB] adb.disconnected rejected — 异常断开:', error?.message || error);
-		      store.setConnectionStatus('disconnected');
-		      store.setAdb(null);
-		      store.setUsbDevice(null);
-		      store.setDeviceInfo(null, null);
-		      store.setError('USB 连接异常断开');
-		    });
+    // 真实掉线 / 有意断开的统一入口：标记区分两者（见 docs/adr/0007）。
+    adb.disconnected.then(
+      () => handleAdbDisconnected(store, adb),
+      (error) => handleAdbDisconnected(store, adb, error),
+    );
   } catch (error) {
     // authenticate 失败后 USB 接口可能被占用，尝试释放以便下一轮重试
     try { await restoreDevice({ reset: () => device.raw.reset(), close: () => device.raw.close() }); } catch {}

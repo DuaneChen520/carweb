@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { VirtualScreen } from './components/VirtualScreen';
 import { DesktopScreen } from './components/DesktopScreen';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
@@ -9,6 +9,7 @@ import { useRememberedDevices, type DisplayMode } from './hooks/useRememberedDev
 import { useDevicePin } from './hooks/useDevicePin';
 import { useUsbConnection } from './hooks/useUsbConnection';
 import { subscribeLinkState } from './lib/link-state-bus';
+import { markIntentionalClose } from '@/lib/adb-intent';
 
 type OverlayState =
   | 'auto-connecting'      // 首次尝试中
@@ -31,12 +32,18 @@ function App() {
   const { hasPin, removePin } = useDevicePin();
   const store = useAdbStore();
   const usb = useUsbConnection();
+  // StrictMode 下挂载 effect 会双调用，导致两次并发 tryAutoConnectUsb；
+  // 用 ref 守卫确保自动连接在组件实例生命周期内只发起一次（见 docs/adr/0007 关联修复）。
+  const autoConnectRanRef = useRef(false);
 
   // 页面刷新/关闭时清理 ADB 连接和 scrcpy session
   useEffect(() => {
     const handleBeforeUnload = () => {
       const adb = useAdbStore.getState().adb;
-      if (adb) { void adb.close(); } // 尽力发送关闭包，不等完成
+      if (adb) {
+        markIntentionalClose(adb); // 页面卸载属有意关闭，避免残留 handler 误判
+        void adb.close(); // 尽力发送关闭包，不等完成
+      }
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
@@ -52,6 +59,9 @@ function App() {
 
   // 自动连接已记忆设备
   useEffect(() => {
+    if (autoConnectRanRef.current) return; // 守卫：StrictMode 双调用时跳过第二次
+    autoConnectRanRef.current = true;
+
     const lastDevice = getLastDevice();
     if (!lastDevice) {
       setOverlayState('manual');
@@ -174,7 +184,7 @@ function App() {
 
   return (
     <ScrcpyProvider>
-      <div className="w-full h-screen bg-slate-900">
+      <div className="w-full h-dvh bg-slate-900">
         {displayMode === 'mirror' ? (
           // mirror 模式仍使用 VirtualScreen（向后兼容）
           <VirtualScreen
