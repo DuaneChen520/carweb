@@ -3,7 +3,9 @@
 @tailwind utilities;
 
 :root {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  font-family: "Outfit", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", "Noto Sans SC", Helvetica, Arial,
+    sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   line-height: 1.5;
   font-weight: 400;
 
@@ -11,9 +13,20 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* 数据类文本默认启用等宽数字，避免时间/尺寸/IP 抖动 */
+  font-variant-numeric: tabular-nums;
+
+  /* 强调色令牌（供非 Tailwind 场景引用） */
+  --accent: #2f6ae6;
+  --accent-strong: #1f52c4;
+
+  color-scheme: light;
 }
 
-html, body, #root {
+html,
+body,
+#root {
   width: 100%;
   height: 100%;
   margin: 0;
@@ -21,7 +34,35 @@ html, body, #root {
   overflow: hidden;
 }
 
-/* 自定义滚动条 */
+html {
+  scroll-behavior: smooth;
+}
+
+/* 大标题：收紧字距、平衡换行，避免孤字 */
+h1,
+h2 {
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+/* 段落防孤字 */
+p {
+  text-wrap: pretty;
+}
+
+/* 选区配色跟随强调色 */
+::selection {
+  background: rgba(47, 106, 230, 0.22);
+}
+
+/* 统一可见焦点环（键盘可达性）——仅键盘导航时出现，不干扰指针操作 */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* 自定义滚动条（着色，匹配冷灰调） */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -32,12 +73,17 @@ html, body, #root {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(100, 116, 139, 0.35);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: rgba(100, 116, 139, 0.55);
+}
+
+/* 深色浮层内的滚动条（覆盖层用浅色轨） */
+.scrollbar-light::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25);
 }
 
 /* 隐藏滚动条 */
@@ -49,9 +95,30 @@ html, body, #root {
   scrollbar-width: none;
 }
 
+/* 细腻噪点纹理：叠加在纯色/渐变背景上打破数字化平面感 */
+.noise-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.4;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
+}
+
 /* 防止触摸设备上的默认行为 */
 canvas {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+}
+
+/* 尊重系统「减少动态效果」偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

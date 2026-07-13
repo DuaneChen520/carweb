@@ -2,7 +2,7 @@ import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import { useScrcpySession, type ScrcpyState, type DisplayConfig } from '@/hooks/scrcpy';
 import type { AudioState } from '@/hooks/scrcpy/audio/types';
 import type { Adb } from '@yume-chan/adb';
-import type { ParseProgress } from '@/lib/app-info-service';
+import type { ParseProgress, SyncResult } from '@/lib/app-info-service';
 import type { FlexDisplayClient } from '@/lib/scrcpy4';
 
 interface ScrcpyContextValue extends ScrcpyState {
@@ -53,6 +53,8 @@ interface ScrcpyContextValue extends ScrcpyState {
   getPinnedApps: () => Promise<import('@/lib/device-apps-store').DeviceAppRecord[]>;
   clearDeviceApps: () => Promise<void>;
   clearAll: () => Promise<void>;
+  setAdb: (adb: Adb | null) => void;
+  syncAndParseIfNeeded: (signal?: AbortSignal) => Promise<SyncResult>;
   syncWithDevice: (signal?: AbortSignal) => Promise<import('@/lib/app-info-service').SyncResult>;
   clearDeviceAppCache: (serial: string) => Promise<void>;
   clearDevicePreferences: (serial: string) => Promise<void>;
@@ -111,6 +113,8 @@ export function ScrcpyProvider({ children }: { children: ReactNode }) {
     session.getPinnedApps,
     session.clearDeviceApps,
     session.clearAll,
+    session.setAdb,
+    session.syncAndParseIfNeeded,
     session.syncWithDevice,
     session.clearDeviceAppCache,
     session.clearDevicePreferences,

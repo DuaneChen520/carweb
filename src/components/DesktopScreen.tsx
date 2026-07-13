@@ -25,6 +25,7 @@ import { ActivityManagerPanel } from './desktop/ActivityManagerPanel';
 import { AppPickerOverlay } from './desktop/AppPickerOverlay';
 import { useSessionManager } from '@/lib/session-manager';
 import { useAdbStore } from '@/hooks/useAdbStore';
+import { useScrcpyContext } from '@/contexts/ScrcpyContext';
 import { DesktopStateStore } from '@/lib/desktop-state-store';
 import { calculateDpi } from '@/utils/display';
 import type { PaneSlot } from '@/lib/session-manager';
@@ -87,6 +88,8 @@ interface DesktopScreenProps {
 export function DesktopScreen({ onStop }: DesktopScreenProps) {
   const store = useAdbStore();
   const adb = store.adb;
+  const scrcpy = useScrcpyContext();
+  const { setAdb: setAppManagerAdb, syncAndParseIfNeeded } = scrcpy;
 
   const setSessionManagerAdb = useSessionManager((s) => s.setAdb);
   const setPersistCallback = useSessionManager((s) => s.setPersistCallback);
@@ -130,10 +133,19 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
   const desktopStateStoreRef = useRef(new DesktopStateStore());
   const hasRestoredRef = useRef(false);
 
-  // 1. 设置 SessionManager 的 adb 引用
+  // 1. 设置 SessionManager 的 adb 引用；同时把 adb 注入 AppManager（应用信息解析器），
+  //    并触发一次后台同步。桌面分屏模式不经 useScrcpySession.startScrcpy，
+  //    否则 AppManager.adbRef 永远为空 → syncWithDevice/parseAllApps 全静默失败 → 列表空。
   useEffect(() => {
     setSessionManagerAdb(adb);
-  }, [adb, setSessionManagerAdb]);
+    if (adb) {
+      console.log('[DesktopScreen] 注入 AppManager adb，触发后台应用列表同步');
+      setAppManagerAdb(adb);
+      syncAndParseIfNeeded().catch((err) =>
+        console.warn('[DesktopScreen] 后台同步应用列表失败:', err),
+      );
+    }
+  }, [adb, setSessionManagerAdb, setAppManagerAdb, syncAndParseIfNeeded]);
 
   // 2. 设置持久化回调（SessionManager → DesktopStateStore）
   useEffect(() => {
@@ -255,7 +267,7 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
   const activityCount = apps.length;
 
   return (
-    <div ref={fullscreenRef} className="flex w-full h-screen bg-slate-900">
+    <div ref={fullscreenRef} className="flex w-full h-dvh bg-slate-900">
       <DesktopShell
         sidebar={
           <ControlSidebar

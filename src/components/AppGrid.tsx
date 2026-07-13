@@ -1,12 +1,15 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { AppIcon } from './AppIcon';
 import { useScrcpyContext } from '@/contexts/ScrcpyContext';
+import { useAdbStore } from '@/hooks/useAdbStore';
 import { sortApps } from '@/lib/app-sorter';
 import { paginateApps } from '@/lib/app-pagination';
 import type { DeviceAppRecord } from '@/lib/device-apps-store';
 
 export interface AppGridHandle {
   goToFirstPage: () => void;
+  /** force=true 时先跑全量设备端重解析（parseAllApps），再重读列表；否则仅重读缓存。 */
+  refresh: (opts?: { force?: boolean }) => Promise<void>;
 }
 
 interface AppGridProps {
@@ -20,23 +23,34 @@ export const AppGrid = forwardRef<AppGridHandle, AppGridProps>(function AppGrid(
   ref,
 ) {
   const scrcpy = useScrcpyContext();
-  const { getAllDeviceApps, getAppIcon, getCachedAppLabels, incrementLocalCount } = scrcpy;
+  const { getAllDeviceApps, getAppIcon, getCachedAppLabels, incrementLocalCount, parseAllApps } = scrcpy;
+  const appListVersion = useAdbStore((s) => s.appListVersion);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [deviceApps, setDeviceApps] = useState<DeviceAppRecord[]>([]);
   const [labels, setLabels] = useState<Map<string, string>>(new Map());
 
   // 拉取应用列表
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (opts?: { force?: boolean }) => {
+    // 手动刷新：先全量重解析设备端应用元数据（清空数据/缓存失效后的恢复路径）。
+    if (opts?.force) {
+      try {
+        console.log('[AppGrid] 手动刷新：执行全量设备端重解析...');
+        await parseAllApps();
+        console.log('[AppGrid] 全量重解析完成');
+      } catch (e) {
+        console.warn('[AppGrid] 全量重解析失败（将回退到缓存）:', e);
+      }
+    }
     const apps = await getAllDeviceApps();
     setDeviceApps(apps);
     const pkgs = apps.map((a) => a.packageName);
     const labelMap = await getCachedAppLabels(pkgs);
     setLabels(labelMap);
-  }, [getAllDeviceApps, getCachedAppLabels]);
+  }, [getAllDeviceApps, getCachedAppLabels, parseAllApps]);
 
   useEffect(() => {
     refresh();
-  }, [refresh]);
+  }, [refresh, appListVersion]);
 
   // 用 sortApps 做三段排序（置顶>常用>其他）
   const allPkgs = deviceApps.map((a) => a.packageName);
@@ -67,14 +81,17 @@ export const AppGrid = forwardRef<AppGridHandle, AppGridProps>(function AppGrid(
     onLaunchApp(pkg);
   }, [incrementLocalCount, refresh, onLaunchApp]);
 
-  // 暴露回第一页
+  // 暴露回第一页 + 手动刷新
   useImperativeHandle(ref, () => ({
     goToFirstPage: () => {
       if (scrollRef.current) {
         scrollRef.current.scrollTo({ left: 0, behavior: 'smooth' });
       }
     },
-  }), []);
+    refresh: async (opts?: { force?: boolean }) => {
+      await refresh(opts);
+    },
+  }), [refresh]);
 
   if (deviceApps.length === 0) {
     return (
@@ -108,7 +125,7 @@ export const AppGrid = forwardRef<AppGridHandle, AppGridProps>(function AppGrid(
                   name={labels.get(pkg) || pkg.split('.').pop() || pkg}
                   getAppIcon={getAppIcon}
                   onLaunch={handleLaunch}
-                  cacheVersion={0}
+                  cacheVersion={appListVersion}
                 />
               ))}
             </div>

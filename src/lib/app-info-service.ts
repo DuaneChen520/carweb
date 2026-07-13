@@ -9,6 +9,8 @@ export interface SyncResult {
   toParse: string[];
   /** 设备上所有应用的包名+版本号 */
   deviceApps: Map<string, number>;
+  /** 本次是否因重入守卫被跳过（未产生任何写入） */
+  skipped?: boolean;
 }
 
 export type ParseProgress = {
@@ -120,7 +122,7 @@ export class AppInfoService {
   async syncWithDevice(adb: Adb, deviceSerial: string, signal?: AbortSignal): Promise<SyncResult> {
     if (this.syncing) {
       console.log('[AppInfoService] 同步正在进行中，跳过重复调用');
-      return { toParse: [], deviceApps: new Map() };
+      return { toParse: [], deviceApps: new Map(), skipped: true };
     }
 
     this.syncing = true;
@@ -162,6 +164,7 @@ export class AppInfoService {
       return {
         toParse,
         deviceApps: new Map(quickApps.map(a => [a.packageName, a.versionCode])),
+        skipped: false,
       };
     } finally {
       this.syncing = false;

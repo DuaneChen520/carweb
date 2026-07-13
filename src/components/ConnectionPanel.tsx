@@ -40,7 +40,7 @@ export function ConnectionPanel({ onStartMirror }: ConnectionPanelProps) {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6">
+    <div className="flex flex-col items-center justify-center min-h-dvh bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-6">
       <div className="w-full max-w-md">
         {/* 标题 */}
         <div className="text-center mb-8">
@@ -87,7 +87,7 @@ export function ConnectionPanel({ onStartMirror }: ConnectionPanelProps) {
               onClick={() => setActiveTab('usb')}
               className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors ${
                 activeTab === 'usb'
-                  ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-700/30'
+                  ? 'text-accent-400 border-b-2 border-accent-400 bg-slate-700/30'
                   : 'text-slate-400 hover:text-slate-300'
               }`}
             >
@@ -98,7 +98,7 @@ export function ConnectionPanel({ onStartMirror }: ConnectionPanelProps) {
               onClick={() => setActiveTab('wifi')}
               className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors ${
                 activeTab === 'wifi'
-                  ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-700/30'
+                  ? 'text-accent-400 border-b-2 border-accent-400 bg-slate-700/30'
                   : 'text-slate-400 hover:text-slate-300'
               }`}
             >
@@ -132,13 +132,13 @@ export function ConnectionPanel({ onStartMirror }: ConnectionPanelProps) {
                     value={wifiAddress}
                     onChange={(e) => setWifiAddress(e.target.value)}
                     placeholder="例如: 192.168.1.100"
-                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-400 transition-colors"
+                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-accent-400 transition-colors"
                   />
                 </div>
                 <button
                   onClick={wifi.scanDevices}
                   disabled={wifi.isScanning}
-                  className="w-full py-2 text-sm text-blue-400 hover:text-blue-300 transition-colors disabled:opacity-50"
+                  className="w-full py-2 text-sm text-accent-400 hover:text-accent-300 transition-colors disabled:opacity-50"
                 >
                   {wifi.isScanning ? '扫描中...' : '扫描局域网设备'}
                 </button>
@@ -181,7 +181,7 @@ export function ConnectionPanel({ onStartMirror }: ConnectionPanelProps) {
                 <button
                   onClick={handleConnect}
                   disabled={usb.isConnecting || wifi.isConnecting}
-                  className="w-full py-3 bg-blue-500 hover:bg-blue-600 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
+                  className="w-full py-3 bg-accent-500 hover:bg-accent-600 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
                 >
                   {usb.isConnecting || wifi.isConnecting ? (
                     <>

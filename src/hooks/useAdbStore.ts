@@ -19,6 +19,9 @@ export interface AdbStore {
   deviceName: string | null;
   deviceSerial: string | null;
 
+  // 应用列表版本号：每次设备端同步/解析完成自增，驱动侧栏与浮窗列表自愈重读。
+  appListVersion: number;
+
   // 操作
   setConnectionType: (type: ConnectionType) => void;
   setConnectionStatus: (status: ConnectionStatus) => void;
@@ -27,6 +30,7 @@ export interface AdbStore {
   setWifiAddress: (address: string | null) => void;
   setError: (error: string | null) => void;
   setDeviceInfo: (name: string | null, serial: string | null) => void;
+  bumpAppListVersion: () => void;
   reset: () => void;
   disconnect: () => Promise<void>;
 }
@@ -40,6 +44,7 @@ const initialState = {
   error: null as string | null,
   deviceName: null as string | null,
   deviceSerial: null as string | null,
+  appListVersion: 0,
 };
 
 export const useAdbStore = create<AdbStore>((set, get) => ({
@@ -52,6 +57,7 @@ export const useAdbStore = create<AdbStore>((set, get) => ({
   setWifiAddress: (address) => set({ wifiAddress: address }),
   setError: (error) => set({ error }),
   setDeviceInfo: (name, serial) => set({ deviceName: name, deviceSerial: serial }),
+  bumpAppListVersion: () => set((s) => ({ appListVersion: s.appListVersion + 1 })),
   reset: () => set(initialState),
   disconnect: async () => {
     try {

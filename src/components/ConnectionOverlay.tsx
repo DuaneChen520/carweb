@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Monitor, Smartphone, Usb, Wifi, RefreshCw, AlertCircle } from 'lucide-react';
+import { Monitor, Smartphone, Usb, Wifi, RefreshCw, AlertCircle, X } from 'lucide-react';
 import { useUsbConnection } from '../hooks/useUsbConnection';
 import { useWifiConnection } from '../hooks/useWifiConnection';
 import { useNetworkCheck } from '../hooks/useNetworkCheck';
@@ -94,8 +94,8 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
       <div className={`fixed inset-0 z-50 bg-black/40 backdrop-blur-xl flex items-center justify-center transition-opacity duration-300 ${fading ? 'opacity-0' : 'opacity-100'}`}>
         <div className="text-center">
           <div className="relative w-12 h-12 mx-auto mb-4">
-            <RefreshCw className="w-12 h-12 text-blue-400/30" />
-            <RefreshCw className="absolute inset-0 w-12 h-12 text-blue-400 animate-spin" />
+            <RefreshCw className="w-12 h-12 text-accent-400/30" />
+            <RefreshCw className="absolute inset-0 w-12 h-12 text-accent-400 animate-spin" />
           </div>
           <p className="text-white text-lg">{message}</p>
           {onCancelAutoConnect && (
@@ -124,7 +124,7 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
             {onReconnect && (
               <button
                 onClick={onReconnect}
-                className="px-6 py-2.5 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition-colors flex items-center gap-2"
+                className="px-6 py-2.5 bg-accent-500 hover:bg-accent-600 shadow-accent-glow text-white font-medium rounded-xl transition-all duration-200 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 flex items-center gap-2"
               >
                 <RefreshCw className="w-4 h-4" />
                 重新连接
@@ -156,7 +156,7 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
           <p className="text-slate-400 text-sm mb-6">设备可能正忙，可在下方手动重新连接。</p>
           <button
             onClick={onCancelAutoConnect ?? (() => {})}
-            className="px-6 py-2.5 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition-colors"
+            className="px-6 py-2.5 bg-accent-500 hover:bg-accent-600 shadow-accent-glow text-white font-medium rounded-xl transition-all duration-200 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
           >
             手动连接
           </button>
@@ -166,36 +166,49 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
   }
 
   return (
-    <div className={`fixed inset-0 z-50 bg-black/40 backdrop-blur-xl flex items-start justify-center overflow-y-auto p-4 transition-opacity duration-300 ${fading ? 'opacity-0' : 'opacity-100'}`}>
-      <div className="w-full max-w-md mt-[10vh] mb-8">
+    <div className={`fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 transition-opacity duration-300 ${fading ? 'opacity-0' : 'opacity-100'}`}>
+      {/* 分层背景：暗色基底 + 顶部强调色径向光晕 + 细噪点，营造纵深 */}
+      <div className="absolute inset-0 bg-slate-950/50 backdrop-blur-xl" />
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background:
+            'radial-gradient(60rem 40rem at 50% -10%, rgba(47,106,230,0.22), transparent 60%)',
+        }}
+      />
+      <div className="absolute inset-0 pointer-events-none noise-overlay" />
+
+      <div className="relative w-full max-w-md mt-[10vh] mb-8 animate-scale-in">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-white mb-2">CARWEB</h1>
+          <h1 className="text-5xl font-extrabold tracking-tight text-white mb-2 bg-gradient-to-b from-white to-slate-300 bg-clip-text text-transparent">
+            CARWEB
+          </h1>
           <p className="text-slate-400">为手机拓展的浏览器大屏</p>
         </div>
 
         <div className="grid grid-cols-2 gap-4 mb-6">
           <button
             onClick={() => onSelectMode('virtual')}
-            className={`flex flex-col items-center gap-2 p-6 rounded-xl border transition-all ${
+            className={`flex flex-col items-center gap-2 p-6 rounded-2xl border transition-all duration-200 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
               displayMode === 'virtual'
-                ? 'border-blue-400 bg-blue-500/10 ring-1 ring-blue-400'
-                : 'border-slate-700 bg-slate-800/50 hover:bg-slate-700/30'
+                ? 'border-accent-400 bg-accent-500/10 ring-1 ring-accent-400 shadow-accent-glow'
+                : 'border-slate-700 bg-slate-800/50 hover:bg-slate-700/40 hover:border-slate-600'
             }`}
           >
-            <Monitor className={`w-8 h-8 ${displayMode === 'virtual' ? 'text-blue-400' : 'text-slate-400'}`} />
-            <span className={`text-sm font-medium ${displayMode === 'virtual' ? 'text-blue-400' : 'text-white'}`}>虚拟显示屏</span>
+            <Monitor className={`w-8 h-8 transition-colors ${displayMode === 'virtual' ? 'text-accent-400' : 'text-slate-400'}`} />
+            <span className={`text-sm font-medium ${displayMode === 'virtual' ? 'text-accent-400' : 'text-white'}`}>虚拟显示屏</span>
             <span className="text-xs text-slate-500">创建独立副屏</span>
           </button>
           <button
             onClick={() => onSelectMode('mirror')}
-            className={`flex flex-col items-center gap-2 p-6 rounded-xl border transition-all ${
+            className={`flex flex-col items-center gap-2 p-6 rounded-2xl border transition-all duration-200 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
               displayMode === 'mirror'
-                ? 'border-blue-400 bg-blue-500/10 ring-1 ring-blue-400'
-                : 'border-slate-700 bg-slate-800/50 hover:bg-slate-700/30'
+                ? 'border-accent-400 bg-accent-500/10 ring-1 ring-accent-400 shadow-accent-glow'
+                : 'border-slate-700 bg-slate-800/50 hover:bg-slate-700/40 hover:border-slate-600'
             }`}
           >
-            <Smartphone className={`w-8 h-8 ${displayMode === 'mirror' ? 'text-blue-400' : 'text-slate-400'}`} />
-            <span className={`text-sm font-medium ${displayMode === 'mirror' ? 'text-blue-400' : 'text-white'}`}>屏幕镜像</span>
+            <Smartphone className={`w-8 h-8 transition-colors ${displayMode === 'mirror' ? 'text-accent-400' : 'text-slate-400'}`} />
+            <span className={`text-sm font-medium ${displayMode === 'mirror' ? 'text-accent-400' : 'text-white'}`}>屏幕镜像</span>
             <span className="text-xs text-slate-500">同步手机屏幕</span>
           </button>
         </div>
@@ -213,7 +226,7 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
                     }}
                     className={`flex-1 flex items-center justify-between p-3 rounded-lg border transition-colors ${
                       selectedDevice?.id === device.id
-                        ? 'border-blue-400 bg-slate-700/50'
+                        ? 'border-accent-400 bg-slate-700/50'
                         : 'border-slate-700 bg-slate-800/50 hover:bg-slate-700/30'
                     }`}
                   >
@@ -232,13 +245,16 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
                   </button>
                   <button
                     onClick={() => {
-                      forgetDeviceCache(device.serial || device.id);
+                      const forgetSerial = device.serial || device.id;
+                      console.log(`[ConnectionOverlay] 用户忘记设备：serial=${forgetSerial}`);
+                      forgetDeviceCache(forgetSerial);
                       onForget(device.id);
                     }}
-                    className="p-2 rounded-lg text-slate-600 hover:text-red-400 hover:bg-slate-800 transition-colors"
+                    className="p-2 rounded-lg text-slate-600 hover:text-red-400 hover:bg-slate-800 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
                     title="忘记此设备"
+                    aria-label="忘记此设备"
                   >
-                    ✕
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
               ))}
@@ -258,7 +274,7 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
               onClick={() => setActiveTab('usb')}
               className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors ${
                 activeTab === 'usb'
-                  ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-700/30'
+                  ? 'text-accent-400 border-b-2 border-accent-400 bg-slate-700/30'
                   : 'text-slate-400 hover:text-slate-300'
               }`}
             >
@@ -269,7 +285,7 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
               onClick={() => setActiveTab('wifi')}
               className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors ${
                 activeTab === 'wifi'
-                  ? 'text-blue-400 border-b-2 border-blue-400 bg-slate-700/30'
+                  ? 'text-accent-400 border-b-2 border-accent-400 bg-slate-700/30'
                   : 'text-slate-400 hover:text-slate-300'
               }`}
             >
@@ -302,13 +318,13 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
                     value={wifiAddress}
                     onChange={(e) => setWifiAddress(e.target.value)}
                     placeholder="例如: 192.168.1.100"
-                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-400 transition-colors"
+                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-accent-400 transition-colors"
                   />
                 </div>
                 <button
                   onClick={wifi.scanDevices}
                   disabled={wifi.isScanning}
-                  className="w-full py-2 text-sm text-blue-400 hover:text-blue-300 transition-colors disabled:opacity-50"
+                  className="w-full py-2 text-sm text-accent-400 hover:text-accent-300 transition-colors disabled:opacity-50"
                 >
                   {wifi.isScanning ? '扫描中...' : '扫描局域网设备'}
                 </button>
@@ -341,7 +357,7 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
                 <button
                   onClick={() => handleConnectClick()}
                   disabled={isConnecting || (activeTab === 'wifi' && !wifiAddress.trim())}
-                  className="w-full mt-6 py-3 bg-blue-500 hover:bg-blue-600 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
+                  className="w-full mt-6 py-3 bg-accent-500 hover:bg-accent-600 disabled:bg-slate-600 disabled:cursor-not-allowed disabled:shadow-none shadow-accent-glow text-white font-medium rounded-xl transition-all duration-200 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 flex items-center justify-center gap-2"
                 >
                   {isConnecting ? (
                     <>
@@ -361,7 +377,7 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
                     type="checkbox"
                     checked={rememberDevice}
                     onChange={(e) => setRememberDevice(e.target.checked)}
-                    className="rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500"
+                    className="rounded border-slate-600 bg-slate-700 text-accent-500 focus:ring-accent-500"
                   />
                   记住此设备
                 </label>

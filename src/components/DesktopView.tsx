@@ -27,7 +27,7 @@ export const DesktopView = forwardRef<DesktopViewHandle, DesktopViewProps>(funct
   }), []);
 
   return (
-    <div className="w-full h-screen bg-slate-900 flex flex-col p-4 gap-4">
+    <div className="w-full h-dvh bg-slate-900 flex flex-col p-4 gap-4">
       {/* 音乐卡片（仅第 1 页可见，位于桌面顶部） */}
       <div className="shrink-0">
         <NowPlayingCard

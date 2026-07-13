@@ -114,6 +114,8 @@ export function useScrcpySession() {
     // versionCode 比对）能真实计算 toParse；仅 toParse>0 才跑全量 dex。
     // 重连时 LinkSupervisor.reconnect 会重入 startScrcpy，故重连亦自动重校验。
     // fire-and-forget：不阻塞会话启动；失败仅记日志，不影响镜像/虚拟屏。
+    const connectSerial = useAdbStore.getState().deviceSerial;
+    console.log(`[ScrcpySession] 连接建立，触发后台同步应用列表（serial=${connectSerial ?? '未知'}）`);
     appManager.syncAndParseIfNeeded().catch((err) => {
       console.warn('[ScrcpySession] 后台同步应用列表失败:', err);
     });
@@ -347,6 +349,8 @@ export function useScrcpySession() {
     getPinnedApps: appManager.getPinnedApps,
     clearDeviceApps: appManager.clearDeviceApps,
     clearAll: appManager.clearAll,
+    setAdb: appManager.setAdb,
+    syncAndParseIfNeeded: appManager.syncAndParseIfNeeded,
     syncWithDevice: appManager.syncWithDevice,
     clearDeviceAppCache: appManager.clearDeviceAppCache,
     clearDevicePreferences: appManager.clearDevicePreferences,

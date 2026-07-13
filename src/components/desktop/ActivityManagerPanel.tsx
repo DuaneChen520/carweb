@@ -43,13 +43,13 @@ function getStateLabel(app: AppInstance): { text: string; color: string; icon: R
     case 'foreground-fullscreen':
       return {
         text: '全屏中',
-        color: 'text-blue-600 border-blue-300 bg-blue-50',
+        color: 'text-accent-600 border-accent-300 bg-accent-50',
         icon: <Monitor size={10} />,
       };
     case 'foreground-pane':
       return {
         text: `小窗中 · ${app.pane === 'left' ? '左' : '右'}分屏`,
-        color: 'text-blue-600 border-blue-300 bg-blue-50',
+        color: 'text-accent-600 border-accent-300 bg-accent-50',
         icon: <SplitSquareHorizontal size={10} />,
       };
     case 'background':

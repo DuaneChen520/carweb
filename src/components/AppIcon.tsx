@@ -66,7 +66,7 @@ export function AppIcon({ pkg, name, getAppIcon, onLaunch, compact, pinMode, isP
       )}
       {pinMode && (
         <div className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${
-          isPinned ? 'bg-blue-500' : 'bg-white/20'
+          isPinned ? 'bg-accent-500' : 'bg-white/20'
         }`}>
           <Pin className={`w-2.5 h-2.5 ${isPinned ? 'text-white fill-white' : 'text-white/60'}`} />
         </div>

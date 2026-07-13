@@ -79,6 +79,8 @@ export function useAppManager() {
     if (!adb || !deviceSerial) return;
 
     await serviceRef.current.parseAllApps(adb, deviceSerial, onProgress);
+    // 解析完成 → 列表/图标已写入应按 serial 索引的 store，通知 UI 重读。
+    useAdbStore.getState().bumpAppListVersion();
   }, [deviceSerial]);
 
   const abortParseApps = useCallback(() => {
@@ -116,17 +118,41 @@ export function useAppManager() {
   const syncWithDevice = useCallback(async (signal?: AbortSignal): Promise<SyncResult> => {
     const adb = adbRef.current;
     if (!adb || !deviceSerial) {
+      console.warn('[AppManager] syncWithDevice 跳过：adb 或 deviceSerial 为空（重连不会拉取）', {
+        hasAdb: !!adb,
+        deviceSerial,
+      });
       return { toParse: [], deviceApps: new Map() };
     }
-    return serviceRef.current.syncWithDevice(adb, deviceSerial, signal);
+    console.log(`[AppManager] 开始设备应用列表同步（serial=${deviceSerial}）`);
+    const result = await serviceRef.current.syncWithDevice(adb, deviceSerial, signal);
+    // 注意：此处不再无条件 bump。syncWithDevice 是底层操作，其调用方（reloadSidebarApps
+    // 的恢复分支、syncAndParseIfNeeded 内部）各自负责在「真实写入」后通知 UI，避免与
+    // appListVersion 自愈副作用形成「同步→bump→再同步」死循环。
+    return result;
   }, [deviceSerial]);
 
   const syncAndParseIfNeeded = useCallback(async (signal?: AbortSignal): Promise<SyncResult> => {
     const adb = adbRef.current;
     if (!adb || !deviceSerial) {
+      console.warn('[AppManager] syncAndParseIfNeeded 跳过：adb 或 deviceSerial 为空（重连不会拉取）', {
+        hasAdb: !!adb,
+        deviceSerial,
+      });
       return { toParse: [], deviceApps: new Map() };
     }
-    return serviceRef.current.syncAndParseIfNeeded(adb, deviceSerial, signal);
+    console.log(`[AppManager] 连接/重连触发应用列表同步与按需解析（serial=${deviceSerial}）`);
+    const result = await serviceRef.current.syncAndParseIfNeeded(adb, deviceSerial, signal);
+    console.log(
+      `[AppManager] 同步结果：设备 ${result.deviceApps.size} 个应用，需解析 ${result.toParse.length} 个`
+      + (result.toParse.length > 0 ? ' → 执行全量 dex 解析' : ' → 缓存命中，无需重拉'),
+    );
+    // syncAndParseIfNeeded 内部已写 store（及按需 parseAllApps），通知 UI 重读；
+    // skip 路径（重入守卫命中）未产生任何写入，不通知，避免无谓重渲染/死循环。
+    if (!result.skipped) {
+      useAdbStore.getState().bumpAppListVersion();
+    }
+    return result;
   }, [deviceSerial]);
 
   const getAllDeviceApps = useCallback(async () => {

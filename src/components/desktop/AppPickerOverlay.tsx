@@ -18,7 +18,7 @@
  */
 
 import { useCallback, useState, useEffect, useRef } from 'react';
-import { X } from 'lucide-react';
+import { X, RefreshCw } from 'lucide-react';
 import { AppGrid, type AppGridHandle } from '@/components/AppGrid';
 import type { PaneSlot } from '@/lib/session-manager';
 
@@ -44,6 +44,7 @@ export function AppPickerOverlay({
 }: AppPickerOverlayProps) {
   const gridRef = useRef<AppGridHandle>(null);
   const [title, setTitle] = useState('全部应用');
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (mode === 'pane' && targetPane) {
@@ -62,18 +63,39 @@ export function AppPickerOverlay({
     onClose();
   }, [mode, targetPane, onLaunchOnPane, onLaunchFullscreen, onClose]);
 
+  // 手动刷新：全量重解析设备端应用元数据（清空数据/缓存失效后的恢复路径，见 ADR-0009 D1）。
+  const handleRefresh = useCallback(() => {
+    if (loading) return;
+    setLoading(true);
+    console.log('[AppPickerOverlay] 用户点击「更新应用列表」');
+    (gridRef.current?.refresh({ force: true }) ?? Promise.resolve())
+      .then(() => gridRef.current?.goToFirstPage())
+      .catch((e) => console.warn('[AppPickerOverlay] 刷新失败:', e))
+      .finally(() => setLoading(false));
+  }, [loading]);
+
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-2xl w-[680px] max-h-[80vh] flex flex-col overflow-hidden">
         {/* 头部 */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
           <h2 className="text-sm font-medium text-slate-800">{title}</h2>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-lg hover:bg-slate-100 transition-colors text-slate-500"
-          >
-            <X size={16} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleRefresh}
+              disabled={loading}
+              className={`p-1 rounded-lg transition-colors ${loading ? 'text-slate-300' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}
+              title="更新应用列表"
+            >
+              <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1 rounded-lg hover:bg-slate-100 transition-colors text-slate-500"
+            >
+              <X size={16} />
+            </button>
+          </div>
         </div>
 
         {/* 应用列表 */}

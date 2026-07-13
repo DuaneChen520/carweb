@@ -229,6 +229,7 @@ function App() {
               finishConnect();
             }}
             onForgot={() => {
+              console.log(`[App] 用户忘记设备（PIN 找回）：deviceId=${pinGuard.deviceId}`);
               removePin(pinGuard.deviceId);
               forgetDeviceCache(pinGuard.deviceId);
               forget(pinGuard.deviceId);

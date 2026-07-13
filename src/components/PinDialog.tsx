@@ -16,13 +16,13 @@ const PIN_LENGTH = 6;
 
 function DigitHoles({ digits, error }: { digits: string[]; error: boolean }) {
   return (
-    <div className={`flex gap-3 justify-center my-6 ${error ? 'animate-[shake_0.3s]' : ''}`}>
+    <div className={`flex gap-3 justify-center my-6 ${error ? 'animate-shake' : ''}`}>
       {Array.from({ length: PIN_LENGTH }, (_, i) => (
         <div
           key={i}
           className={`w-10 h-12 rounded-lg border-2 flex items-center justify-center text-lg font-mono transition-colors ${
             digits[i]
-              ? 'border-blue-500 bg-blue-500/20 text-blue-400'
+              ? 'border-accent-500 bg-accent-500/20 text-accent-400'
               : error
                 ? 'border-red-500 bg-red-500/20'
                 : 'border-slate-600 bg-slate-800/50 text-transparent'
@@ -50,7 +50,7 @@ function NumberPad({ onDigit, onBackspace }: { onDigit: (n: string) => void; onB
             <button
               key={n}
               onClick={() => onDigit(n)}
-              className="w-16 h-12 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-lg font-medium transition-colors active:scale-95"
+              className="w-16 h-12 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-lg font-medium transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400"
             >
               {n}
             </button>
@@ -61,13 +61,13 @@ function NumberPad({ onDigit, onBackspace }: { onDigit: (n: string) => void; onB
         <div className="w-16 h-12" />
         <button
           onClick={() => onDigit('0')}
-          className="w-16 h-12 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-lg font-medium transition-colors active:scale-95"
+          className="w-16 h-12 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-lg font-medium transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400"
         >
           0
         </button>
         <button
           onClick={onBackspace}
-          className="w-16 h-12 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-lg transition-colors active:scale-95 flex items-center justify-center"
+          className="w-16 h-12 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-lg transition-all active:scale-95 flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400"
         >
           删除
         </button>
@@ -197,7 +197,7 @@ export function PinDialog({ mode, deviceId, deviceName, hasExistingPin, onSucces
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div className="bg-slate-900/90 border border-slate-700 rounded-2xl p-8 w-80 shadow-2xl">
         <div className="flex items-center justify-center mb-2">
-          <Lock className="w-5 h-5 text-blue-400" />
+          <Lock className="w-5 h-5 text-accent-400" />
         </div>
         <h2 className="text-white text-lg font-semibold text-center">{title}</h2>
         <p className="text-slate-400 text-sm text-center mt-1">{subtitle}</p>

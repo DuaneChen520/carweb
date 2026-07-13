@@ -71,7 +71,7 @@ export function PaneSelector({ sourcePane, leftApp, rightApp, onSelect, onCancel
           <div className="text-xs text-slate-500 truncate">{displayName}</div>
         </div>
         {isSource && (
-          <span className="text-xs text-blue-600 flex items-center gap-1">
+          <span className="text-xs text-accent-600 flex items-center gap-1">
             <Check size={12} />
             恢复
           </span>

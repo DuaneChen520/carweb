@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Home, Loader2, X, MonitorOff, Monitor, Maximize2, Minimize2, Power, Settings, Trash2, Search, Pin, RefreshCw, Volume2, VolumeX, AppWindow } from 'lucide-react';
+import { ArrowLeft, Home, Loader2, X, MonitorOff, Monitor, Maximize2, Minimize2, Power, Settings, Trash2, Search, Pin, RefreshCw, Volume2, VolumeX, AppWindow, Smartphone, Keyboard } from 'lucide-react';
 import { AppGridIcon } from './AppGridIcon';
 import { NeumorphicButton, ICON_SIZE } from './NeumorphicButton';
 import type { ResolutionPresetKey } from '../hooks/scrcpy';
@@ -82,7 +82,7 @@ function AppIcon({ pkg, name, getAppIcon, onLaunch, compact, pinMode, isPinned, 
       )}
       {pinMode && (
         <div className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${
-          isPinned ? 'bg-blue-500' : 'bg-white/20'
+          isPinned ? 'bg-accent-500' : 'bg-white/20'
         }`}>
           <Pin className={`w-2.5 h-2.5 ${isPinned ? 'text-white fill-white' : 'text-white/60'}`} />
         </div>
@@ -148,6 +148,7 @@ export function ControlSidebar({
   const isMuted = propIsMuted ?? ctxIsMuted;
   const setMuted = propSetMuted ?? ctxSetMuted;
   const adbStore = useAdbStore();
+  const appListVersion = useAdbStore((s) => s.appListVersion);
   const { hasPin } = useDevicePin();
   const rememberedDevices = useRememberedDevices();
   const [panelMode, setPanelMode] = useState<'closed' | 'search' | 'apps'>('closed');
@@ -169,7 +170,6 @@ export function ControlSidebar({
   const [showCacheSettings, setShowCacheSettings] = useState(false);
   const [cacheDevices, setCacheDevices] = useState<DeviceCacheInfo[]>([]);
   const [showPinSetup, setShowPinSetup] = useState(false);
-  const [iconCacheVersion, setIconCacheVersion] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef({ x: 0, y: 0 });
@@ -182,52 +182,69 @@ export function ControlSidebar({
     }
   }, [panelMode]);
 
-  const refreshSidebarApps = useCallback(async (forceRefresh = false) => {
-    if (forceRefresh) {
-      await parseAllApps();
-    }
-
-    let deviceApps = await getAllDeviceApps();
-
-    if (deviceApps.length === 0) {
-      const syncResult = await syncWithDevice();
-      if (syncResult.toParse.length > 0) {
-        parseAllApps().then(() => setIconCacheVersion(v => v + 1)).catch(() => {});
+  // 按「置顶 > 常用 > 其他」分类并写入侧栏状态（纯数据整理，不触发同步/解析）。
+  const classifyAndSetSidebarApps = useCallback(
+    async (deviceApps: Awaited<ReturnType<typeof getAllDeviceApps>>) => {
+      const pinned: typeof deviceApps = [];
+      const frequent: typeof deviceApps = [];
+      const other: typeof deviceApps = [];
+      for (const app of deviceApps) {
+        if (app.pinned) pinned.push(app);
+        else if (app.localCount > 0) frequent.push(app);
+        else other.push(app);
       }
-      deviceApps = await getAllDeviceApps();
-    }
 
-    const pinned: typeof deviceApps = [];
-    const frequent: typeof deviceApps = [];
-    const other: typeof deviceApps = [];
-    for (const app of deviceApps) {
-      if (app.pinned) pinned.push(app);
-      else if (app.localCount > 0) frequent.push(app);
-      else other.push(app);
-    }
+      pinned.sort((a, b) => b.pinOrder - a.pinOrder);
+      frequent.sort((a, b) => b.localCount - a.localCount);
+      other.sort((a, b) => b.launchCount - a.launchCount);
 
-    pinned.sort((a, b) => b.pinOrder - a.pinOrder);
-    frequent.sort((a, b) => b.localCount - a.localCount);
-    other.sort((a, b) => b.launchCount - a.launchCount);
+      setPinnedApps(pinned.map((a) => a.packageName));
 
-    setPinnedApps(pinned.map(a => a.packageName));
+      const sorted = [...pinned, ...frequent, ...other];
+      const sidebarList = sorted.slice(0, 12).map((a) => a.packageName);
+      setSidebarApps(sidebarList);
 
-    const sorted = [...pinned, ...frequent, ...other];
-    const sidebarList = sorted.slice(0, 12).map(a => a.packageName);
-    setSidebarApps(sidebarList);
-
-    getCachedAppLabels(sidebarList).then((labels) => {
-      setAppLabels(prev => {
-        const newMap = new Map(prev);
-        labels.forEach((value, key) => newMap.set(key, value));
-        return newMap;
+      getCachedAppLabels(sidebarList).then((labels) => {
+        setAppLabels((prev) => {
+          const newMap = new Map(prev);
+          labels.forEach((value, key) => newMap.set(key, value));
+          return newMap;
+        });
       });
-    });
-  }, [getAllDeviceApps, getCachedAppLabels, syncWithDevice, parseAllApps]);
+    },
+    [getCachedAppLabels],
+  );
+
+  // 只读重载：仅从已写入的 store 重读并刷新侧栏。供 appListVersion 自愈副作用调用，
+  // 绝不触发 syncWithDevice/parseAllApps —— 否则会与 bump 形成「同步→bump→同步」死循环。
+  const reloadSidebarApps = useCallback(async () => {
+    const deviceApps = await getAllDeviceApps();
+    await classifyAndSetSidebarApps(deviceApps);
+  }, [getAllDeviceApps, classifyAndSetSidebarApps]);
+
+  // 显式恢复 / 手动刷新：forceRefresh 时先全量重解析（清空数据/缓存失效后的恢复路径）；
+  // 列表为空时尝试轻量同步。结果直接写 store，由 appListVersion 驱动其它 UI 重读。
+  const refreshSidebarApps = useCallback(
+    async (forceRefresh = false) => {
+      if (forceRefresh) {
+        await parseAllApps();
+      }
+      let deviceApps = await getAllDeviceApps();
+      if (deviceApps.length === 0) {
+        const syncResult = await syncWithDevice();
+        if (syncResult.toParse.length > 0) {
+          await parseAllApps();
+        }
+        deviceApps = await getAllDeviceApps();
+      }
+      await classifyAndSetSidebarApps(deviceApps);
+    },
+    [getAllDeviceApps, syncWithDevice, parseAllApps, classifyAndSetSidebarApps],
+  );
 
   useEffect(() => {
-    refreshSidebarApps();
-  }, [refreshSidebarApps]);
+    reloadSidebarApps();
+  }, [reloadSidebarApps, appListVersion]);
 
   const filteredPinned = pinnedApps.filter(
     (pkg) => !query || pkg.toLowerCase().includes(query) || (appLabels.get(pkg) || '').toLowerCase().includes(query),
@@ -281,7 +298,6 @@ export function ControlSidebar({
       const labels = await scrcpy.getCachedAppLabels(sorted);
       setAppLabels(labels);
       setParseProgress(null);
-      setIconCacheVersion(v => v + 1);
     } catch {
       setParseProgress(null);
     } finally {
@@ -414,7 +430,7 @@ export function ControlSidebar({
               compact
               pinMode={pinMode}
               isPinned={pinnedSet.has(pkg)}
-              cacheVersion={iconCacheVersion}
+              cacheVersion={appListVersion}
             />
           ))}
           {pinnedApps.length > 0 && sidebarApps.length > pinnedApps.length && (
@@ -432,7 +448,7 @@ export function ControlSidebar({
                 compact
                 pinMode={pinMode}
                 isPinned={pinnedSet.has(pkg)}
-                cacheVersion={iconCacheVersion}
+                cacheVersion={appListVersion}
               />
             ))}
         </div>
@@ -470,7 +486,7 @@ export function ControlSidebar({
             <AppWindow size={ICON_SIZE} />
             {activityCount && activityCount > 0 ? (
               <span
-                className="absolute -top-0.5 -right-0.5 bg-blue-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center"
+                className="absolute -top-0.5 -right-0.5 bg-accent-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center"
                 style={{ position: 'absolute' }}
               >
                 {activityCount > 9 ? '9+' : activityCount}
@@ -534,13 +550,13 @@ export function ControlSidebar({
 
           {showSettings && (
             <div
-              className="absolute bottom-full left-full mb-1 ml-1 bg-black/95 backdrop-blur-md border border-white/10 rounded-lg overflow-hidden z-50 min-w-[160px] shadow-xl"
+              className="absolute bottom-full left-full mb-1 ml-1 bg-white/95 backdrop-blur-xl border border-slate-200 rounded-xl overflow-hidden z-50 min-w-[168px] shadow-float animate-scale-in"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="px-3 py-2.5 text-xs text-white/70 space-y-2">
+              <div className="px-3 py-2.5 text-xs text-slate-600 space-y-2">
                 <div className="flex items-center justify-between gap-3">
                   <span>缓存大小</span>
-                  <span className="text-white font-mono">{formatCacheSize(cacheInfo?.size ?? 0)}</span>
+                  <span className="text-slate-900 font-mono tabular-nums">{formatCacheSize(cacheInfo?.size ?? 0)}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span>键盘模式</span>
@@ -551,11 +567,13 @@ export function ControlSidebar({
                       setKeyboardMode(next);
                       localStorage.setItem('carweb-keyboard-mode', next);
                     }}
-                    className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
-                      keyboardMode === 'browser' ? 'bg-blue-500/30 text-blue-400' : 'bg-white/10 text-white/60'
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] transition-colors ${
+                      keyboardMode === 'browser' ? 'bg-accent-100 text-accent-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                     }`}
                   >
-                    {keyboardMode === 'phone' ? '📱 手机' : '⌨️ 浏览器'}
+                    {keyboardMode === 'phone'
+                      ? <><Smartphone className="w-3 h-3" /> 手机</>
+                      : <><Keyboard className="w-3 h-3" /> 浏览器</>}
                   </button>
                 </div>
                 <div className="flex items-center justify-between gap-3">
@@ -566,12 +584,12 @@ export function ControlSidebar({
                       setShowSettings(false);
                       setShowPinSetup(true);
                     }}
-                    className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
+                    className={`px-2 py-0.5 rounded-md text-[10px] transition-colors ${
                       adbStore.deviceSerial && hasPin(adbStore.deviceSerial)
-                        ? 'bg-blue-500/30 text-blue-400'
+                        ? 'bg-accent-100 text-accent-700'
                         : adbStore.deviceSerial
-                          ? 'bg-white/10 text-white/60'
-                          : 'bg-white/5 text-white/30 cursor-not-allowed'
+                          ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          : 'bg-slate-50 text-slate-300 cursor-not-allowed'
                     }`}
                   >
                     {!adbStore.deviceSerial
@@ -585,11 +603,13 @@ export function ControlSidebar({
                   <span>音频输出</span>
                   <button
                     onClick={() => setAudioRoute(audioRoute === 'browser' ? 'phone' : 'browser')}
-                    className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
-                      audioRoute === 'browser' ? 'bg-blue-500/30 text-blue-400' : 'bg-white/10 text-white/60'
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] transition-colors ${
+                      audioRoute === 'browser' ? 'bg-accent-100 text-accent-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                     }`}
                   >
-                    {audioRoute === 'browser' ? '🔊 浏览器' : '📱 手机'}
+                    {audioRoute === 'browser'
+                      ? <><Volume2 className="w-3 h-3" /> 浏览器</>
+                      : <><Smartphone className="w-3 h-3" /> 手机</>}
                   </button>
                 </div>
                 {isRunning && toggleDisplayMode && (
@@ -597,8 +617,8 @@ export function ControlSidebar({
                     <span>显示模式</span>
                     <button
                       onClick={toggleDisplayMode}
-                      className={`px-2 py-0.5 rounded text-[10px] transition-colors ${
-                        useMirrorMode ? 'bg-blue-500/30 text-blue-400' : 'bg-white/10 text-white/60'
+                      className={`px-2 py-0.5 rounded-md text-[10px] transition-colors ${
+                        useMirrorMode ? 'bg-accent-100 text-accent-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                       }`}
                     >
                       {useMirrorMode ? '镜像' : '虚拟屏'}
@@ -612,7 +632,7 @@ export function ControlSidebar({
                       <select
                         value={resolutionPreset}
                         onChange={(e) => changeResolutionPreset(e.target.value as ResolutionPresetKey)}
-                        className="px-2 py-0.5 rounded text-[10px] bg-white/10 text-white/60 border-none outline-none cursor-pointer"
+                        className="px-2 py-0.5 rounded-md text-[10px] bg-slate-100 text-slate-700 border-none outline-none cursor-pointer focus-visible:ring-2 focus-visible:ring-accent-400"
                       >
                         {RESOLUTION_PRESETS.map(p => (
                           <option key={p.key} value={p.key}>{p.label}</option>
@@ -640,7 +660,7 @@ export function ControlSidebar({
                     }
                     setShowCacheSettings(true);
                   }}
-                  className="flex items-center gap-1.5 text-white/60 hover:text-white transition-colors w-full"
+                  className="flex items-center gap-1.5 pt-1 border-t border-slate-200 mt-1 text-slate-500 hover:text-slate-900 transition-colors w-full"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>缓存设置</span>
@@ -688,7 +708,7 @@ export function ControlSidebar({
       {panelMode !== 'closed' && (
         <div
           ref={panelRef}
-          className="fixed w-72 max-h-[calc(100vh-2rem)] bg-black/90 backdrop-blur-md border-r border-white/10 flex flex-col z-50 shadow-2xl rounded-lg overflow-hidden"
+          className="fixed w-72 max-h-[calc(100vh-2rem)] bg-white/95 backdrop-blur-xl border border-slate-200 flex flex-col z-50 shadow-float rounded-2xl overflow-hidden animate-scale-in"
           style={{
             left: `${floatingPanelPosition.x}px`,
             top: `${floatingPanelPosition.y}px`,
@@ -698,15 +718,15 @@ export function ControlSidebar({
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
         >
-          <div className="drag-handle flex items-center justify-between px-4 pt-3 pb-2 cursor-move select-none bg-white/5 hover:bg-white/10 transition-colors">
-            <span className="text-white/80 text-sm font-medium">
+          <div className="drag-handle flex items-center justify-between px-4 pt-3 pb-2 cursor-move select-none bg-slate-50 hover:bg-slate-100 transition-colors border-b border-slate-200">
+            <span className="text-slate-700 text-sm font-medium">
               {panelMode === 'search' ? '搜索应用' : '全部应用'}
               {panelMode === 'apps' && apps && ` (${filteredAll.length})`}
             </span>
             <div className="flex items-center gap-1">
               <button
                 onClick={togglePinMode}
-                className={`p-1 rounded transition-colors ${pinMode ? 'text-blue-400' : 'text-white/40 hover:text-white'}`}
+                className={`p-1 rounded-lg transition-colors ${pinMode ? 'text-accent-600 bg-accent-50' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-200'}`}
                 title={pinMode ? '退出置顶模式' : '置顶模式'}
               >
                 <Pin className="w-4 h-4" />
@@ -719,14 +739,13 @@ export function ControlSidebar({
                     refreshSidebarApps(true).then(async () => {
                       const sorted = await sortDeviceApps();
                       setApps(sorted);
-                      setIconCacheVersion(v => v + 1);
                       setLoading(false);
                     }).catch(() => {
                       setLoading(false);
                     });
                   }}
                   disabled={loading}
-                  className={`p-1 rounded transition-colors ${loading ? 'text-white/20' : 'text-white/40 hover:text-white'}`}
+                  className={`p-1 rounded-lg transition-colors ${loading ? 'text-slate-300' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-200'}`}
                   title="更新应用列表"
                 >
                   <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -734,7 +753,7 @@ export function ControlSidebar({
               )}
               <button
                 onClick={closePanel}
-                className="p-1 text-white/40 hover:text-white rounded transition-colors"
+                className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-lg transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -743,27 +762,27 @@ export function ControlSidebar({
 
           <div className="px-3 pb-2">
             <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/40" />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
               <input
                 ref={searchRef}
                 type="text"
                 value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
                 placeholder="搜索应用..."
-                className="w-full pl-8 pr-3 py-1.5 text-xs bg-white/10 rounded-lg border border-white/10 text-white placeholder-white/30 outline-none focus:border-blue-500/50 transition-colors"
+                className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-100 rounded-lg border border-slate-200 text-slate-900 placeholder-slate-400 outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-400/30 transition-colors"
               />
             </div>
           </div>
 
           {parseProgress && (
             <div className="px-4 pb-2">
-              <div className="flex items-center justify-between text-[10px] text-white/40 mb-1">
+              <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
                 <span>{parseProgress.current ? `解析 ${parseProgress.current}...` : '解析应用中...'}</span>
-                <span>{parseProgress.parsed}/{parseProgress.total}</span>
+                <span className="tabular-nums">{parseProgress.parsed}/{parseProgress.total}</span>
               </div>
-              <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+              <div className="h-1 bg-slate-200 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-blue-500/60 rounded-full transition-all duration-300"
+                  className="h-full bg-accent-500 rounded-full transition-all duration-300"
                   style={{ width: `${(parseProgress.parsed / Math.max(parseProgress.total, 1)) * 100}%` }}
                 />
               </div>
@@ -774,7 +793,7 @@ export function ControlSidebar({
             {panelMode === 'search' ? (
               filteredPinned.length > 0 ? (
                 <>
-                  <div className="text-white/40 text-[10px] uppercase tracking-wider px-1 pt-1 pb-0.5">
+                  <div className="text-slate-400 text-[10px] uppercase tracking-wider px-1 pt-1 pb-0.5">
                     常用
                   </div>
                   <div className="grid grid-cols-3 gap-0.5">
@@ -787,13 +806,13 @@ export function ControlSidebar({
                         onLaunch={handleLaunchApp}
                         pinMode={pinMode}
                         isPinned={pinnedSet.has(pkg)}
-                        cacheVersion={iconCacheVersion}
+                        cacheVersion={appListVersion}
                       />
                     ))}
                   </div>
                 </>
               ) : (
-                <div className="text-white/40 text-xs text-center py-4">
+                <div className="text-slate-400 text-xs text-center py-4">
                   无匹配应用
                 </div>
               )
@@ -809,18 +828,18 @@ export function ControlSidebar({
                       onLaunch={handleLaunchApp}
                       pinMode={pinMode}
                       isPinned={pinnedSet.has(pkg)}
-                      cacheVersion={iconCacheVersion}
+                      cacheVersion={appListVersion}
                     />
                   ))}
                 </div>
               ) : (
-                <div className="text-white/40 text-xs text-center py-4">
+                <div className="text-slate-400 text-xs text-center py-4">
                   无匹配应用
                 </div>
               )
             ) : (
               <div className="flex items-center justify-center py-8">
-                <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
+                <Loader2 className="w-5 h-5 text-accent-400 animate-spin" />
               </div>
             )}
           </div>
