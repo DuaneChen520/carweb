@@ -183,7 +183,7 @@ export function ControlSidebar({
             <AppIcon
               key={`pinned-${pkg}`}
               pkg={pkg}
-              name={appLabels.get(pkg) || pkg.split('.').pop() || pkg}
+              name={appLabels.get(pkg) || pkg}
               getAppIcon={getAppIcon}
               onLaunch={handleDockLaunch}
               compact
@@ -199,7 +199,7 @@ export function ControlSidebar({
               <AppIcon
                 key={`other-${pkg}`}
                 pkg={pkg}
-                name={appLabels.get(pkg) || pkg.split('.').pop() || pkg}
+                name={appLabels.get(pkg) || pkg}
                 getAppIcon={getAppIcon}
                 onLaunch={handleDockLaunch}
                 compact

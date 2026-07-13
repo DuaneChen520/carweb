@@ -152,7 +152,7 @@ export const AppGrid = forwardRef<AppGridHandle, AppGridProps>(function AppGrid(
                 <AppIcon
                   key={pkg}
                   pkg={pkg}
-                  name={labels.get(pkg) || pkg.split('.').pop() || pkg}
+                  name={labels.get(pkg) || pkg}
                   getAppIcon={getAppIcon}
                   onLaunch={handleLaunch}
                   pinMode={pinMode}

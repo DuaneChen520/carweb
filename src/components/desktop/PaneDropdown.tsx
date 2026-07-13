@@ -15,6 +15,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Maximize2, X, RefreshCw } from 'lucide-react';
 import type { AppInstance, PaneSlot } from '@/lib/session-manager';
+import { useAppDisplayName } from '@/lib/useAppDisplayName';
 
 interface PaneDropdownProps {
   pane: PaneSlot;
@@ -40,7 +41,7 @@ export function PaneDropdown({ pane, app, onSwitch, onFullscreen, onClose }: Pan
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen]);
 
-  const displayName = app.appLabel || app.packageName.split('.').pop() || app.packageName;
+  const displayName = useAppDisplayName(app.packageName);
 
   return (
     <div

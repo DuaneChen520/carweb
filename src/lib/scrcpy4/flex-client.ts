@@ -15,6 +15,14 @@ export interface FlexDisplayClientOptions {
   setCanvasSize: (width: number, height: number) => void;
   /** 防抖时间，默认 150ms。 */
   debounceMs?: number;
+  /**
+   * ADR-0011：resize 进行中回调。
+   * pendingResize 从 null→非null 时触发 active=true（resize 发起，画面即将清屏）；
+   * pendingResize 从非null→null 时触发 active=false（server 确认 resize，新帧已到）。
+   * 供 UI 层在「应用尺寸变化过渡」期间显示浅白占位，覆盖 canvas 清屏白闪。
+   * 也可在实例化后直接赋值 flexClient.onResizeActivity 覆盖。
+   */
+  onResizeActivity?: (active: boolean) => void;
 }
 
 export class FlexDisplayClient {
@@ -28,11 +36,14 @@ export class FlexDisplayClient {
   private readonly setCanvasSize: (w: number, h: number) => void;
   /** 最近一次发送的尺寸，用于去重。 */
   private lastSentTarget: { w: number; h: number } | null = null;
+  /** ADR-0011：resize 进行中回调（见 onResizeActivity 文档）。 */
+  public onResizeActivity?: (active: boolean) => void;
 
   constructor(opts: FlexDisplayClientOptions) {
     this.sendResize = opts.sendResize;
     this.setCanvasSize = opts.setCanvasSize;
     this.debounceMs = opts.debounceMs ?? 150;
+    this.onResizeActivity = opts.onResizeActivity;
   }
 
   /** 设置初始虚拟屏尺寸（来自 startScrcpy 的 displayConfig）。 */
@@ -87,9 +98,16 @@ export class FlexDisplayClient {
     // squash：只保留最新请求
     this.pendingResize = target;
     this.lastSentTarget = target;
-    this.sendResize(target.w, target.h).catch((e) => {
-      console.warn('[FlexClient] RESIZE_DISPLAY 发送失败:', e);
-    });
+    // ADR-0011：通知 UI 进入「尺寸变化过渡」（canvas 即将清屏白闪，需占位覆盖）
+    this.onResizeActivity?.(true);
+    this.sendResize(target.w, target.h)
+      .catch((e) => {
+        console.warn('[FlexClient] RESIZE_DISPLAY 发送失败:', e);
+        // 发送即失败（如 flexClient 尚未就绪）→ 清除 pending 并结束过渡态，
+        // 否则 onResizeActivity(false) 永不触发，UI 占位会永久卡在屏幕上。
+        this.pendingResize = null;
+        this.onResizeActivity?.(false);
+      });
   }
 
   /** demuxer 解出 session 包时调用。 */
@@ -99,8 +117,14 @@ export class FlexDisplayClient {
     this.setCanvasSize(w, h);
 
     if (clientResized) {
-      // 客户端请求的 resize 被确认，清除 pending
-      this.clearPendingIfMatches(w, h);
+      // server 确认了客户端请求的 resize 已生效：无论实际尺寸是否精确等于请求值，
+      // 都视为已应用并清除 pending，结束「尺寸变化过渡」（占位淡出）。
+      // 旧逻辑要求尺寸精确匹配才清 pending，一旦设备回的尺寸有细微出入
+      // （虚拟屏分辨率取整、DPR 抖动）便永不清除，导致 UI 占位卡死。
+      if (this.pendingResize !== null) {
+        this.pendingResize = null;
+        this.onResizeActivity?.(false);
+      }
     } else {
       // 独立变化（如 App 自旋转），不清除 pending；
       // 但如果 session 包尺寸与 pendingResize 匹配，server 实际已应用了变化，清除 pending
@@ -110,6 +134,9 @@ export class FlexDisplayClient {
         this.lastRetryTime = Date.now();
         this.sendResize(this.pendingResize.w, this.pendingResize.h).catch((e) => {
           console.warn('[FlexClient] RESIZE_DISPLAY 重发失败:', e);
+          // 重发失败同样结束过渡，避免占位卡死
+          this.pendingResize = null;
+          this.onResizeActivity?.(false);
         });
       }
     }
@@ -123,6 +150,8 @@ export class FlexDisplayClient {
       this.pendingResize.h === h
     ) {
       this.pendingResize = null;
+      // ADR-0011：resize 已被 server 确认，退出「尺寸变化过渡」，占位淡出
+      this.onResizeActivity?.(false);
     }
   }
 
@@ -136,7 +165,11 @@ export class FlexDisplayClient {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
     }
-    this.pendingResize = null;
+    if (this.pendingResize !== null) {
+      this.pendingResize = null;
+      // ADR-0011：组件卸载/会话销毁时强制结束过渡状态，避免占位残留
+      this.onResizeActivity?.(false);
+    }
     this.lastSentTarget = null;
   }
 }

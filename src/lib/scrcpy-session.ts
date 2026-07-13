@@ -16,7 +16,7 @@
 import type { AdbScrcpyClient } from '@yume-chan/adb-scrcpy';
 import { AdbScrcpyExitedError } from '@yume-chan/adb-scrcpy';
 import type { ScrcpyControlMessageWriter } from '@yume-chan/scrcpy';
-import { ScrcpyNewDisplay, ScrcpyCaptureOrientation, AndroidKeyCode, AndroidKeyEventAction } from '@yume-chan/scrcpy';
+import { ScrcpyNewDisplay, ScrcpyCaptureOrientation, ScrcpyLockOrientation, ScrcpyOrientation, AndroidKeyCode, AndroidKeyEventAction } from '@yume-chan/scrcpy';
 import { AdbScrcpyOptions4_0, FlexDisplayClient, serializeResizeDisplay, RESIZE_DISPLAY_TYPE, ControllerHealth } from '@/lib/scrcpy4';
 import type { AdbScrcpyOptions4_0 as AdbScrcpyOptions4_0Type, Scrcpy4MediaPacket } from '@/lib/scrcpy4';
 import type { ControllerHealthState } from '@/lib/scrcpy4';
@@ -332,7 +332,21 @@ export class ScrcpySession {
           : useVirtualDisplay
             ? {
                 newDisplay: new ScrcpyNewDisplay(displayConfig.width, displayConfig.height, displayConfig.dpi ?? 320),
-                captureOrientation: ScrcpyCaptureOrientation.Unlocked,
+                // ADR-0011 / ADR-0001：锁定到虚拟屏「初始方向」（LockedInitial，"@"）。
+                //
+                // 为什么是 LockedInitial 而不是硬编码 LockedPortrait/LockedLandscape：
+                // 虚拟屏由 ScrcpyNewDisplay(窗口宽, 窗口高) 创建——竖窗创建出的就是竖屏显示、
+                // 横窗就是横屏显示。LockedInitial 锁定的正是「这块显示创建时的初始方向」，
+                // 而那初始方向由窗口宽高比（displayConfig）决定。因此本行 == "锁=窗口宽高比"：
+                //   竖窗(分屏左/右) → 竖显示 → 锁竖；横窗/全屏 → 横显示 → 锁横。
+                // 硬编码 LockedPortrait/Landscape 反而更糟：横窗里硬锁竖会让横 app 侧着显示。
+                //
+                // 作用：app 启动若要求旋转整块屏 → 采集帧被锁在初始方向 → 不翻转 →
+                // 无 canvas 尺寸互换清屏 → 根除「白→黑→白」方向白闪（白闪A）。
+                // 注意：方向锁只防「翻转」，尺寸轴(RESIZE_DISPLAY)仍全开 —— 运行中改窗口大小
+                // 依然实时改分辨率、app 实时重布局，灵活性未牺牲。resize 本身的 canvas 清屏
+                // （白闪B）由 AppTransitionPlaceholder 统一占位动画兜底（见 SplitPane/FullscreenOverlay）。
+                captureOrientation: new ScrcpyCaptureOrientation(ScrcpyLockOrientation.LockedInitial, ScrcpyOrientation.Orient0),
                 displayImePolicy: 'local' as const,
                 flexDisplay: true,
                 keepActive: true,

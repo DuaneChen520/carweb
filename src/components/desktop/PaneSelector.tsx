@@ -15,6 +15,7 @@
 import { useState } from 'react';
 import { Check, AlertTriangle } from 'lucide-react';
 import type { AppInstance, PaneSlot } from '@/lib/session-manager';
+import { useAppDisplayName } from '@/lib/useAppDisplayName';
 
 interface PaneSelectorProps {
   /** 当前全屏 app 的来源 pane（若来自 pane） */
@@ -31,6 +32,10 @@ interface PaneSelectorProps {
 
 export function PaneSelector({ sourcePane, leftApp, rightApp, onSelect, onCancel }: PaneSelectorProps) {
   const [confirmPane, setConfirmPane] = useState<PaneSlot | null>(null);
+
+  // ADR-0012：按包名渲染时解析显示名（左/右各一条，避免拆分缩写兜底）
+  const leftName = useAppDisplayName(leftApp?.packageName);
+  const rightName = useAppDisplayName(rightApp?.packageName);
 
   const handleSelect = (pane: PaneSlot) => {
     // 来源 pane：直接恢复，无确认
@@ -56,7 +61,7 @@ export function PaneSelector({ sourcePane, leftApp, rightApp, onSelect, onCancel
 
   const renderPaneOption = (pane: PaneSlot, app: AppInstance | null) => {
     const isSource = pane === sourcePane;
-    const displayName = app?.appLabel || app?.packageName.split('.').pop() || app?.packageName || '空闲';
+    const displayName = pane === 'left' ? leftName : rightName;
 
     return (
       <button
@@ -82,8 +87,7 @@ export function PaneSelector({ sourcePane, leftApp, rightApp, onSelect, onCancel
 
   // 覆盖确认状态
   if (confirmPane) {
-    const targetApp = confirmPane === 'left' ? leftApp : rightApp;
-    const targetName = targetApp?.appLabel || targetApp?.packageName.split('.').pop() || targetApp?.packageName || '';
+    const targetName = confirmPane === 'left' ? leftName : rightName;
 
     return (
       <div className="p-3">

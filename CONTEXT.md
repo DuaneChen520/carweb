@@ -102,8 +102,9 @@ CarWeb 是基于 **WebADB + Scrcpy** 的车机投屏 Web 应用：通过浏览�
    - 若 ROM 忽略 `--display`（应用落到了主屏），策略2：**先在主屏 `am start`**（:361）→ `sleep(2500)` →
      `am task move-to-display <id>`（:369）→ `sleep(1500)`。应用会**先在主屏出现、再被搬到虚拟屏**，
      这是最典型的「多次跳转」可见动画；整条回退路径累计 ~6s 等待。
-4. **`AppLaunchingOverlay` 是死代码**：该组件定义于 `AppLaunchingOverlay.tsx`，但全仓无任何 import/渲染，
-   用户看到的启动动画来自**真实显示内容的过渡**（Launcher 强杀、主屏→虚拟屏搬运），而非该 DOM 覆盖层。
+4. **`AppLaunchingOverlay` 已删除**：原零引用死代码（全屏深色遮罩、无任何 import/渲染），其"启动过渡"角色由
+   ADR-0011 的 `AppTransitionPlaceholder`（浅色+图标统一占位）取代；用户看到的启动动画来自**真实显示内容的过渡**
+   （Launcher 强杀、主屏→虚拟屏搬运），而非该 DOM 覆盖层。
 
 > 诊断「多次跳转」时优先确认策略2是否触发（看 `[launch-diag]` 日志中「策略1 后 进程存活 / display分段」），
 > 以及 Launcher 强杀的可见过渡是否可合并进启动序列以消除闪烁。

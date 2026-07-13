@@ -22,6 +22,7 @@
 import { useMemo } from 'react';
 import { X, LogIn, Trash2, Monitor, SplitSquareHorizontal, Moon } from 'lucide-react';
 import { useSessionManager, type AppInstance, type PaneSlot } from '@/lib/session-manager';
+import { useAppLabels } from '@/lib/useAppDisplayName';
 import type { DisplayConfig } from '@/lib/scrcpy-session';
 
 interface ActivityManagerPanelProps {
@@ -78,6 +79,9 @@ export function ActivityManagerPanel({ onClose, getDisplayConfig }: ActivityMana
     });
   }, [apps]);
 
+  // ADR-0012：按包名批量解析显示名（渲染时查设备缓存，兜底完整包名）
+  const labels = useAppLabels(sortedApps.map((a) => a.packageName));
+
   const handleEnter = (app: AppInstance) => {
     if (app.state === 'background') {
       void resumeBackground(app.sessionId, getDisplayConfig(app.pane ?? 'left'));
@@ -118,7 +122,7 @@ export function ActivityManagerPanel({ onClose, getDisplayConfig }: ActivityMana
           ) : (
             sortedApps.map((app) => {
               const stateInfo = getStateLabel(app);
-              const displayName = app.appLabel || app.packageName.split('.').pop() || app.packageName;
+              const displayName = labels.get(app.packageName) || app.packageName;
 
               return (
                 <div

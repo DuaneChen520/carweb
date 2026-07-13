@@ -43,7 +43,7 @@ export function AppIcon({ pkg, name, getAppIcon, onLaunch, compact, pinMode, isP
     return () => { cancelled = true; };
   }, [pkg, getAppIcon, isVisible, cacheVersion]);
 
-  const displayName = name || pkg.split('.').pop() || pkg;
+  const displayName = name || pkg;
   const firstLetter = displayName.charAt(0).toUpperCase();
   const hue = pkg.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) % 360;
 

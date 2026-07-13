@@ -23,12 +23,13 @@
  *    解决 ScrcpySession 实例引用不变导致 flexClientInstance 变化不可见的问题。
  */
 
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { PaneEmptyState } from './PaneEmptyState';
 import { useSessionManager } from '@/lib/session-manager';
 import type { AppInstance, PaneSlot } from '@/lib/session-manager';
 import type { ScrcpySession } from '@/lib/scrcpy-session';
 import { useCanvasPointerInput } from '@/hooks/scrcpy/useCanvasPointerInput';
+import { AppTransitionPlaceholder } from './AppTransitionPlaceholder';
 
 interface SplitPaneProps {
   pane: PaneSlot;
@@ -48,6 +49,11 @@ export function SplitPane({ pane, app, session, onOpenAppPicker, dropdown, resiz
   const containerRef = useRef<HTMLDivElement>(null);
   const flexClientRef = useRef(session?.flexClientInstance ?? null);
   const lastSizeRef = useRef({ width: 0, height: 0 });
+  // ADR-0011：尺寸变化过渡态（flex-client pendingResize 进行中）。
+  // 与 videoWidth===0 共同驱动 AppTransitionPlaceholder 的显隐。
+  const [resizing, setResizing] = useState(false);
+  // ADR-0011 兜底：resize 进行中启动安全超时，server 未回确认时强制结束过渡，防止占位卡死。
+  const resizeSafetyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 订阅 session 的 isRunning 状态。
   // ScrcpySession 实例引用不变，但 start() 完成后 isRunning 从 false → true，
@@ -59,11 +65,49 @@ export function SplitPane({ pane, app, session, onOpenAppPicker, dropdown, resiz
     return managed?.state.isRunning ?? false;
   });
 
+  // 订阅 session 的 videoWidth：首帧未到达时为 0（启动过渡中），>0 表示有效帧已渲染。
+  const videoWidth = useSessionManager((s) => {
+    if (!app) return 0;
+    const managed = s.sessions[app.sessionId];
+    return managed?.state.videoWidth ?? 0;
+  });
+
   // 触控输入：为 reparent 进来的原生 canvas 绑定指针事件（桌面分屏缺省无触控层）
   const handlePointer = useCanvasPointerInput(session);
 
   // 1. 同步 flexClientRef —— 每次 re-render 都执行（非 effect），确保拿到最新值
   flexClientRef.current = session?.flexClientInstance ?? null;
+
+  // 1b. ADR-0011：订阅 flex-client 的 resize 进行中回调，驱动尺寸变化过渡占位。
+  // flexClientInstance 在 start() 完成后（isRunning 翻转）才就绪，故依赖 sessionIsRunning。
+  useEffect(() => {
+    const fc = session?.flexClientInstance ?? null;
+    if (!fc) return;
+    fc.onResizeActivity = (active) => {
+      if (resizeSafetyTimer.current) {
+        clearTimeout(resizeSafetyTimer.current);
+        resizeSafetyTimer.current = null;
+      }
+      if (active) {
+        setResizing(true);
+        // 自愈兜底：极端情况下 server 未回 clientResized 确认（尺寸出入/发送失败），
+        // 超时后强制结束过渡，避免浅白占位永久占据屏幕。
+        resizeSafetyTimer.current = setTimeout(() => {
+          resizeSafetyTimer.current = null;
+          setResizing(false);
+        }, 1200);
+      } else {
+        setResizing(false);
+      }
+    };
+    return () => {
+      fc.onResizeActivity = undefined;
+      if (resizeSafetyTimer.current) {
+        clearTimeout(resizeSafetyTimer.current);
+        resizeSafetyTimer.current = null;
+      }
+    };
+  }, [session, sessionIsRunning]);
 
   // flexClient 新可用时，立即用缓存的容器尺寸触发一次 resize
   useEffect(() => {
@@ -136,6 +180,11 @@ export function SplitPane({ pane, app, session, onOpenAppPicker, dropdown, resiz
             onPointerMove={handlePointer}
             onPointerUp={handlePointer}
             onPointerCancel={handlePointer}
+          />
+          {/* ADR-0011：应用启动（首帧未到）或尺寸变化（resize 进行中）的统一过渡占位 */}
+          <AppTransitionPlaceholder
+            pkg={app.packageName}
+            show={videoWidth === 0 || resizing}
           />
           {/* 顶部下拉悬浮控件（透明悬浮，不占画面尺寸） */}
           {dropdown}

@@ -27,6 +27,25 @@
 - **appListVersion**：`useAdbStore` 中的计数器；设备应用数据变更时 bump，驱动 `AppGrid` / dock 重读列表（见 ADR-0009 反馈环修复）。
 - **AppPickerContext**：`openAppPicker(config)` / `closeAppPicker()`；两屏通过它触发统一浮窗，浮窗在 App 层单实例渲染。
 
+## 虚拟屏渲染与方向（ADR-0011）
+
+- **captureOrientation**：scrcpy 4.x 采集方向选项（官方 CLI 为 `--capture-orientation`）。决定"发送到电脑的视频帧方向"，即 canvas 帧尺寸的来源层。
+  - **Unlocked**（协议值 0，无 `@`）：采集**跟随**设备/显示旋转 → app 启动旋转显示即翻转视频帧 → 触发 canvas 清屏白闪。carweb 虚拟屏路径原错用此项（`scrcpy-session.ts:335`）。
+  - **LockedInitial**（协议值 1，CLI `@`）：采集方向**锁定到初始方向**（虚拟屏创建时的方向），显示旋转不改变采集帧方向 → 无翻转。scrcpy 默认值（平板/镜像路径即此行为）。
+- **canvas-clear（清屏）**：`canvas.width=w; canvas.height=h` 赋值会清空 canvas 为透明（`scrcpy-session.ts:422-425`）。每当视频帧尺寸变化（`flex-client.ts` 的 `onSessionPacket`）即触发，是白闪的直接来源；透明 canvas 透出浅色容器即"白屏"。
+- **flex-display resize（尺寸变化）**：`flexDisplay` 开启时，`SplitPane` 的 `ResizeObserver` 经 `flex-client` 防抖（150ms）向设备发 `RESIZE_DISPLAY`，把虚拟屏尺寸改为容器尺寸。尺寸变化同样触发 canvas-clear → 白闪（与方向锁无关，故 `LockedInitial` 修不了）。
+- **统一过渡占位（transition placeholder）**：ADR-0011 的 D2——浅色背景 + 居中应用图标，作为**启动**与**尺寸变化**两类过渡的统一动画（参考 HyperOS 分屏 resize 占位）；canvas 无有效帧/过渡中显示，有效帧到达淡出。由 `AppTransitionPlaceholder.tsx` 实现，取代已删除的零引用死代码 `AppLaunchingOverlay.tsx`。
+- **setRotationLocked(adb)**：Android 层旋转锁（`scrcpy-session.ts:392`，`try/catch` 防护），阻止虚拟屏被 app 转走，使方向不符 app 正立留黑边；`LockedInitial` 为其采集层双保险。
+
+## 应用显示名解析（ADR-0012）
+
+- **displayName（应用显示名）**：顶部下拉（`PaneDropdown`/`FullscreenDropdown`）、分屏选择（`PaneSelector`）、活动进程（`ActivityManagerPanel`）、启动占位（`AppTransitionPlaceholder`）、应用网格（`AppGrid`）、侧栏 dock（`ControlSidebar`）中展示给用户的应用名称。
+- **AppInfo.label**：设备端 `AppInfoFetcher.java` 解析出的应用真实名称（如"微信"），经 `app-info-service.parseAllApps` 缓存于 IndexedDB。是 displayName 的**唯一数据源**。
+- **AppInstance.appLabel（已弃用）**：`AppInstance` 可选字段，原意图"由 UI 层在 launch 时填充"。因启动调用点（`DesktopScreen.tsx` 的 `launchOnPane`/`launchFullscreen`）从未传入，且写入后不随缓存刷新、跨 resume/backgroundify 易失配，ADR-0012 起不再作为显示名来源。
+- **getCachedAppLabels(pkgs)**：`ScrcpyContext` 暴露的批量解析接口（`useAppManager` → `app-info-service`），按包名返回 `Map<pkg,label>`。
+- **渲染时解析（pull 模型）**：ADR-0012 决策——所有 displayName 在**渲染时**经 `useAppDisplayName(pkg)` / `useAppLabels(pkgs)` 按包名查 `getCachedAppLabels` 获得；单一数据源、自动随缓存刷新、覆盖所有启动入口（选择器/侧栏/媒体/NowPlaying）。
+- **兜底规则**：label 缺失（首次启动、设备未扫完）时显示**完整包名**（如 `com.tencent.mm`），不再用末段缩写（`com.tencent.mm → mm`）——后者不可读，已于 ADR-0012 全面废弃。
+
 ## 冗余 / 已清理项（ADR-0010）
 
 - **① 全部应用面板**：`ControlSidebar` 内 `panelMode='apps'/'search'` 浮层，ADR-0010 已剔除。

@@ -14,6 +14,7 @@ import { useState, useRef, useEffect } from 'react';
 import { SplitSquareHorizontal, X } from 'lucide-react';
 import type { AppInstance, PaneSlot } from '@/lib/session-manager';
 import { PaneSelector } from './PaneSelector';
+import { useAppDisplayName } from '@/lib/useAppDisplayName';
 
 interface FullscreenDropdownProps {
   app: AppInstance;
@@ -46,7 +47,7 @@ export function FullscreenDropdown({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showSplitMenu]);
 
-  const displayName = app.appLabel || app.packageName.split('.').pop() || app.packageName;
+  const displayName = useAppDisplayName(app.packageName);
 
   return (
     <div

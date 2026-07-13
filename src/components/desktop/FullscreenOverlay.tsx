@@ -19,10 +19,11 @@
  * - ResizeObserver 依赖 sessionIsRunning 确保容器出现时启动
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSessionManager } from '@/lib/session-manager';
 import { FullscreenDropdown } from './FullscreenDropdown';
 import { useCanvasPointerInput } from '@/hooks/scrcpy/useCanvasPointerInput';
+import { AppTransitionPlaceholder } from './AppTransitionPlaceholder';
 import type { DisplayConfig } from '@/lib/scrcpy-session';
 
 interface FullscreenOverlayProps {
@@ -36,6 +37,10 @@ export function FullscreenOverlay({ displayConfig, resizeScale = 1.0 }: Fullscre
   const containerRef = useRef<HTMLDivElement>(null);
   const flexClientRef = useRef<import('@/lib/scrcpy4').FlexDisplayClient | null>(null);
   const lastSizeRef = useRef({ width: 0, height: 0 });
+  // ADR-0011：尺寸变化过渡态（flex-client pendingResize 进行中）。
+  const [resizing, setResizing] = useState(false);
+  // ADR-0011 兜底：resize 进行中启动安全超时，server 未回确认时强制结束过渡，防止占位卡死。
+  const resizeSafetyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fullscreenSessionId = useSessionManager((s) => s.fullscreenSessionId);
   const getSession = useSessionManager((s) => s.getSession);
@@ -57,6 +62,43 @@ export function FullscreenOverlay({ displayConfig, resizeScale = 1.0 }: Fullscre
 
   // 同步 flexClientRef（render 时执行，拿到最新值）
   flexClientRef.current = session?.flexClientInstance ?? null;
+
+  // 订阅 session 的 videoWidth：首帧未到达时为 0（启动过渡中），>0 表示有效帧已渲染。
+  const videoWidth = useSessionManager((s) => {
+    if (!fullscreenSessionId) return 0;
+    const managed = s.sessions[fullscreenSessionId];
+    return managed?.state.videoWidth ?? 0;
+  });
+
+  // ADR-0011：订阅 flex-client 的 resize 进行中回调，驱动尺寸变化过渡占位。
+  useEffect(() => {
+    const fc = session?.flexClientInstance ?? null;
+    if (!fc) return;
+    fc.onResizeActivity = (active) => {
+      if (resizeSafetyTimer.current) {
+        clearTimeout(resizeSafetyTimer.current);
+        resizeSafetyTimer.current = null;
+      }
+      if (active) {
+        setResizing(true);
+        // 自愈兜底：极端情况下 server 未回 clientResized 确认（尺寸出入/发送失败），
+        // 超时后强制结束过渡，避免浅白占位永久占据屏幕。
+        resizeSafetyTimer.current = setTimeout(() => {
+          resizeSafetyTimer.current = null;
+          setResizing(false);
+        }, 1200);
+      } else {
+        setResizing(false);
+      }
+    };
+    return () => {
+      fc.onResizeActivity = undefined;
+      if (resizeSafetyTimer.current) {
+        clearTimeout(resizeSafetyTimer.current);
+        resizeSafetyTimer.current = null;
+      }
+    };
+  }, [session, sessionIsRunning]);
 
   // flexClient 新可用时，立即用缓存尺寸触发一次 resize
   useEffect(() => {
@@ -137,6 +179,12 @@ export function FullscreenOverlay({ displayConfig, resizeScale = 1.0 }: Fullscre
         onPointerMove={handlePointer}
         onPointerUp={handlePointer}
         onPointerCancel={handlePointer}
+      />
+
+      {/* ADR-0011：应用启动（首帧未到）或尺寸变化（resize 进行中）的统一过渡占位 */}
+      <AppTransitionPlaceholder
+        pkg={app.packageName}
+        show={videoWidth === 0 || resizing}
       />
 
       {/* 顶部下拉菜单 */}
