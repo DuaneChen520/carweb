@@ -62,3 +62,91 @@ describe('AdbScrcpyOptions4_0', () => {
     expect(ts.writable instanceof WritableStream).toBe(true);
   });
 });
+
+// ── parseAudioStreamMetadata：车机定制 scrcpy server 兼容（ADR-0015 修复）──
+// 标准 scrcpy 4.0 仅上报 OPUS/AAC/FLAC/RAW 四种 4 字节标签；本项目定制
+// scrcpy-server.jar 上报私有标签 0x32333034，需容错回退而非抛错。
+function fourByteStream(bytes: number[]): ReadableStream<Uint8Array> {
+  const buf = new Uint8Array(bytes);
+  return new ReadableStream<Uint8Array>({
+    start(c) {
+      c.enqueue(buf);
+      c.close();
+    },
+  });
+}
+
+describe('AdbScrcpyOptions4_0.parseAudioStreamMetadata', () => {
+  it('未知标签 0x32333034 容错回退到协商 audioCodec=opus（不抛错）', async () => {
+    const opts = new AdbScrcpyOptions4_0({
+      video: true,
+      audio: true,
+      control: true,
+      sendCodecMeta: true,
+      audioCodec: 'opus',
+    });
+    const meta = await opts.parseAudioStreamMetadata(
+      fourByteStream([0x32, 0x33, 0x30, 0x34]),
+    );
+    expect(meta.type).toBe('success');
+    if (meta.type === 'success') {
+      expect(meta.codec.webCodecId).toBe('opus');
+    }
+  });
+
+  it('标准 opus 标签 0x6f707573 直接识别', async () => {
+    const opts = new AdbScrcpyOptions4_0({
+      video: true,
+      audio: true,
+      control: true,
+      sendCodecMeta: true,
+    });
+    const meta = await opts.parseAudioStreamMetadata(
+      fourByteStream([0x6f, 0x70, 0x75, 0x73]),
+    );
+    expect(meta.type).toBe('success');
+    if (meta.type === 'success') {
+      expect(meta.codec.webCodecId).toBe('opus');
+    }
+  });
+
+  it('disabled(0x00000000) 透传 disabled', async () => {
+    const opts = new AdbScrcpyOptions4_0({
+      video: true,
+      audio: true,
+      control: true,
+      sendCodecMeta: true,
+    });
+    const meta = await opts.parseAudioStreamMetadata(fourByteStream([0, 0, 0, 0]));
+    expect(meta.type).toBe('disabled');
+  });
+
+  it('errored(0x00000001) 透传 errored', async () => {
+    const opts = new AdbScrcpyOptions4_0({
+      video: true,
+      audio: true,
+      control: true,
+      sendCodecMeta: true,
+    });
+    const meta = await opts.parseAudioStreamMetadata(fourByteStream([0, 0, 0, 1]));
+    expect(meta.type).toBe('errored');
+  });
+
+  it('sendCodecMeta=false 时把 4 字节作为音频数据回推，按协商 codec=aac 推断', async () => {
+    const opts = new AdbScrcpyOptions4_0({
+      video: true,
+      audio: true,
+      control: true,
+      sendCodecMeta: false,
+      audioCodec: 'aac',
+    });
+    const meta = await opts.parseAudioStreamMetadata(
+      fourByteStream([0x32, 0x33, 0x30, 0x34]),
+    );
+    expect(meta.type).toBe('success');
+    if (meta.type === 'success') {
+      // Aac 的 webCodecId 为 mp4a.66（见 @yume-chan ScrcpyAudioCodec）
+      expect(meta.codec.webCodecId).toBe('mp4a.66');
+    }
+  });
+});

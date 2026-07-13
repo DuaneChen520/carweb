@@ -298,6 +298,133 @@ export async function getScrcpyServerPids(adb: Adb): Promise<number[]> {
 }
 
 /**
+ * 单条 scrcpy 虚拟屏的解析结果（来自 `dumpsys display`）。
+ * 用于「设备侧快照」诊断，定位虚拟屏累积 / 并发 pane 超限等更深一层原因。
+ */
+export interface ScrcpyDisplayInfo {
+  id: number;
+  ownContent: boolean;
+  touchVirtual: boolean;
+  isPrivate: boolean;
+  uniqueId: string | null;
+}
+
+/** 解析 `dumpsys display` 输出，提取所有 scrcpy 虚拟屏（含 id 与关键 flag）。 */
+function parseScrcpyDisplays(output: string): ScrcpyDisplayInfo[] {
+  const viewportMatches = [
+    ...output.matchAll(
+      /DisplayViewport\{[^}]*type=VIRTUAL[^}]*displayId=(\d+)[^}]*uniqueId='([^']*scrcpy[^']*)'[^}]*\}/g,
+    ),
+  ];
+  const uniqueIds = new Map<number, string>();
+  for (const m of viewportMatches) {
+    uniqueIds.set(parseInt(m[1]!, 10), m[2]!);
+  }
+
+  const lines = output.split('\n');
+  const disps: ScrcpyDisplayInfo[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (!line.includes('DisplayDeviceInfo')) continue;
+    let displayId: number | null = null;
+    for (let j = i + 1; j < Math.min(i + 10, lines.length); j++) {
+      const idMatch = lines[j]!.match(/mDisplayId=(\d+)/);
+      if (idMatch) {
+        displayId = parseInt(idMatch[1]!, 10);
+        break;
+      }
+      if (lines[j]!.includes('DisplayDeviceInfo')) break;
+    }
+    if (line.includes('scrcpy') && displayId !== null) {
+      disps.push({
+        id: displayId,
+        ownContent: line.includes('FLAG_OWN_CONTENT_ONLY'),
+        touchVirtual: line.includes('touch VIRTUAL'),
+        isPrivate: line.includes('FLAG_PRIVATE'),
+        uniqueId: uniqueIds.get(displayId) ?? null,
+      });
+    }
+  }
+  return disps;
+}
+
+/** 返回设备上当前所有 scrcpy 虚拟屏（失败时返回空数组，不抛错）。 */
+export async function getScrcpyVirtualDisplays(adb: Adb): Promise<ScrcpyDisplayInfo[]> {
+  try {
+    const output = await runAdbCommand(adb, 'dumpsys display');
+    return parseScrcpyDisplays(output);
+  } catch {
+    return [];
+  }
+}
+
+export interface ScrcpyProcessInfo {
+  pid: number;
+  cmdline: string;
+}
+
+/**
+ * 返回设备上所有 scrcpy server 进程及完整 cmdline（从中可提取 scid，
+ * 用于判断反向隧道是否被某条遗留进程占用）。失败时返回空数组。
+ */
+export async function getScrcpyProcessInfo(adb: Adb): Promise<ScrcpyProcessInfo[]> {
+  try {
+    const pidsOut = await runAdbCommand(adb, 'pidof scrcpy 2>/dev/null');
+    const pids = pidsOut
+      .split(/\s+/)
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => !isNaN(n));
+    const infos: ScrcpyProcessInfo[] = [];
+    for (const pid of pids) {
+      try {
+        const cmdline = await runAdbCommand(
+          adb,
+          `cat /proc/${pid}/cmdline 2>/dev/null | tr '\\000' ' '`,
+        );
+        infos.push({ pid, cmdline: cmdline.trim() });
+      } catch {
+        infos.push({ pid, cmdline: '' });
+      }
+    }
+    return infos;
+  } catch {
+    return [];
+  }
+}
+
+/** 返回设备上当前所有 scrcpy 反向隧道（localabstract:scrcpy_<scid>）。失败时返回空数组。 */
+export async function getScrcpyReverseTunnels(adb: Adb): Promise<string[]> {
+  try {
+    const list = await adb.reverse.list();
+    return list
+      .filter((l) => l.localName.includes('scrcpy'))
+      .map((l) => `${l.localName}->${l.remoteName}`);
+  } catch {
+    return [];
+  }
+}
+
+export interface DeviceSnapshot {
+  virtualDisplays: ScrcpyDisplayInfo[];
+  scrcpyProcesses: ScrcpyProcessInfo[];
+  reverseTunnels: string[];
+}
+
+/**
+ * 采集「设备侧快照」：虚拟屏清单 + scrcpy 进程（含 scid）+ 反向隧道。
+ * 任一子项失败都不影响其余采集（各自 catch）。
+ * 用于 AdbScrcpyExitedError 时定位更深一层原因。
+ */
+export async function captureDeviceSnapshot(adb: Adb): Promise<DeviceSnapshot> {
+  const [virtualDisplays, scrcpyProcesses, reverseTunnels] = await Promise.all([
+    getScrcpyVirtualDisplays(adb).catch(() => [] as ScrcpyDisplayInfo[]),
+    getScrcpyProcessInfo(adb).catch(() => [] as ScrcpyProcessInfo[]),
+    getScrcpyReverseTunnels(adb).catch(() => [] as string[]),
+  ]);
+  return { virtualDisplays, scrcpyProcesses, reverseTunnels };
+}
+
+/**
  * 按 PID 精确 kill scrcpy server 进程。
  *
  * 用于多实例并发场景下替代 killScrcpyServer 的全杀模式，

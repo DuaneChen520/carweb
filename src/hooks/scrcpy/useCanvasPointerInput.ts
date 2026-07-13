@@ -33,6 +33,9 @@ export function useCanvasPointerInput(session: ScrcpySession | null) {
       const rect = canvas.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) return;
 
+      // 音频由专用音频采集连接统一承载（ADR-0015），pane session 自身不持有音频；
+      // AudioContext 的唤醒由 DesktopScreen 的全局手势监听统一处理，此处无需调用。
+
       // 客户端坐标 → canvas 相对比例 → 视频帧像素坐标
       const relativeX = (e.clientX - rect.left) / rect.width;
       const relativeY = (e.clientY - rect.top) / rect.height;

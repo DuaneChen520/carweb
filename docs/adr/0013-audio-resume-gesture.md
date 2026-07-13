@@ -1,57 +1,60 @@
 # ADR-0013: 分屏桌面浏览器端音频恢复（AudioContext 手势唤醒）
 
-- 状态：已采纳（2026-07-14，经 `/grill-with-docs` 确认）
-- 相关：无（独立音频修复，不涉及其它 ADR）
+- 状态：**已废弃（结论被 ADR-0015 推翻并取代）**；其中「D1 全局手势监听 / D1-bis」作为**唤醒机制**仍保留（现服务于 ADR-0015 的专用音频连接），但「根因 = 缺手势唤醒」的定性已不成立。
+- 相关：ADR-0001（虚拟屏方向锁）、ADR-0004（scrcpy 4.0 flex display 迁移）、**ADR-0015（无声真因与修复，取代本 ADR）**
+
+---
+
+> ⚠️ **本 ADR 已被 ADR-0015 取代。** 本 ADR 把无声根因归为「分屏桌面缺手势唤醒 `AudioContext`」，但源码坐实真因为**设备级单一音频捕获（`REMOTE_SUBMIX`）被多个 `audio:true` 的 pane 争抢**——多数 pane 拿不到音频流 → 无 AudioContext → `resumeAudio` 永久 no-op。手势路径本身正确（用户日志已证 `resumeAudio` 被调用），治的是不存在的症状。修复方案见 ADR-0015（专用音频采集连接）。本 ADR 的 D1/D1-bis 唤醒机制仍保留，现服务于 ADR-0015 的专用连接。
+
+
 
 ## 背景（Context）
 
-用户报告：在分屏桌面（`DesktopScreen`）下，浏览器端无法播放手机声音，而此前单屏镜像模式（`VirtualScreen`）正常。
+用户报告：分屏桌面（`DesktopScreen`）下浏览器端无法播放手机声音。
 
-音频链路：`scrcpy 音频流 → 原始字节 → Web Worker 内 WebCodecs AudioDecoder 解码 → AudioWorklet → AudioContext.destination`。
+**关键事实（用户第二轮纠正，2026-07-14）：**
+- 用户**基本没用过镜像模式**；即便单屏也是用虚拟屏（`--new-display`）开应用。
+- **虚拟屏（flex display）音频在其设备上是正常的**——4.0 升级后那次音频问题已修复，之后测过 flex display 音频正常。
+- 即：设备 + scrcpy server **能产出虚拟屏音频流**；`client.audioStream` 在虚拟屏下返回成功流。
 
-`AudioContext` 在 `ScrcpySession.setupAudioStream`（`scrcpy-session.ts:579`）创建时即处于 **suspended** 状态——浏览器自动播放策略要求媒体音频必须由用户手势激活。代码刻意不在 setup 中调用 `resume()`（注释见 `useAudioDecoder.ts:166-168`），改由用户手势触发 `resumeAudio()`。
+**推论（推翻旧假设）：** 上一版 ADR 的「D2：虚拟屏下设备未产出音频流（上游根因）」**不成立**。无声根因在分屏桌面这条 UI 路径的**手势唤醒**环节。
 
-核查调用点：
-- `VirtualScreen.tsx:260` 的 `handlePointerEvent` 在 `pointerdown` 调 `resumeAudio()` → 单屏镜像模式可出声。
-- 分屏桌面的触控全部经 `useCanvasPointerInput`（`SplitPane.tsx:76` / `FullscreenOverlay.tsx:162`），该 hook **只调 `session.injectTouch()`，从不调 `resumeAudio()`**。
-- `git log -S "resumeAudio" -- src/hooks/scrcpy/useCanvasPointerInput.ts` 为空 → 该路径历史上从未唤醒音频。
-- `AppTransitionPlaceholder` 为 `pointer-events-none`，排除其拦截触控的可能；未提交的 ADR-0011 改动与音频无关。
+git 历史核对（`src/lib/scrcpy-session.ts` `setupAudioStream` 自 `a449da6` 类化以来结构未变，浏览器侧链路完整正确）：
+- 单屏 `VirtualScreen.tsx:260` 在 `handlePointerEvent`（画布 `onPointerDown`）里**直连** `resumeAudio()` → 单屏有声。
+- 分屏桌面触控全部经 `useCanvasPointerInput`，该 hook 只调 `session.injectTouch()`、**从不调 `resumeAudio()`**。
+- 第一版修复在 `DesktopScreen` 挂 `document` 全局 `pointerdown`/`keydown` 监听 → 用户实测**仍无声**，说明全局监听不足以覆盖（可能未触发/时序问题）。
 
-结论：分屏桌面每个 `ScrcpySession` 的 `AudioContext` 永久停留 `suspended`，浏览器端无声。
+---
 
 ## 决策（Decision）
 
-在 `DesktopScreen.tsx` 顶层挂一个**持久化**的全局手势监听，任意用户交互即唤醒 **SessionManager 中所有活跃 session** 的 `AudioContext`：
+### D1（已落地，必要但不充分）：全局手势监听
+`DesktopScreen.tsx` 顶层挂全局监听，唤醒 `SessionManager` 所有 session 的 `resumeAudio()`。
+- 初版为冒泡期；第三轮改为**捕获阶段**（`addEventListener(..., true)`），确保即使子元素 `stopPropagation` 也能唤醒，并兜底「未触控的 pane」。
+- 用户实测仍无声 → 该路径在实践中不可靠，**不能作为唯一手段**。
 
-```tsx
-useEffect(() => {
-  const resumeAllAudio = () => {
-    const { sessions } = useSessionManager.getState();
-    for (const entry of Object.values(sessions)) {
-      entry.session.resumeAudio();
-    }
-  };
-  document.addEventListener('pointerdown', resumeAllAudio);
-  document.addEventListener('keydown', resumeAllAudio);
-  return () => {
-    document.removeEventListener('pointerdown', resumeAllAudio);
-    document.removeEventListener('keydown', resumeAllAudio);
-  };
-}, []);
-```
+### D1-bis（第三轮，主要修复）：触控 handler 直连 resumeAudio
+在 `useCanvasPointerInput`（分屏/全屏画布的确定会触发的 pointer handler）的 `pointerdown` 分支**直接调 `session.resumeAudio()`**，与单屏 `VirtualScreen.tsx:260` 1:1 对齐。
+- 理由：该 handler 由 `SplitPane`/`FullscreenOverlay` 挂在画布容器 div，触控注入可用即证明其必然触发；而全局 `document` 监听在分屏桌面实测未生效。被触控的 session 即时出声，最可靠。
+- 全局捕获监听保留，兜底尚未触控的 pane（如左 pane 后台播视频、用户只在右 pane 操作）。
 
-- `ScrcpySession.resumeAudio()`（`scrcpy-session.ts:934`）仅在 `audioCtx.state === 'suspended'` 时调用 `resume()`，幂等、无副作用；`audioCtx` 未建（音频流不可用）时为 no-op。
-- 监听**持久化**（不一次性移除），使**稍后启动**的 pane（用户尚未触控）也能在下次任意交互时被唤醒；遍历对象在 handler 内实时读取，天然覆盖动态增删的 session。
-- 范围限定 `DesktopScreen`：单屏镜像模式 `VirtualScreen` 已有自己的 `resumeAudio()` 调用，无需改动。
+### D3（第三轮，诊断）：最小日志
+- `resumeAudio()`：唤醒时打 `唤醒 suspended AudioContext`；无 `audioCtx` 时打 `无 AudioContext（音频流可能未建立）`。
+- `setupAudioStream` 成功建流后打 `音频流已建立并开始播放（AudioContext state=…, codec=…）`。
+- 用途：若仍无声，用户开 DevTools Console 即可区分「流未建立 / 流已建但未唤醒 / 已唤醒仍无声」三态，避免再猜。
+
+---
 
 ## 后果与权衡（Consequences）
 
-- ✅ 分屏桌面浏览器端恢复出声；多 pane 并发（最多 3 路）与后续启动的 pane 均被覆盖。
-- ✅ 监听持久化但开销极低（仅在 `suspended` 时调用 `resume()`），不影响交互性能。
-- ✅ 静音（`isMuted`）/ 路由切到手机（`audioRoute==='phone'`）仍由 worklet 层拦截，行为不变。
-- ⚠️ 依赖浏览器自动播放策略：当前 Chrome/Edge/Safari/Firefox 均认可 `pointerdown` 为有效用户激活；若未来某浏览器仅认 `click`，可追加 `click` 监听。
+- ✅ D1-bis 与单屏工作路径完全一致，是最高置信度修复。
+- ✅ 全局捕获监听 + 每触控唤醒双保险，覆盖多 pane 并发与后续启动 pane。
+- ✅ `resumeAudio()` 仅在 `suspended` 时 `resume()`，幂等；`audioCtx` 未建时为 no-op（不会报错）。
+- ⚠️ 仍需真机复核：分屏桌面进 app、点击/触控后是否出声；并看 Console 是否出现 `音频流已建立并开始播放`（确认流正常）+ `唤醒 suspended AudioContext`（确认唤醒链路通）。
+- ❌ 旧 D2（上游流禁用）已否决：用户确认虚拟屏音频正常。
 
 ## 验证
 
-- `tsc --noEmit` 0 错误；`vitest run` 全绿；`vite build` 成功。
-- 真机实测（沙箱无设备，无法自动化）：进入分屏桌面 → 启动任意发声 app → 首次点击/按键后浏览器应出声；切换 pane、后续启动新 app 后再次交互亦出声。
+- `tsc --noEmit` 0 错误。
+- 真机：分屏桌面启动发声 app → 触控/点击后浏览器应出声；Console 应见 `音频流已建立并开始播放` 与 `唤醒 suspended AudioContext`。若仍无声，按 Console 三态日志定位。

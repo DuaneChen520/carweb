@@ -14,7 +14,16 @@ vi.mock('@/lib/adb-commands', async (importOriginal) => {
 });
 
 // 共享的 start spy：用于断言「是否在死连接上调用了 session.start」。
-const startSpy = vi.fn(async () => {});
+// 显式签名匹配 ScrcpySession.start，便于在断言里读取第 5 个参数（StartOptions）。
+const startSpy = vi.fn(
+  async (
+    _adb?: unknown,
+    _displayConfig?: unknown,
+    _attachDisplayId?: unknown,
+    _externalCanvas?: unknown,
+    _opts?: { audioOnly?: boolean; audio?: boolean },
+  ) => {},
+);
 
 function createMockSession(id: string): ScrcpySession {
   const state: SessionState = {
@@ -86,11 +95,19 @@ describe('SessionManager 启动门禁（2026-07-09 诊断）', () => {
     expect(startSpy).not.toHaveBeenCalled();
   });
 
-  it('connectionStatus=connected 时，launchOnPane 正常调用 session.start', async () => {
+  it('connectionStatus=connected 时，launchOnPane 正常调用 session.start，并额外拉起专用音频采集连接（ADR-0015）', async () => {
     useAdbStore.setState({ connectionStatus: 'connected' });
     const id = await useSessionManager.getState().launchOnPane('com.test.a', 'left', { width: 800, height: 600 });
     expect(id).not.toBeNull();
-    expect(startSpy).toHaveBeenCalledTimes(1);
+    // pane 自身 start（audio:false）+ 专用音频采集连接 start（audioOnly:true）= 2 次。
+    // 这是 ADR-0015 修复生效的直接证据：音频不再由 pane 各自抢占，而是由全设备唯一
+    // 的专用连接统一捕获（REMOTE_SUBMIX 在设备级是单一的）。
+    expect(startSpy).toHaveBeenCalledTimes(2);
+    // 其中一次必须为专用音频采集连接：audioOnly 模式（video:false + audio:true）。
+    const audioOnlyCall = startSpy.mock.calls.find(
+      (args) => (args[4] as { audioOnly?: boolean } | undefined)?.audioOnly === true
+    );
+    expect(audioOnlyCall).toBeDefined();
   });
 
   it('connectionStatus=connected 时，resumeBackground(_restartSession) 也正常调用 session.start', async () => {

@@ -1,5 +1,28 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ScrcpySession } from '@/lib/scrcpy-session';
+import { ScrcpySession, generateScid } from '@/lib/scrcpy-session';
+
+describe('generateScid（ADR-0014 H6 回归）', () => {
+  it('始终是合法十六进制串（设备端按 base-16 解析，含 g–z 会抛 NumberFormatException）', () => {
+    for (let i = 0; i < 2000; i += 1) {
+      const scid = generateScid();
+      expect(scid).toMatch(/^[0-9a-f]+$/); // 纯 0–9a–f，无任何非法字符
+      expect(parseInt(scid, 16)).not.toBeNaN();
+    }
+  });
+
+  it('十六进制数值始终 ≤ 0x7FFFFFFF（设备端 int31 上限，否则溢出崩溃）', () => {
+    for (let i = 0; i < 2000; i += 1) {
+      const n = parseInt(generateScid(), 16);
+      expect(n).toBeGreaterThanOrEqual(0);
+      expect(n).toBeLessThanOrEqual(0x7fffffff);
+    }
+  });
+
+  it('多次生成具有足够随机性（非恒定值）', () => {
+    const set = new Set(Array.from({ length: 200 }, () => generateScid()));
+    expect(set.size).toBeGreaterThan(150);
+  });
+});
 
 describe('ScrcpySession', () => {
   function createSession(id: string) {

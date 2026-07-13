@@ -1,8 +1,9 @@
 // src/lib/scrcpy4/options.ts
 import { AdbScrcpyOptions3_3_3, type AdbScrcpyClientOptions } from '@yume-chan/adb-scrcpy';
 import type { ScrcpyControlMessageType, ScrcpyMediaStreamPacket, ScrcpyVideoStream } from '@yume-chan/scrcpy';
-import { ScrcpyVideoCodecId } from '@yume-chan/scrcpy';
-import { BufferedReadableStream, TransformStream } from '@yume-chan/stream-extra';
+import { ScrcpyAudioCodec, ScrcpyAudioStreamMetadata, ScrcpyVideoCodecId } from '@yume-chan/scrcpy';
+import { getUint32BigEndian } from '@yume-chan/no-data-view';
+import { BufferedReadableStream, PushReadableStream, TransformStream } from '@yume-chan/stream-extra';
 import { decodeUtf8 } from '@yume-chan/struct';
 import { createScrcpy4Demuxer } from './video/demuxer';
 
@@ -13,6 +14,21 @@ import { createScrcpy4Demuxer } from './video/demuxer';
  * RESIZE_DISPLAY 为 21（经 scrcpy v4.0 源码 ControlMessage.java 确认）。
  */
 export const RESIZE_DISPLAY_TYPE = 21 as ScrcpyControlMessageType;
+
+/**
+ * 音频编解码器回退值（车机定制 scrcpy server 兼容）。
+ *
+ * 标准 scrcpy（含官方 4.0，见 scrcpy AudioCodec.java）只上报 OPUS/AAC/FLAC/RAW 四种，
+ * 元数据值分别为 0x6f707573 / 0x00616163 / 0x666c6163 / 0x00726177。
+ * 本项目车机定制 server（public/scrcpy-server.jar）却上报 0x32333034（四者皆非），
+ * @yume-chan/scrcpy 2.3.0 的 parseAudioStreamMetadata 不认识 → 抛
+ * "Unknown audio codec metadata value"，导致专用音频采集连接（ADR-0015）启动失败。
+ *
+ * parseAudioStreamMetadata 已重写：未知标签回退到本值，正常消费 4 字节元数据、不抛错。
+ * 默认 opus（scrcpy 默认编码）。若设备实际用 AAC，把本常量改为 "aac" 即可
+ * （会同时作为 --audio-codec 请求发给 server）。
+ */
+export const AUDIO_CODEC_FALLBACK: "opus" | "aac" | "flac" | "raw" = "opus";
 
 /**
  * scrcpy 4.0 ADB 选项。
@@ -112,6 +128,100 @@ export class AdbScrcpyOptions4_0<TVideo extends boolean> extends AdbScrcpyOption
     } as unknown as ScrcpyVideoStream;
   }
 
+  /**
+   * 覆盖 parseAudioStreamMetadata：
+   *
+   * 标准 4 种 codec（OPUS/AAC/FLAC/RAW）走原逻辑；未知标签（车机定制 server
+   * 上报的 0x32333034 等）容错回退到 AUDIO_CODEC_FALLBACK，正常消费 4 字节
+   * 元数据、不抛错，使专用音频采集连接（ADR-0015）得以启动。
+   *
+   * 依据：scrcpy 官方 4.0 AudioCodec.java 仅定义上述 4 种，而本项目定制
+   * scrcpy-server.jar 上报私有标签，@yume-chan/scrcpy 2.3.0 不认识即抛错。
+   */
+  override async parseAudioStreamMetadata(
+    stream: ReadableStream<Uint8Array>,
+  ): Promise<ScrcpyAudioStreamMetadata> {
+    const buffered = new BufferedReadableStream(
+      stream as unknown as import('@yume-chan/stream-extra').ReadableStream<Uint8Array>,
+    );
+    const buffer = await buffered.readExactly(4);
+
+    // [DEBUG-a3f2] 诊断：dump 音频流前 32 字节，定位定制 server 实际发送的格式
+    let debugExtra: Uint8Array | null = null;
+    try {
+      debugExtra = await buffered.readExactly(28);
+    } catch { /* 流数据不足 28 字节，正常——仅 dump 已有部分 */ }
+    const debugAll = debugExtra
+      ? new Uint8Array([...buffer, ...debugExtra])
+      : buffer;
+    const hexStr = Array.from(debugAll).map(b => b.toString(16).padStart(2, '0')).join(' ');
+    const asciiStr = Array.from(debugAll).map(b => b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : '.').join('');
+    console.log(`[DEBUG-a3f2] 音频流前 ${debugAll.length} 字节 | hex: ${hexStr} | ascii: "${asciiStr}"`);
+
+    // 辅助：将 debugExtra 回推到 released stream 前，避免丢失数据
+    const releaseWithExtra = (): any => {
+      const remaining = buffered.release();
+      if (!debugExtra || debugExtra.byteLength === 0) return remaining;
+      return new PushReadableStream<Uint8Array>(async (controller) => {
+        await controller.enqueue(debugExtra!);
+        const reader = remaining.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          await controller.enqueue(value);
+        }
+      }) as unknown as typeof remaining;
+    };
+
+    const codecMetadataValue = getUint32BigEndian(buffer, 0);
+
+    // 0x00000000 / 0x00000001 仍为 disabled / errored（标准语义，原样透传）
+    if (codecMetadataValue === 0x00_00_00_00) return { type: "disabled" };
+    if (codecMetadataValue === 0x00_00_00_01) return { type: "errored" };
+
+    const value = this.value as Required<AdbScrcpyOptions4_0.Init<TVideo>>;
+    const fallback = audioCodecFromOption(value.audioCodec ?? AUDIO_CODEC_FALLBACK);
+    const sendCodecMeta = value.sendCodecMeta ?? true;
+
+    if (sendCodecMeta) {
+      // 先匹配标准编解码器（覆盖绝大多数标准 server）
+      switch (codecMetadataValue) {
+        case ScrcpyAudioCodec.Raw.metadataValue:
+          return { type: "success", codec: ScrcpyAudioCodec.Raw, stream: releaseWithExtra() };
+        case ScrcpyAudioCodec.Opus.metadataValue:
+          return { type: "success", codec: ScrcpyAudioCodec.Opus, stream: releaseWithExtra() };
+        case ScrcpyAudioCodec.Aac.metadataValue:
+          return { type: "success", codec: ScrcpyAudioCodec.Aac, stream: releaseWithExtra() };
+        case ScrcpyAudioCodec.Flac.metadataValue:
+          return { type: "success", codec: ScrcpyAudioCodec.Flac, stream: releaseWithExtra() };
+        default:
+          // 定制 server 私有标签：回退到协商 codec，4 字节元数据照常消费，不抛错。
+          console.warn(
+            `[AdbScrcpyOptions4_0] 未知音频编解码器标签 0x${codecMetadataValue
+              .toString(16)}, 回退到协商 audioCodec=${fallback.optionValue}（设备定制 scrcpy server）`,
+          );
+          return { type: "success", codec: fallback, stream: releaseWithExtra() };
+      }
+    }
+
+    // sendCodecMeta=false：4 字节是真实音频数据，回推到流，按协商 codec 推断。
+    return {
+      type: "success",
+      codec: fallback,
+      stream: new PushReadableStream<Uint8Array>(async (controller) => {
+        await controller.enqueue(buffer);
+        if (debugExtra) await controller.enqueue(debugExtra);
+        const s = buffered.release();
+        const reader = s.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          await controller.enqueue(value);
+        }
+      }),
+    };
+  }
+
   override createMediaStreamTransformer(): TransformStream<Uint8Array, ScrcpyMediaStreamPacket> {
     // 4.0 的 parseVideoStreamMetadata 已将原始字节解析为包对象（Scrcpy4MediaPacket），
     // 此处用显式恒等透传，避免原生 new TransformStream() 的可能问题，
@@ -123,6 +233,21 @@ export class AdbScrcpyOptions4_0<TVideo extends boolean> extends AdbScrcpyOption
         controller.enqueue(chunk as unknown as ScrcpyMediaStreamPacket);
       },
     }) as unknown as TransformStream<Uint8Array, ScrcpyMediaStreamPacket>;
+  }
+}
+
+/** 把协商的 audioCodec 选项字符串映射为 ScrcpyAudioCodec（默认 opus）。 */
+function audioCodecFromOption(c: string): ScrcpyAudioCodec {
+  switch (c) {
+    case "raw":
+      return ScrcpyAudioCodec.Raw;
+    case "aac":
+      return ScrcpyAudioCodec.Aac;
+    case "flac":
+      return ScrcpyAudioCodec.Flac;
+    case "opus":
+    default:
+      return ScrcpyAudioCodec.Opus;
   }
 }
 

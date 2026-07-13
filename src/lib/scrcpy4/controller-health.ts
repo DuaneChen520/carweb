@@ -48,7 +48,7 @@ export class ControllerHealth {
   markHealthy(): void {
     this._state = 'HEALTHY';
     this.retryCount = 0;
-    console.log(`[CtrlHealth] HEALTHY`);
+    // console.log(`[CtrlHealth] HEALTHY`); // 诊断时取消注释
     this.emit('HEALTHY');
   }
 
@@ -104,7 +104,7 @@ export class ControllerHealth {
   reset(): void {
     this._state = 'IDLE';
     this.retryCount = 0;
-    console.log(`[CtrlHealth] reset → IDLE`);
+    // console.log(`[CtrlHealth] reset → IDLE`); // 诊断时取消注释
   }
 
   isDead(): boolean {

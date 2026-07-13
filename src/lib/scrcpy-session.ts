@@ -17,7 +17,7 @@ import type { AdbScrcpyClient } from '@yume-chan/adb-scrcpy';
 import { AdbScrcpyExitedError } from '@yume-chan/adb-scrcpy';
 import type { ScrcpyControlMessageWriter } from '@yume-chan/scrcpy';
 import { ScrcpyNewDisplay, ScrcpyCaptureOrientation, ScrcpyLockOrientation, ScrcpyOrientation, AndroidKeyCode, AndroidKeyEventAction } from '@yume-chan/scrcpy';
-import { AdbScrcpyOptions4_0, FlexDisplayClient, serializeResizeDisplay, RESIZE_DISPLAY_TYPE, ControllerHealth } from '@/lib/scrcpy4';
+import { AdbScrcpyOptions4_0, FlexDisplayClient, serializeResizeDisplay, RESIZE_DISPLAY_TYPE, ControllerHealth, AUDIO_CODEC_FALLBACK } from '@/lib/scrcpy4';
 import type { AdbScrcpyOptions4_0 as AdbScrcpyOptions4_0Type, Scrcpy4MediaPacket } from '@/lib/scrcpy4';
 import type { ControllerHealthState } from '@/lib/scrcpy4';
 import type { Adb } from '@yume-chan/adb';
@@ -32,14 +32,116 @@ import {
   killScrcpyServer,
   killScrcpyByPid,
   getScrcpyServerPids,
+  captureDeviceSnapshot,
 } from '@/lib/adb-commands';
 import type { RotationState } from '@/lib/adb-commands';
+
+/** 启动韧性用的简单延时（ADR-0014 D2）。 */
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * ADR-0014 深化诊断：在 AdbScrcpyExitedError 时结构化打印设备侧快照，
+ * 用于定位「更深一层原因」——
+ *   - 虚拟屏累积超设备上限 / 并发 pane 数超限（虚拟屏数 ≥ 进程数且无对应进程）
+ *   - 反向隧道被遗留进程占用（tunnel 列表含非本会话 scid）
+ *   - 真 ROM/选项不兼容（server.stderr 非空且含 [server] ERROR）
+ * 该辅助函数自身全程 try/catch，绝不向外抛错，避免干扰既有失败处理。
+ */
+async function diagnoseFailure(
+  adb: Adb | null,
+  ctx: {
+    id: string;
+    scid?: string;
+    attempt: number;
+    totalAttempts: number;
+    displayConfig: DisplayConfig | null;
+  },
+  error: AdbScrcpyExitedError,
+): Promise<void> {
+  const serverOutput =
+    error.output && error.output.length > 0 ? error.output.join('\n') : '(empty)';
+
+  // 结构化诊断负载：合并「server stderr + 设备侧快照 + 自动判读」，
+  // 以单条 console.error 输出（红色高亮、一整块、可直接复制回贴），避免被其它日志冲散。
+  const payload: Record<string, unknown> = {
+    sessionId: ctx.id,
+    attempt: `${ctx.attempt}/${ctx.totalAttempts}`,
+    scid: ctx.scid ?? '-',
+    display: ctx.displayConfig ? `${ctx.displayConfig.width}x${ctx.displayConfig.height}` : 'physical',
+    serverStderr: serverOutput,
+    virtualDisplays: [] as Array<Record<string, unknown>>,
+    scrcpyProcesses: [] as Array<Record<string, unknown>>,
+    reverseTunnels: [] as string[],
+    suspect: '需对照 ADR-0014 的 H1a–H5 判据表解读',
+  };
+
+  if (adb) {
+    try {
+      const snap = await captureDeviceSnapshot(adb);
+      payload.virtualDisplays = snap.virtualDisplays.map((d) => ({
+        id: d.id,
+        ownContent: d.ownContent,
+        touch: d.touchVirtual,
+        private: d.isPrivate,
+        uniqueId: d.uniqueId,
+      }));
+      payload.scrcpyProcesses = snap.scrcpyProcesses.map((p) => {
+        const m = p.cmdline.match(/scid=([0-9a-f]{1,8})/i);
+        return { pid: p.pid, scid: m ? m[1] : null };
+      });
+      payload.reverseTunnels = snap.reverseTunnels;
+
+      // 自动判读：按优先级给出最可能假设，缩短定位路径
+      if (snap.virtualDisplays.length > 0 && snap.virtualDisplays.length >= snap.scrcpyProcesses.length) {
+        payload.suspect =
+          `H1a 嫌疑：虚拟屏数(${snap.virtualDisplays.length})≥进程数(${snap.scrcpyProcesses.length})，` +
+          `孤儿/累积虚拟屏撞设备上限（多刷新/多 pane 后更易触发）`;
+      } else if (
+        ctx.scid &&
+        snap.reverseTunnels.find(
+          (t) => t.includes(`scrcpy_${ctx.scid.padStart(8, '0')}`) &&
+            !snap.scrcpyProcesses.some((p) => p.cmdline.includes(`scid=${ctx.scid}`)),
+        )
+      ) {
+        payload.suspect = `H3 嫌疑：反向隧道 scrcpy_${ctx.scid.padStart(8, '0')} 存在但无进程持有 → 隧道泄漏`;
+      } else if (serverOutput !== '(empty)') {
+        payload.suspect = 'H4 嫌疑：server.stderr 非空，疑似 ROM/选项不兼容（见 stderr）';
+      } else if (snap.virtualDisplays.length === snap.scrcpyProcesses.length) {
+        payload.suspect = 'H5 嫌疑：虚拟屏数=进程数、stderr 空、重试仍败 → 回收瞬态窗口 > 1s';
+      }
+    } catch (e) {
+      payload.snapshotError = String(e);
+    }
+  }
+
+  console.error(`[诊断][${ctx.id}] AdbScrcpyExitedError 设备快照 ↓`, payload);
+}
 
 export interface DisplayConfig {
   width: number;
   height: number;
   dpi?: number;
   bitRate?: number;
+}
+
+/**
+ * ScrcpySession.start 的可选开关（ADR-0015）。
+ * - audioOnly：仅音频采集连接。video:false / control:false，只捕获设备整机音频
+ *   （REMOTE_SUBMIX），不创建虚拟屏、不渲染画面。用于分屏桌面的「专用音频拥有者」。
+ * - audio：是否向设备请求音频流。分屏桌面的 pane 设为 false（音频由专用采集连接统一承担），
+ *   镜像/默认 true。
+ */
+export interface StartOptions {
+  /** 仅音频采集连接（ADR-0015）：true 时 video/control 关闭，只抓整机音频 */
+  audioOnly?: boolean;
+  /** 是否向设备请求音频流 */
+  audio?: boolean;
+  /**
+   * 覆盖发给设备 server 的 --audio-codec 请求（ADR-0016 自愈）。
+   * 默认沿用全局 AUDIO_CODEC_FALLBACK；专用音频采集连接在 opus 解码失败时
+   * 由 SessionManager 改用 "aac" 重试，走本覆盖通道，不改全局默认值。
+   */
+  audioCodecOverride?: typeof AUDIO_CODEC_FALLBACK;
 }
 
 export interface SessionState {
@@ -58,6 +160,8 @@ export interface ScrcpySessionCallbacks {
   onHealthChange?: (state: ControllerHealthState) => void;
   /** flex-client 就绪/销毁时回调（供上层透传到渲染层）。 */
   onFlexClient?: (flexClient: FlexDisplayClient | null) => void;
+  /** 音频解码失败（codec 不匹配或流损坏）时回调；专用音频连接据此触发 opus→aac 自愈（ADR-0016）。 */
+  onAudioDecodeError?: (sessionId: string) => void;
 }
 
 // 音频流原始包解析常量（与 useAudioDecoder 一致）
@@ -87,29 +191,41 @@ function withLaunchMutex<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /**
- * 为每个 scrcpy 会话生成唯一 scid（8 位十六进制）。
+ * 为每个 scrcpy 会话生成唯一 scid（十六进制字符串，数值 ≤ 0x7FFFFFFF）。
  *
- * scrcpy server 在设备端绑定 `localabstract:scrcpy_<scid>` 作为反向隧道端点。
+ * 设备端 scrcpy server 在解析启动参数时用 `Integer.parseInt(value, 0x10)`
+ * （十六进制）把 scid 读入一个 32 位有符号 int 字段，合法范围为 −1 … 0x7FFFFFFF
+ * （= 2³¹−1）。若 scid 作为十六进制解析后数值 > 0x7FFFFFFF，会立即抛出
+ * `NumberFormatException: For input string: "..."` → server 在启动期即退出 →
+ * 浏览器侧 `AdbScrcpyExitedError: scrcpy server exited prematurely`。
+ *
+ * 这正是此前「高频但非 100% 报错」的真实根因：scid 始终是十六进制被解析，
+ * 崩溃与否只取决于「十六进制数值是否溢出 int31」——
+ *   - 旧实现产出 8 位十六进制（0x00000000–0xFFFFFFFF），最高位 nibble ≥ 8
+ *     （约 50%）即 > 0x7FFFFFFF → 溢出崩溃；
+ *   - 曾误改为十进制（如 95753917），设备仍按十六进制读 → 0x95753917 ≈ 25 亿
+ *     > 21 亿 → 同样溢出崩溃。
+ *
+ * 因此 scid 必须同时满足：① 是合法十六进制串（纯 0–9a–f）；② 其十六进制数值
+ * ≤ 0x7FFFFFFF。本函数生成 31 位非负随机值（清掉最高位，`>>> 1`），再 `toString(16)`，
+ * 既保证 ① 又保证 ②，彻底消除溢出崩溃。每会话独立 scid 仍走各自的
+ * `localabstract:scrcpy_<scid>` 隧道（见下）。
+ *
+ * 隧道名两端对齐：@yume-chan 连接层 `getSocketName` 用 `scid.padStart(8,'0')` 构造
+ * `localabstract:scrcpy_<8位>`，设备端以 `%08x` 零填充还原同一名字，故两端隧道严格一致。
  * 不给 scid 时所有会话共用 `localabstract:scrcpy`，并发启动时后启动的会话会
- * `reverse.remove` 拆掉先启动会话已建立的隧道（AdbScrcpyExitedError），因此
- * 历史上只能靠 `killScrcpyServer(pkill)` 先杀光其它会话，常驻分屏被误杀。
- *
- * 给每个会话独立的 scid，各会话走各自的 `localabstract:scrcpy_<scid>`，
- * 互不抢占隧道，从而支持「左+右+全屏」真正并发（设计 §2.3 并发上限 3），
- * 也使 launchFullscreen 不再需要 pkill 常驻分屏（T4）。
- *
- * scid 必须 ≤ 8 字符（@yume-chan 连接层 `getSocketName` 用 `padStart(8,'0')`）。
+ * `reverse.remove` 拆掉先启动会话已建立的隧道，故需每会话独立 scid 隔离（T4）。
  */
-function generateScid(): string {
-  const buf = new Uint8Array(4);
+export function generateScid(): string {
+  const buf = new Uint32Array(1);
   if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
     crypto.getRandomValues(buf);
   } else {
-    for (let i = 0; i < buf.length; i += 1) {
-      buf[i] = Math.floor(Math.random() * 256);
-    }
+    buf[0] = Math.floor(Math.random() * 0x80000000);
   }
-  return Array.from(buf, (b) => b.toString(16).padStart(2, '0')).join('').slice(0, 8);
+  // 清掉最高位（>>>1）→ 31 位非负值，保证十六进制解析不溢出 int31（≤ 0x7FFFFFFF）
+  const n = buf[0] >>> 1;
+  return n.toString(16);
 }
 
 export class ScrcpySession {
@@ -141,7 +257,14 @@ export class ScrcpySession {
   private audioBuf: Uint8Array = new Uint8Array(0);
   private audioRoute: 'browser' | 'phone' = 'browser';
   private audioMuted = false;
+  /** 仅音频采集连接（ADR-0015）：true 时 video/control 关闭，只抓整机音频；供 setupAudioStream 内部判读 */
+  private audioOnly = false;
+  // 启动初期音频流尚未建立、audioCtx 为 null 属正常态；resumeAudio 在每条指针事件上被调用，
+  // 若每次都告警会把控制台淹没、埋掉真正的报错。用此 flag 限制「无 AudioContext」告警每会话仅一次。
+  private audioNoCtxWarned = false;
   private audioDisposed = false;
+  /** 本 session 是否被设计为承载音频。pane 为 false（音频交给专用采集连接），专用连接/镜像为 true。 */
+  private audioEnabled = true;
 
   // ===== 状态 =====
   private state: SessionState = {
@@ -255,10 +378,27 @@ export class ScrcpySession {
    *   而非创建新虚拟屏。用于 T5：后台 app resume 时复用原 displayId，
    *   画面瞬间回前台、无「Launcher 闪→黑→app」重建跳动。
    */
-  async start(adb: Adb, displayConfig?: DisplayConfig, attachDisplayId?: number, externalCanvas?: HTMLCanvasElement): Promise<void> {
-    // 复用或创建 canvas：若调用方传入外部 canvas（如 React 渲染的 <canvas>），优先复用，
-    // 否则自行创建（分屏/全屏路径）。
-    if (!this._canvas) {
+  async start(
+    adb: Adb,
+    displayConfig?: DisplayConfig,
+    attachDisplayId?: number,
+    externalCanvas?: HTMLCanvasElement,
+    opts?: StartOptions,
+  ): Promise<void> {
+    // 音频/视频模式解析（ADR-0015）：
+    // - 分屏桌面的 pane：audio:false（音频由专用采集连接统一承担），video:true
+    // - 专用音频采集连接：audioOnly:true → video:false, control:false，只抓整机声音
+    // - 镜像/默认：audio:true, video:true
+    const audioOnly = opts?.audioOnly ?? false;
+    const audioEnabled = opts?.audio ?? true;
+    const video = !audioOnly;
+    const negotiatedAudioCodec = opts?.audioCodecOverride ?? AUDIO_CODEC_FALLBACK;
+    const control = !audioOnly;
+    this.audioEnabled = audioEnabled;
+    this.audioOnly = audioOnly;
+
+    // 仅视频模式需要 canvas；audioOnly 模式不创建。
+    if (video && !this._canvas) {
       this._canvas = externalCanvas ?? document.createElement('canvas');
       if (!externalCanvas) {
         this._canvas.className = 'scrcpy-canvas';
@@ -276,6 +416,13 @@ export class ScrcpySession {
       return;
     }
     this.startingLock = true;
+
+    // 每会话独立 scid：避免并发会话抢占同一 `localabstract:scrcpy` 隧道（见 generateScid）。
+    // 提到 try 之前声明，使 catch/finally 中的诊断也能引用。
+    const scid = generateScid();
+    // 启动韧性重试参数（ADR-0014 D2），提到 try 之前供诊断引用。
+    const MAX_LAUNCH_RETRIES = 1; // 共 2 次：首试 + 1 次自愈重试
+    const RETRY_SETTLE_MS = 1000;
 
     const startTime = Date.now();
     console.log(`[ScrcpySession:${this.id}] start 开始, displayConfig:`, displayConfig ? `${displayConfig.width}x${displayConfig.height}` : 'mirror');
@@ -300,10 +447,11 @@ export class ScrcpySession {
       // 启动前记录已有 PID，用于启动后对比确定本次 PID
       const attachMode = attachDisplayId != null;
       const useVirtualDisplay = attachMode || !!displayConfig;
-      const pidsBefore = useVirtualDisplay ? await getScrcpyServerPids(adb) : [];
+      // 专用音频采集连接（audioOnly）也是独立的 scrcpy server 进程，需精确记录 PID，
+      // 否则 stop() 会回退到「全设备 killScrcpyServer」误杀同设备其它会话（含分屏 pane）。
+      const trackPid = useVirtualDisplay || audioOnly;
+      const pidsBefore = trackPid ? await getScrcpyServerPids(adb) : [];
 
-      // 每会话独立 scid：避免并发会话抢占同一 `localabstract:scrcpy` 隧道（见 generateScid）。
-      const scid = generateScid();
       let client!: AdbScrcpyClient<AdbScrcpyOptions4_0Type<true>>;
 
       // 串行化「pushServer + start」临界区，避免并发会话在设备端争夺同一
@@ -327,10 +475,12 @@ export class ScrcpySession {
 
         // attach 模式：接管已有虚拟屏（沿用 resumeBackground 的 keepActive 屏），
         // 用 { displayId: attachDisplayId } 直接 attach，不再 newDisplay / 重建。
-        const displayOptions = attachMode
-          ? { displayId: attachDisplayId }
-          : useVirtualDisplay
-            ? {
+        const displayOptions = audioOnly
+          ? { displayId: 0 }
+          : attachMode
+            ? { displayId: attachDisplayId }
+            : useVirtualDisplay
+              ? {
                 newDisplay: new ScrcpyNewDisplay(displayConfig.width, displayConfig.height, displayConfig.dpi ?? 320),
                 // ADR-0011 / ADR-0001：锁定到虚拟屏「初始方向」（LockedInitial，"@"）。
                 //
@@ -358,39 +508,83 @@ export class ScrcpySession {
             : { displayId: 0 };
 
         const options = new AdbScrcpyOptions4_0({
-          video: true,
-          videoCodec: 'h264',
-          videoBitRate: displayConfig?.bitRate ?? 8000000,
-          maxFps: 60,
-          audio: true,
-          control: true,
-          stayAwake: true,
-          showTouches: false,
+          video,
+          ...(video
+            ? {
+                videoCodec: 'h264',
+                videoBitRate: displayConfig?.bitRate ?? 8000000,
+                maxFps: 60,
+              }
+            : {}),
+          audio: audioEnabled,
+          // 音频编解码器：与 AUDIO_CODEC_FALLBACK 单一旋钮联动，
+          // parseAudioStreamMetadata 对未知标签回退到同一值。默认 opus。
+          // negotiatedAudioCodec 允许专用音频连接在解码失败时改用 aac 重试（ADR-0016 自愈）。
+          audioCodec: negotiatedAudioCodec,
+          control,
+          ...(control ? { stayAwake: true, showTouches: false } : {}),
+          // audioOnly 模式下只存在音频 socket，设备名（sendDeviceMeta）会写入音频 socket
+          // 污染 codec 解析。官方 scrcpy 4.0 默认 sendDeviceMeta=true，此处显式关闭。
+          sendDeviceMeta: !audioOnly,
           // 每会话独立隧道端点（见 generateScid）：并发会话互不抢占
           scid,
           ...displayOptions,
         });
 
-        // 超时保护：USB 断开时底层 transport 流被销毁，AdbScrcpyClient.start()
-        // 内部的 ADB 调用可能既不 resolve 也不 reject，导致会话永久卡死（zombie session）。
-        // 用 Promise.race 兜底，超时后主动抛错，交由外层 catch 统一清理。
+        // 启动韧性（ADR-0014 D2）：设备端虚拟屏孤儿回收瞬态可能导致
+        // AdbScrcpyExitedError（scrcpy server exited prematurely）。刷新/重连后，
+        // 上一会话 keepActive 虚拟屏的 owner 进程刚被 kill，屏处于回收瞬态，
+        // 此时 newDisplay 易撞上 → 启动失败。等待屏随 owner 死亡被回收后重试一次即可自愈，
+        // 无需 pkill（避免误杀同设备其它运行中会话）。
         const START_TIMEOUT_MS = 15000;
-        const startWithTimeout = Promise.race([
-          AdbScrcpyClient.start(adb, serverPath, options),
-          new Promise<never>((_, reject) =>
-            setTimeout(
-              () => reject(new Error(`[ScrcpySession:${this.id}] AdbScrcpyClient.start 超时 (${START_TIMEOUT_MS}ms)，可能 USB 已断开)`)),
-              START_TIMEOUT_MS,
-            ),
-          ),
-        ]);
-        client = await startWithTimeout;
+        let launchError: unknown = null;
+        for (let attempt = 0; attempt <= MAX_LAUNCH_RETRIES; attempt++) {
+          try {
+            const startWithTimeout = Promise.race([
+              AdbScrcpyClient.start(adb, serverPath, options),
+              new Promise<never>((_, reject) =>
+                setTimeout(
+                  () =>
+                    reject(
+                      new Error(
+                        `[ScrcpySession:${this.id}] AdbScrcpyClient.start 超时 (${START_TIMEOUT_MS}ms)，可能 USB 已断开)`,
+                      ),
+                    ),
+                  START_TIMEOUT_MS,
+                ),
+              ),
+            ]);
+            client = await startWithTimeout;
+            launchError = null;
+            break;
+          } catch (e) {
+            if (e instanceof AdbScrcpyExitedError && attempt < MAX_LAUNCH_RETRIES) {
+              console.warn(
+                `[ScrcpySession:${this.id}] start 提前退出(${(e as Error).message})，` +
+                  `等待设备回收残留虚拟屏后重试 (${attempt + 1}/${MAX_LAUNCH_RETRIES + 1})`,
+              );
+              // ADR-0014 深化诊断：重试前采集设备侧快照，看首试失败时的真实状态
+              await diagnoseFailure(
+                adb,
+                { id: this.id, scid, attempt: attempt + 1, totalAttempts: MAX_LAUNCH_RETRIES + 1, displayConfig },
+                e,
+              );
+              await sleep(RETRY_SETTLE_MS);
+              launchError = e;
+              continue;
+            }
+            throw e; // 非瞬态错误或重试耗尽 → 交由外层 catch 统一处理
+          }
+        }
+        if (launchError && !client) {
+          throw launchError;
+        }
       });
       this.client = client;
       this.adb = adb;
 
       // 启动后对比 PID，确定本次启动的 server PID
-      if (useVirtualDisplay) {
+      if (trackPid) {
         const pidsAfter = await getScrcpyServerPids(adb);
         const newPids = pidsAfter.filter((p) => !pidsBefore.includes(p));
         this.serverPid = newPids.length === 1 ? newPids[0]! : (pidsAfter[pidsAfter.length - 1] ?? null);
@@ -443,12 +637,14 @@ export class ScrcpySession {
       this.flexClient = flexClient;
       this.callbacks.onFlexClient?.(flexClient);
 
-      // 视频流 setup（内联自 useVideoDecoder）
-      await this.setupVideoStream(client, canvas, (w, h) => {
-        this.updateState({ videoWidth: w, videoHeight: h });
-        this.callbacks.onVideoSize(w, h);
-        flexClient?.onDecoderSizeChanged(w, h);
-      }, flexClient ? (w, h, clientResized) => flexClient.onSessionPacket(w, h, clientResized) : undefined);
+      // 视频流 setup（内联自 useVideoDecoder）；仅视频模式需要
+      if (video) {
+        await this.setupVideoStream(client, canvas, (w, h) => {
+          this.updateState({ videoWidth: w, videoHeight: h });
+          this.callbacks.onVideoSize(w, h);
+          flexClient?.onDecoderSizeChanged(w, h);
+        }, flexClient ? (w, h, clientResized) => flexClient.onSessionPacket(w, h, clientResized) : undefined);
+      }
 
       if (flexClient && displayConfig) {
         flexClient.setInitialDisplaySize(displayConfig.width, displayConfig.height);
@@ -485,6 +681,17 @@ export class ScrcpySession {
       }
       this.updateState({ isStarting: false, error: message });
       console.error(`[ScrcpySession:${this.id}] 启动错误:`, error);
+
+      // D3 深化诊断（ADR-0014）：AdbScrcpyExitedError 时采集设备侧快照，
+      // 定位虚拟屏累积/并发 pane 超限/反向隧道泄漏/真 ROM 不兼容等更深一层原因。
+      // 仅打日志，不影响状态与既有失败处理。
+      if (error instanceof AdbScrcpyExitedError && adb) {
+        await diagnoseFailure(
+          adb,
+          { id: this.id, scid, attempt: MAX_LAUNCH_RETRIES + 1, totalAttempts: MAX_LAUNCH_RETRIES + 1, displayConfig },
+          error,
+        );
+      }
     } finally {
       this.startingLock = false;
     }
@@ -558,13 +765,19 @@ export class ScrcpySession {
   private async setupAudioStream(client: AdbScrcpyClient<AdbScrcpyOptions4_0Type<true>>): Promise<void> {
     const audioMeta = await client.audioStream;
     if (!audioMeta) {
-      console.warn(`[ScrcpySession:${this.id}] 音频流不可用: undefined`);
+      // audio:false（分屏 pane）时 server 不提供音频流，属预期，不告警；
+      // 仅当本 session 设计上应承载音频（audioEnabled）却拿不到流才告警。
+      if (this.audioEnabled) {
+        console.warn(`[ScrcpySession:${this.id}] 音频流不可用: undefined`);
+      }
       this.callbacks.onAudioStateChange?.({ status: 'disabled', route: 'browser', muted: false });
       return;
     }
 
     if (audioMeta.type !== 'success') {
-      console.warn(`[ScrcpySession:${this.id}] 音频流不可用:`, audioMeta.type);
+      if (this.audioEnabled) {
+        console.warn(`[ScrcpySession:${this.id}] 音频流不可用:`, audioMeta.type);
+      }
       this.callbacks.onAudioStateChange?.({
         status: audioMeta.type === 'disabled' ? 'disabled' : 'errored',
         route: 'browser',
@@ -616,10 +829,14 @@ export class ScrcpySession {
                 { type: 'pcm', buffer: msg.buffer, sampleRate: msg.sampleRate, channels: msg.channels },
                 [msg.buffer]
               );
+            } else {
+              console.log(`[DEBUG-a3f2] PCM 收到但未转发: route=${this.audioRoute}, muted=${this.audioMuted}`);
             }
             break;
-          case 'error':
+            case 'error':
             console.warn(`[ScrcpySession:${this.id}] 音频解码错误:`, msg.message);
+            // 上抛给 SessionManager：专用音频连接据此触发 opus→aac 自愈（ADR-0016）
+            this.callbacks.onAudioDecodeError?.(this.id);
             break;
           case 'configured':
             console.log(`[ScrcpySession:${this.id}] 音频解码器配置完成`);
@@ -633,12 +850,19 @@ export class ScrcpySession {
       this.audioBuf = new Uint8Array(0);
 
       const pump = async () => {
+        let debugPktCount = 0;
+        let debugFirstChunk = true;
         try {
           while (!this.audioDisposed) {
             const { done, value } = await reader.read();
             if (done) break;
 
             const chunk = value as unknown as Uint8Array;
+            if (debugFirstChunk) {
+              debugFirstChunk = false;
+              const preview = Array.from(chunk.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+              console.log(`[DEBUG-a3f2] 音频 pump 首个 chunk: ${chunk.byteLength} 字节, 前16: ${preview}`);
+            }
             const merged = new Uint8Array(this.audioBuf.byteLength + chunk.byteLength);
             merged.set(this.audioBuf, 0);
             merged.set(chunk, this.audioBuf.byteLength);
@@ -657,11 +881,17 @@ export class ScrcpySession {
               if (isConfig) {
                 const codecStr = codec.webCodecId || 'opus';
                 const desc = data.byteLength > 0 ? data.slice(0) : undefined;
+                const descHex = desc ? Array.from(desc.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ') : '(空)';
+                console.log(`[DEBUG-a3f2] 配置包: codec=${codecStr}, desc ${desc?.byteLength ?? 0} 字节, hex: ${descHex}`);
                 worker.postMessage(
                   { type: 'configure', codec: codecStr, description: desc },
                   desc ? [desc.buffer] : []
                 );
               } else {
+                debugPktCount++;
+                if (debugPktCount <= 3) {
+                  console.log(`[DEBUG-a3f2] 音频包 #${debugPktCount}: ${data.byteLength} 字节`);
+                }
                 const dataBuf = data.slice(0).buffer;
                 const realPts = pts & PTS_MASK;
                 worker.postMessage(
@@ -680,6 +910,11 @@ export class ScrcpySession {
               this.audioBuf = this.audioBuf.slice(totalLen);
             }
           }
+          console.log(`[DEBUG-a3f2] 音频 pump 结束, 共 ${debugPktCount} 个音频包`);
+          // 音频流结束（server 退出或 socket 关闭）——通知上层以便重启专用音频连接
+          if (this.audioOnly) {
+            this.callbacks.onAudioStateChange?.({ status: 'errored', route: 'browser', muted: false });
+          }
         } catch (e) {
           console.warn(`[ScrcpySession:${this.id}] 音频流读取错误:`, e);
         }
@@ -687,7 +922,13 @@ export class ScrcpySession {
 
       pump();
 
+      console.log(`[ScrcpySession:${this.id}] 音频流已建立并开始播放（AudioContext state=${this.audioCtx?.state}, codec=${audioMeta.codec.webCodecId}）`);
       this.callbacks.onAudioStateChange?.({ status: 'playing', route: 'browser', muted: false });
+      if (this.audioOnly) {
+        // 仅音频连接无 control 通道，健康检查无法经 controller 验证；
+        // 音频流已成功建立即视为健康，避免被健康监护误杀。
+        this.health.markHealthy();
+      }
     } catch (e) {
       console.error(`[ScrcpySession:${this.id}] 音频启动失败:`, e);
       if (this.audioCtx) {
@@ -932,8 +1173,19 @@ export class ScrcpySession {
   }
 
   resumeAudio(): void {
+    // 本 session 设计上不承载音频（分屏 pane，音频由专用采集连接统一处理）→ 静默跳过
+    if (!this.audioEnabled) return;
+
     if (this.audioCtx && this.audioCtx.state === 'suspended') {
-      this.audioCtx.resume().catch(() => {});
+      console.log(`[ScrcpySession:${this.id}] resumeAudio: 唤醒 suspended AudioContext`);
+      this.audioCtx.resume().catch((e) => console.warn(`[ScrcpySession:${this.id}] resume 失败:`, e));
+    } else if (!this.audioCtx) {
+      // 无 audioCtx ⇒ 音频流尚未建立（client.audioStream 返回 disabled/undefined），resume 无效。
+      // 启动后 1~2 秒内属正常态，且仅在每条指针事件上被调用，故每会话仅告警一次，避免淹没控制台。
+      if (!this.audioNoCtxWarned) {
+        this.audioNoCtxWarned = true;
+        console.warn(`[ScrcpySession:${this.id}] resumeAudio: 无 AudioContext（音频流可能未建立，启动初期正常）`);
+      }
     }
   }
 

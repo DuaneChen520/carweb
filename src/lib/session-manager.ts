@@ -20,8 +20,11 @@
 
 import { create } from 'zustand';
 import { ScrcpySession, type DisplayConfig, type SessionState } from './scrcpy-session';
+
+/** 音频编解码器名（与 AUDIO_CODEC_FALLBACK 的类型一致，ADR-0016 自愈用）。 */
+type AudioCodecName = "opus" | "aac" | "flac" | "raw";
 import type { Adb } from '@yume-chan/adb';
-import { forceStopPackage } from './adb-commands';
+import { forceStopPackage, killScrcpyServer } from './adb-commands';
 import { useAdbStore } from '@/hooks/useAdbStore';
 import type { AudioState } from '@/hooks/scrcpy/audio/types';
 
@@ -36,6 +39,31 @@ function aggregateAudioStatus(states: AudioState[]): AudioState['status'] {
 }
 
 export type PaneSlot = 'left' | 'right';
+
+/**
+ * 冷启动对账（ADR-0014 D1）：刷新/重连后，上一页面会话遗留的 scrcpy server 进程
+ * （keepActive 虚拟屏的 owner）可能尚未被设备回收，其虚拟屏处于「回收瞬态」，
+ * 首次 newDisplay 会撞上 → AdbScrcpyExitedError。
+ *
+ * 在「浏览器侧 0 会话」的冷启动窗口，安全地杀光设备端残留 scrcpy 进程
+ * （不影响任何运行中会话），并短暂 settle 等待孤儿屏随 owner 死亡被回收，
+ * 使首次启动从干净状态开始。仅冷启动跑一次（模块级 flag，刷新后重置）。
+ */
+let coldStartReconciled = false;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+async function reconcileVirtualDisplaysOnColdStart(adb: Adb): Promise<void> {
+  if (coldStartReconciled) return;
+  coldStartReconciled = true;
+  try {
+    // pkill -f scrcpy + 删 jar；仅冷启动（0 会话）调用，安全。jar 会在下次 start 重新推送。
+    await killScrcpyServer(adb, true);
+    await sleep(800); // 等待 keepActive 孤儿屏随 owner 进程死亡被回收
+    console.log('[SessionManager] 冷启动对账完成：已清理设备端残留 scrcpy 进程');
+  } catch (e) {
+    console.warn('[SessionManager] 冷启动对账失败（可忽略，依赖启动重试兜底 D2）:', e);
+  }
+}
 export type AppRuntimeState = 'foreground-pane' | 'foreground-fullscreen' | 'background' | 'closed';
 
 export interface AppInstance {
@@ -70,6 +98,12 @@ interface SessionManagerState {
   paneRight: string | null;
   /** 当前全屏覆盖层的 sessionId */
   fullscreenSessionId: string | null;
+  /** 专用音频采集连接的 sessionId（ADR-0015）：全设备唯一 audio:true 的连接，捕获整机声音。 */
+  audioCaptureSessionId: string | null;
+  /** 专用音频连接当前使用的音频编解码器（ADR-0016 自愈）：默认 opus，解码失败自动切 aac。 */
+  audioCaptureCodec: AudioCodecName | null;
+  /** 专用音频连接是否已尝试过 aac 回退，防止重复重试死循环。 */
+  audioCaptureRetried: boolean;
   /** ADB 连接（由 setAdb 设置） */
   adb: Adb | null;
   /** displayId 池：已分配的 displayId 集合，用于避免冲突 */
@@ -100,6 +134,10 @@ interface SessionManagerState {
   _backgroundify: (sessionId: string) => Promise<void>;
   /** 重启 background app 的 scrcpy session（恢复 streaming，复用原 displayId） */
   _restartSession: (sessionId: string, displayConfig: DisplayConfig) => Promise<void>;
+  /** 确保专用音频采集连接存在并运行（全设备唯一 audio:true）。codec 指定请求编码，默认 opus；解码失败由 onAudioDecodeError 回调改用 aac 重试（ADR-0016）。 */
+  _ensureAudioCapture: (adb: Adb, codec?: AudioCodecName) => Promise<void>;
+  /** 停止并移除专用音频采集连接。 */
+  _stopAudioCapture: () => Promise<void>;
   /** 更新某个 session 的音频状态并重新聚合全局 audioStatus */
   _setSessionAudio: (sessionId: string, audioState: AudioState) => void;
 
@@ -137,6 +175,9 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
   paneLeft: null,
   paneRight: null,
   fullscreenSessionId: null,
+  audioCaptureSessionId: null,
+  audioCaptureCodec: null,
+  audioCaptureRetried: false,
   adb: null,
   allocatedDisplayIds: new Set(),
   audioStatusBySession: {},
@@ -166,7 +207,30 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
         });
       },
       onVideoSize: () => {},
-      onAudioStateChange: (state) => { get()._setSessionAudio(sessionId, state); },
+      onAudioStateChange: (state) => {
+        get()._setSessionAudio(sessionId, state);
+        // 专用音频连接流结束（server 退出）→ 清理并自动重启
+        const s = get();
+        if (sessionId === s.audioCaptureSessionId && state.status === 'errored') {
+          console.warn('[SessionManager] 专用音频连接流已结束，自动重启');
+          set({ audioCaptureSessionId: null, audioCaptureCodec: null, audioCaptureRetried: false });
+          get()._unregisterSession(sessionId);
+          const liveAdb = get().getLiveAdb();
+          if (liveAdb) void get()._ensureAudioCapture(liveAdb, 'opus');
+        }
+      },
+      onAudioDecodeError: (sid) => {
+        const s = get();
+        if (sid !== s.audioCaptureSessionId) return; // 仅专用音频连接触发自愈
+        if (s.audioCaptureCodec === 'opus' && !s.audioCaptureRetried) {
+          set({ audioCaptureRetried: true });
+          console.warn('[SessionManager] 专用音频 opus 解码失败，自动改用 aac 重试（ADR-0016 自愈）');
+          const liveAdb = get().getLiveAdb();
+          if (liveAdb) void get()._ensureAudioCapture(liveAdb, 'aac');
+        } else {
+          console.error(`[SessionManager] 专用音频解码失败（codec=${s.audioCaptureCodec}），已无更多回退`);
+        }
+      },
       onHealthChange: () => {},
     });
   },
@@ -284,11 +348,59 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
     // start 会复用 session 的 canvas（如果存在）。
     // T5：若 app 已记录 displayId（keepActive 保住的虚拟屏），以 attach 模式
     // 接管原屏而非 newDisplay，画面瞬间回前台、无重建跳动。
-    await session.start(adb, displayConfig, app.displayId ?? undefined);
+    // 注意：pane 恢复也必须是 audio:false（音频由专用采集连接统一承担，ADR-0015）。
+    await session.start(adb, displayConfig, app.displayId ?? undefined, undefined, { audio: false });
 
     // 重新在 displayId 上启动 app
     if (app.displayId !== null) {
       await session.startAppOnDisplay(app.packageName);
+    }
+  },
+
+  // ===== 专用音频采集连接（ADR-0015）=====
+  // 分屏桌面的每个 pane 都请求 audio:true 时，设备只会向其中一个连接授予音频
+  // （scrcpy 音频捕获在设备级是单一的，REMOTE_SUBMIX）。因此改为：全设备仅由
+  // 一条「专用音频采集连接」（video:false, control:false, audio:true）统一捕获
+  // 整机声音，与任何 pane 的生命周期解耦——关 pane / 切焦点均不闪烁、不断音。
+
+  _ensureAudioCapture: async (adb, codec: AudioCodecName = 'opus') => {
+    const state = get();
+    // 已存在且 codec 一致 → 无需动作
+    if (state.audioCaptureSessionId && state.audioCaptureCodec === codec) return;
+    // 已存在但 codec 不同（opus→aac 自愈切换中）→ 先停旧的再起新的
+    if (state.audioCaptureSessionId && state.audioCaptureCodec !== codec) {
+      const oldId = state.audioCaptureSessionId;
+      const old = get()._getSession(oldId);
+      set({ audioCaptureSessionId: null, audioCaptureCodec: null, audioCaptureRetried: false });
+      if (old) {
+        await old.stop();
+        get()._unregisterSession(oldId);
+      }
+    }
+    const sessionId = get()._generateSessionId();
+    const session = get()._createSessionWithCallbacks(sessionId);
+    get()._registerSession(sessionId, session);
+    set({ audioCaptureSessionId: sessionId, audioCaptureCodec: codec, audioCaptureRetried: false });
+    try {
+      // 专用音频采集连接：video:false + audio:true + control:false。
+      // sendDeviceMeta:false 防止设备名写入音频 socket 污染 codec 解析。
+      // audioCodecOverride 指定本次请求的编码；opus 解码失败时上层 onAudioDecodeError 会用 'aac' 重试（ADR-0016 自愈）。
+      await session.start(adb, undefined, undefined, undefined, { audioOnly: true, audioCodecOverride: codec });
+    } catch (e) {
+      console.error('[SessionManager] 专用音频采集连接启动失败:', e);
+      get()._unregisterSession(sessionId);
+      set({ audioCaptureSessionId: null, audioCaptureCodec: null, audioCaptureRetried: false });
+    }
+  },
+
+  _stopAudioCapture: async () => {
+    const { audioCaptureSessionId } = get();
+    if (!audioCaptureSessionId) return;
+    const session = get()._getSession(audioCaptureSessionId);
+    set({ audioCaptureSessionId: null, audioCaptureCodec: null, audioCaptureRetried: false });
+    if (session) {
+      await session.stop();
+      get()._unregisterSession(audioCaptureSessionId);
     }
   },
 
@@ -299,6 +411,8 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
     // 置空避免后续 stop() 在已死的连接上执行 adb 命令 / kill server。
     if (!adb) {
       Object.values(get().sessions).forEach(({ session }) => session.invalidateAdb());
+      // 设备断开：停止专用音频采集连接（其 adb 已失效，stop 仅做本地清理）
+      void get()._stopAudioCapture();
     }
     set({ adb });
   },
@@ -352,6 +466,13 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
       return null;
     }
 
+    // D1 冷启动对账（仅浏览器侧 0 会话的冷启动窗口）：杀光设备端残留 scrcpy 进程，
+    // 等待 keepActive 孤儿虚拟屏随 owner 死亡被回收，使首次 newDisplay 从干净状态开始。
+    // 见 ADR-0014。非冷启动（已有运行/后台会话）跳过，避免误杀运行中会话。
+    if (get().apps.length === 0) {
+      await reconcileVirtualDisplaysOnColdStart(adb);
+    }
+
     // T6：不再于每次启动前全局 pkill 设备端 scrcpy server。
     // 原因：T4 已为各会话分配独立 scid，分别走各自的 localabstract:scrcpy_<scid>
     // 隧道，旧会话的残留 server 不再占用同一 socket、不会阻塞新会话启动；
@@ -382,13 +503,16 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
     get()._setPane(pane, sessionId);
 
     try {
-      await session.start(adb, displayConfig);
+      // pane 启动必须是 audio:false（音频由专用采集连接统一承担，ADR-0015）
+      await session.start(adb, displayConfig, undefined, undefined, { audio: false });
       const displayId = session.displayId;
       if (displayId !== null) {
         set((state) => ({ allocatedDisplayIds: new Set(state.allocatedDisplayIds).add(displayId) }));
         get()._updateAppState(sessionId, { displayId });
       }
       await session.startAppOnDisplay(packageName);
+      // ADR-0015：确保专用音频采集连接运行（全设备唯一 audio:true），捕获整机声音
+      await get()._ensureAudioCapture(adb);
       return sessionId;
     } catch (error) {
       console.error('[SessionManager] launchOnPane 启动失败:', error);
@@ -407,6 +531,12 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
     if (!adb) {
       console.error('[SessionManager] launchFullscreen 失败：adb 未连接');
       return null;
+    }
+
+    // D1 冷启动对账（仅浏览器侧 0 会话的冷启动窗口）：同 launchOnPane 说明。
+    // 见 ADR-0014。非冷启动跳过，避免误杀运行中会话。
+    if (get().apps.length === 0) {
+      await reconcileVirtualDisplaysOnColdStart(adb);
     }
 
     // 同包名去重（修复「分屏运行中的 app 从侧边栏再全屏 → 双实例」bug）：
@@ -464,13 +594,16 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
     }));
 
     try {
-      await session.start(adb, displayConfig);
+      // pane 启动必须是 audio:false（音频由专用采集连接统一承担，ADR-0015）
+      await session.start(adb, displayConfig, undefined, undefined, { audio: false });
       const displayId = session.displayId;
       if (displayId !== null) {
         set((state) => ({ allocatedDisplayIds: new Set(state.allocatedDisplayIds).add(displayId) }));
         get()._updateAppState(sessionId, { displayId });
       }
       await session.startAppOnDisplay(packageName);
+      // ADR-0015：确保专用音频采集连接运行（全设备唯一 audio:true），捕获整机声音
+      await get()._ensureAudioCapture(adb);
       return sessionId;
     } catch (error) {
       console.error('[SessionManager] launchFullscreen 启动失败:', error);
@@ -663,6 +796,11 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
 
     get()._removeApp(sessionId);
     get()._unregisterSession(sessionId);
+
+    // ADR-0015：最后一个 app 关闭后，停止专用音频采集连接
+    if (get().apps.length === 0) {
+      await get()._stopAudioCapture();
+    }
   },
 
   // ===== closeAll（遍历所有进程执行关闭）=====
@@ -671,6 +809,8 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
     for (const app of allApps) {
       await get().closeApp(app.sessionId);
     }
+    // ADR-0015：停止专用音频采集连接（closeApp 在最后一个 app 时也会触发，此处兜底）
+    await get()._stopAudioCapture();
     set({ paneLeft: null, paneRight: null, fullscreenSessionId: null });
   },
 
@@ -682,6 +822,10 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
       console.warn('[SessionManager] resumeBackground: app 不是 background 状态');
       return;
     }
+
+    // ADR-0015：恢复一个 app 即确保专用音频采集连接运行（全设备唯一 audio:true）
+    const adb = get().getLiveAdb();
+    if (adb) await get()._ensureAudioCapture(adb);
 
     // target === 'fullscreen'（来自 launchFullscreen 同包名去重）：强制落全屏覆盖层，
     // 复用原 displayId（T5 attach 模式，不重建屏），不抢占 pane。

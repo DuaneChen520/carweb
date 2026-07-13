@@ -220,12 +220,13 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
     };
   }, [closeAll]);
 
-  // 5. 用户手势唤醒所有 session 的 AudioContext（修复分屏桌面浏览器端无声，ADR-0013）
-  // 根因：分屏桌面的触控 handler（useCanvasPointerInput）只调 session.injectTouch()，
-  // 从不调 resumeAudio()，而每个 ScrcpySession 的 AudioContext 创建时处于 suspended
-  // （浏览器自动播放策略），必须由用户手势内同步调用 resume() 才出声。
-  // 故在此挂持久化的全局 pointerdown/keydown 监听，任意交互即唤醒 SessionManager
-  // 中所有活跃 session 的 AudioContext（含稍后启动、用户尚未触控的 pane）。
+  // 5. 用户手势唤醒 AudioContext（ADR-0015）
+  // 音频由 SessionManager 的「专用音频采集连接」统一承载（全设备唯一 audio:true），
+  // 与各 pane 生命周期解耦。每个 ScrcpySession 的 AudioContext 创建时处于 suspended
+  // （浏览器自动播放策略），必须由用户手势内同步 resume() 才出声。
+  // 在此挂持久化全局 pointerdown/keydown 监听（捕获阶段），任意交互即唤醒所有
+  // 活跃 session 的 AudioContext——其中专用音频连接拥有 AudioContext，pane（audio:false）
+  // 的 resumeAudio 为静默 no-op。
   useEffect(() => {
     const resumeAllAudio = () => {
       const { sessions } = useSessionManager.getState();
@@ -233,11 +234,11 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
         entry.session.resumeAudio();
       }
     };
-    document.addEventListener('pointerdown', resumeAllAudio);
-    document.addEventListener('keydown', resumeAllAudio);
+    document.addEventListener('pointerdown', resumeAllAudio, true);
+    document.addEventListener('keydown', resumeAllAudio, true);
     return () => {
-      document.removeEventListener('pointerdown', resumeAllAudio);
-      document.removeEventListener('keydown', resumeAllAudio);
+      document.removeEventListener('pointerdown', resumeAllAudio, true);
+      document.removeEventListener('keydown', resumeAllAudio, true);
     };
   }, []);
 

@@ -32,6 +32,8 @@ self.onmessage = (e: MessageEvent<WorkerInMessage>) => {
   }
 };
 
+let pcmOutputCount = 0;
+
 function pcmOutputHandler(audioData: AudioData) {
   try {
     const { numberOfChannels, numberOfFrames, sampleRate, format } = audioData;
@@ -48,6 +50,14 @@ function pcmOutputHandler(audioData: AudioData) {
     }
 
     audioData.close();
+
+    // [DEBUG-a3f2] 诊断：确认解码器是否产出 PCM + 是否为静音
+    pcmOutputCount++;
+    if (pcmOutputCount <= 5) {
+      let nonZero = 0;
+      for (let i = 0; i < pcm.length; i++) { if (pcm[i] !== 0) nonZero++; }
+      console.log(`[DEBUG-a3f2] PCM #${pcmOutputCount}: ${numberOfFrames} frames, ${numberOfChannels}ch, ${sampleRate}Hz, format=${format}, samples=${pcm.length}, nonZero=${nonZero}`);
+    }
 
     postOut(
       {
