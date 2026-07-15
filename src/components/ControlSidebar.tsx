@@ -175,6 +175,7 @@ export function ControlSidebar({
   return (
     <>
       <div className="w-13 h-full flex flex-col items-center py-2 gap-1 bg-slate-950 border-r border-white/5">
+        <span data-sidebar-trigger="true">
         <NeumorphicButton
           variant="dark"
           toggled={sidebarPickerOpen}
@@ -191,6 +192,7 @@ export function ControlSidebar({
         >
           <Grid2X2 size={ICON_SIZE} />
         </NeumorphicButton>
+        </span>
 
         <div className="w-8 h-px bg-white/10 my-1" />
 

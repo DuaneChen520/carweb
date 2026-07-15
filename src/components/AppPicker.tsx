@@ -108,21 +108,22 @@ export function AppPicker({ config, onClose }: AppPickerProps) {
   }, [getAllDeviceApps, appListVersion]);
 
   // 点击面板外部 → 关闭（无遮罩时自然行为）。
-  // 用 `click` 而非 `mousedown` + setTimeout(0) 延迟挂载，确保触发按钮自身的 onClick 先执行，
-  // 避免侧栏 toggle 逻辑被外部点击干扰（`mousedown` 总在 `click` 前触发，会抢先关闭面板）。
+  // 通过 `data-sidebar-trigger` 属性排除侧栏触发按钮，
+  // 避免按钮的 toggle 逻辑与外部点击监听器冲突。
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+    const handlePointerOutside = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      // 点击侧栏触发按钮时不关闭 —— 由按钮自身的 toggle 逻辑全权管理
+      if (target.closest('[data-sidebar-trigger]')) return;
+      if (panelRef.current && !panelRef.current.contains(target)) {
         onClose();
       }
     };
-    const timer = setTimeout(() => {
-      document.addEventListener('click', handleClickOutside);
-    }, 0);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener('click', handleClickOutside);
-    };
+    // 用 pointerdown 而非 mousedown：canvas 投屏画面的 onPointerDown(e.preventDefault())
+    // 会阻止兼容鼠标事件（mousedown/click）派发，但不阻止 pointerdown 冒泡。
+    document.addEventListener('pointerdown', handlePointerOutside);
+    return () => document.removeEventListener('pointerdown', handlePointerOutside);
   }, [onClose]);
 
   const handleLaunch = useCallback((pkg: string) => {
