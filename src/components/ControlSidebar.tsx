@@ -5,6 +5,7 @@ import { NeumorphicButton, ICON_SIZE } from './NeumorphicButton';
 import type { ResolutionPresetKey } from '../hooks/scrcpy';
 import { RESOLUTION_PRESETS } from '../hooks/scrcpy';
 import { useScrcpyActions, useScrcpyAudio } from '../contexts/ScrcpyContext';
+import { useAppPicker } from '../contexts/AppPickerContext';
 import { CacheSettingsDialog, type DeviceCacheInfo } from './CacheSettingsDialog';
 import { PinDialog } from './PinDialog';
 import { useAdbStore } from '../hooks/useAdbStore';
@@ -67,6 +68,9 @@ export function ControlSidebar({
 }: ControlSidebarProps) {
   const { goBack, goHome, startApp, getAppIcon, getCachedAppLabels, parseAllApps, turnOffPhysicalScreen, turnOnPhysicalScreen, getAllDeviceApps, incrementLocalCount, syncWithDevice, getCacheInfo, getAllDeviceSerials, getDeviceCacheInfo, clearDeviceAppCache, clearDevicePreferences, clearAll, setMuted: ctxSetMuted, setAudioRoute } = useScrcpyActions();
   const { audioStatus: ctxAudioStatus, isMuted: ctxIsMuted, audioRoute } = useScrcpyAudio();
+  // AppPicker 切换状态：面板打开时按钮显示按下态，再点击则关闭
+  const { config: pickerConfig, closeAppPicker } = useAppPicker();
+  const [sidebarPickerOpen, setSidebarPickerOpen] = useState(false);
   // 桌面模式：优先使用 SessionManager 提供的音频状态；单屏模式回退到 context 单例
   const audioStatus = propAudioStatus ?? ctxAudioStatus;
   const isMuted = propIsMuted ?? ctxIsMuted;
@@ -84,6 +88,13 @@ export function ControlSidebar({
   const [showCacheSettings, setShowCacheSettings] = useState(false);
   const [cacheDevices, setCacheDevices] = useState<DeviceCacheInfo[]>([]);
   const [showPinSetup, setShowPinSetup] = useState(false);
+
+  // picker 从外部关闭（分屏/点击外部/启动应用）时，重置侧栏 toggle 状态
+  useEffect(() => {
+    if (!pickerConfig) {
+      setSidebarPickerOpen(false);
+    }
+  }, [pickerConfig]);
 
   // 按「置顶 > 常用 > 其他」分类并写入侧栏状态（纯数据整理，不触发同步/解析）。
   const classifyAndSetSidebarApps = useCallback(
@@ -166,9 +177,15 @@ export function ControlSidebar({
       <div className="w-13 h-full flex flex-col items-center py-2 gap-1 bg-slate-950 border-r border-white/5">
         <NeumorphicButton
           variant="dark"
+          toggled={sidebarPickerOpen}
           onClick={() => {
-            // §10 / ADR-0010：侧栏「全部应用」统一触发 AppPickerContext 浮窗
-            onOpenAppPicker?.();
+            if (sidebarPickerOpen) {
+              closeAppPicker();
+              setSidebarPickerOpen(false);
+            } else {
+              onOpenAppPicker?.();
+              setSidebarPickerOpen(true);
+            }
           }}
           title="应用列表"
         >
