@@ -6,10 +6,10 @@
  * - 有效帧到达 / resize 确认后淡出，与画面交叉淡入，替代原本刺眼的白闪。
  * - 容器内绝对定位（inset-0），pointer-events-none 不拦截触控。
  *
- * 图标经 useScrcpyContext().getAppIcon 取得；取代原零引用死代码 AppLaunchingOverlay.tsx（已删除）。
+ * 图标经 useScrcpyActions().getAppIcon 取得；取代原零引用死代码 AppLaunchingOverlay.tsx（已删除）。
  */
 import { useEffect, useState } from 'react';
-import { useScrcpyContext } from '@/contexts/ScrcpyContext';
+import { useScrcpyActions } from '@/contexts/ScrcpyContext';
 import { useAppDisplayName } from '@/lib/useAppDisplayName';
 
 interface AppTransitionPlaceholderProps {
@@ -19,7 +19,7 @@ interface AppTransitionPlaceholderProps {
 }
 
 export function AppTransitionPlaceholder({ pkg, show }: AppTransitionPlaceholderProps) {
-  const { getAppIcon } = useScrcpyContext();
+  const { getAppIcon } = useScrcpyActions();
   const displayName = useAppDisplayName(pkg);
   const [iconUrl, setIconUrl] = useState<string | null>(null);
   const [rendered, setRendered] = useState(show);
@@ -52,7 +52,7 @@ export function AppTransitionPlaceholder({ pkg, show }: AppTransitionPlaceholder
     <div
       className="absolute inset-0 z-20 flex flex-col items-center justify-center pointer-events-none transition-opacity duration-200"
       style={{
-        background: 'linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)',
+        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
         opacity: show ? 1 : 0,
       }}
     >
@@ -67,14 +67,14 @@ export function AppTransitionPlaceholder({ pkg, show }: AppTransitionPlaceholder
           <img src={iconUrl} alt={displayName} className="w-full h-full object-cover" />
         ) : (
           <div
-            className="w-full h-full flex items-center justify-center text-slate-600 text-3xl font-medium"
-            style={{ backgroundColor: `hsl(${hue}, 45%, 92%)` }}
+            className="w-full h-full flex items-center justify-center text-slate-300 text-3xl font-medium"
+            style={{ backgroundColor: `hsl(${hue}, 25%, 18%)` }}
           >
             {displayName.charAt(0).toUpperCase()}
           </div>
         )}
       </div>
-      <div className="text-slate-500 text-sm font-medium mt-3">{displayName}</div>
+      <div className="text-slate-400 text-sm font-medium mt-3">{displayName}</div>
     </div>
   );
 }

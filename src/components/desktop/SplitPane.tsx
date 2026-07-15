@@ -167,7 +167,7 @@ export function SplitPane({ pane, app, session, onOpenAppPicker, dropdown, resiz
   return (
     <div
       data-pane={pane}
-      className="flex-1 h-full bg-slate-100 rounded-lg overflow-hidden relative border border-black/5"
+      className="flex-1 h-full bg-slate-800 rounded-lg overflow-hidden relative border border-white/5"
     >
       {app && session ? (
         <>

@@ -5,7 +5,7 @@ import { RESOLUTION_PRESETS } from '../hooks/scrcpy';
 import type { ResolutionPresetKey } from '../hooks/scrcpy';
 import { calculateDpi } from '../utils/display';
 import { useAdbStore } from '../hooks/useAdbStore';
-import { useScrcpyContext } from '../contexts/ScrcpyContext';
+import { useScrcpySession, useScrcpyActions } from '../contexts/ScrcpyContext';
 import { useAppPicker } from '../contexts/AppPickerContext';
 import { subscribeLinkState } from '../lib/link-state-bus';
 import { ControlSidebar } from './ControlSidebar';
@@ -28,16 +28,15 @@ export function VirtualScreen({ active = false, displayMode = 'virtual', onStop 
   }, [displayMode]);
   const [resolutionPreset, setResolutionPreset] = useState<ResolutionPresetKey>('original');
   const [showResMenu, setShowResMenu] = useState(false);
-  const [showVirtualKeyboard] = useState(false);
   const [keyboardMode, setKeyboardMode] = useState<'phone' | 'browser'>(() => {
     return (localStorage.getItem('carweb-keyboard-mode') as 'phone' | 'browser') || 'phone';
   });
-  const browserInputRef = useRef<HTMLInputElement>(null);
   const hasStartedRef = useRef(false);
   const initialStartTimerRef = useRef<NodeJS.Timeout | null>(null);
   const initialStartDoneRef = useRef(false);
 
-  const { startScrcpy, stopScrcpy, injectTouch, injectText, resumeAudio, isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay, flexClient, flexClientRef, startApp } = useScrcpyContext();
+  const { isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay, flexClient, flexClientRef } = useScrcpySession();
+  const { startScrcpy, stopScrcpy, injectTouch, resumeAudio, startApp } = useScrcpyActions();
   const { openAppPicker } = useAppPicker();
   const store = useAdbStore();
 
@@ -303,13 +302,6 @@ currentPresetRef.current = currentPreset;
     onStop();
   }, [stopScrcpy, onStop]);
 
-  // Auto-focus browser input when keyboard mode is browser
-  useEffect(() => {
-    if (showVirtualKeyboard && keyboardMode === 'browser' && browserInputRef.current) {
-      browserInputRef.current.focus();
-    }
-  }, [showVirtualKeyboard, keyboardMode]);
-
   const separator = displayConfig?.width ? `${displayConfig.width}x${displayConfig.height}` : '';
 
   return (
@@ -370,7 +362,7 @@ currentPresetRef.current = currentPreset;
 
           {!active && !isStarting && !error && (
             <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center text-slate-700">
+              <div className="text-center text-slate-400">
                 <Monitor className="w-16 h-16 mx-auto mb-4 opacity-30" />
                 <p className="text-lg font-medium">车机虚拟屏</p>
                 <p className="text-sm mt-1">连接设备后启动</p>
@@ -392,36 +384,6 @@ currentPresetRef.current = currentPreset;
             onPointerUp={handlePointerEvent}
           />
         </div>
-
-        {showVirtualKeyboard && keyboardMode === 'browser' && (
-          <input
-            ref={browserInputRef}
-            type="text"
-            className="absolute inset-0 w-full h-full opacity-0 z-10 cursor-default"
-            style={{ caretColor: 'transparent' }}
-            onCompositionEnd={(e) => {
-              const text = e.data;
-              if (text) {
-                injectText(text);
-              }
-              // Clear the input for next composition
-              if (browserInputRef.current) {
-                browserInputRef.current.value = '';
-              }
-            }}
-            onKeyDown={(e) => {
-              // Handle non-composition keys
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                injectText('\n');
-              } else if (e.key === 'Backspace') {
-                e.preventDefault();
-                // injectText handles empty string gracefully
-              }
-              // For regular characters, let them go through composition
-            }}
-          />
-        )}
       </div>
     </div>
   );

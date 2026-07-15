@@ -44,19 +44,19 @@ function getStateLabel(app: AppInstance): { text: string; color: string; icon: R
     case 'foreground-fullscreen':
       return {
         text: '全屏中',
-        color: 'text-accent-600 border-accent-300 bg-accent-50',
+        color: 'text-accent-400 border-accent-500/30 bg-accent-500/10',
         icon: <Monitor size={10} />,
       };
     case 'foreground-pane':
       return {
         text: `小窗中 · ${app.pane === 'left' ? '左' : '右'}分屏`,
-        color: 'text-accent-600 border-accent-300 bg-accent-50',
+        color: 'text-accent-400 border-accent-500/30 bg-accent-500/10',
         icon: <SplitSquareHorizontal size={10} />,
       };
     case 'background':
       return {
         text: '后台',
-        color: 'text-slate-500 border-slate-200 bg-slate-50',
+        color: 'text-slate-400 border-slate-600 bg-slate-700/50',
         icon: <Moon size={10} />,
       };
     default:
@@ -101,13 +101,13 @@ export function ActivityManagerPanel({ onClose, getDisplayConfig }: ActivityMana
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl w-[400px] max-h-[80vh] flex flex-col overflow-hidden">
+      <div className="bg-slate-800/95 backdrop-blur-xl rounded-2xl shadow-2xl w-[400px] max-h-[80vh] flex flex-col overflow-hidden">
         {/* 头部 */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-          <h2 className="text-sm font-medium text-slate-800">活动进程</h2>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
+          <h2 className="text-sm font-medium text-slate-100">活动进程</h2>
           <button
             onClick={onClose}
-            className="p-1 rounded-lg hover:bg-slate-100 transition-colors text-slate-500"
+            className="p-1 rounded-lg hover:bg-white/10 transition-colors text-slate-400"
           >
             <X size={16} />
           </button>
@@ -116,7 +116,7 @@ export function ActivityManagerPanel({ onClose, getDisplayConfig }: ActivityMana
         {/* 进程列表 */}
         <div className="flex-1 overflow-y-auto p-2">
           {sortedApps.length === 0 ? (
-            <div className="py-12 text-center text-sm text-slate-400">
+            <div className="py-12 text-center text-sm text-slate-500">
               暂无活动进程
             </div>
           ) : (
@@ -130,16 +130,16 @@ export function ActivityManagerPanel({ onClose, getDisplayConfig }: ActivityMana
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-lg mb-1 border ${stateInfo.color}`}
                 >
                   {/* 应用图标占位 */}
-                  <div className="w-8 h-8 rounded-lg bg-slate-200 flex items-center justify-center text-slate-500 text-xs font-medium flex-shrink-0">
-                    {displayName.charAt(0).toUpperCase()}
-                  </div>
+<div className="w-8 h-8 rounded-lg bg-slate-700 flex items-center justify-center text-slate-400 text-xs font-medium flex-shrink-0">
+				    {displayName.charAt(0).toUpperCase()}
+				  </div>
 
-                  {/* 应用信息 */}
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-slate-800 truncate">
-                      {displayName}
-                    </div>
-                    <div className="flex items-center gap-1 text-xs text-slate-500">
+				  {/* 应用信息 */}
+				  <div className="flex-1 min-w-0">
+				    <div className="text-sm font-medium text-slate-100 truncate">
+				      {displayName}
+				    </div>
+				    <div className="flex items-center gap-1 text-xs text-slate-400">
                       {stateInfo.icon}
                       {stateInfo.text}
                     </div>
@@ -149,14 +149,14 @@ export function ActivityManagerPanel({ onClose, getDisplayConfig }: ActivityMana
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button
                       onClick={() => handleEnter(app)}
-                      className="p-1.5 rounded-lg hover:bg-white/60 transition-colors text-slate-600"
+                      className="p-1.5 rounded-lg hover:bg-white/10 transition-colors text-slate-400"
                       title="进入"
                     >
                       <LogIn size={14} />
                     </button>
                     <button
                       onClick={() => handleClose(app)}
-                      className="p-1.5 rounded-lg hover:bg-red-100 hover:text-red-600 transition-colors text-slate-600"
+                      className="p-1.5 rounded-lg hover:bg-red-500/20 hover:text-red-400 transition-colors text-slate-400"
                       title="关闭"
                     >
                       <X size={14} />
@@ -170,10 +170,10 @@ export function ActivityManagerPanel({ onClose, getDisplayConfig }: ActivityMana
 
         {/* 底部：全部关闭 */}
         {sortedApps.length > 0 && (
-          <div className="px-4 py-3 border-t border-slate-100">
+          <div className="px-4 py-3 border-t border-slate-700">
             <button
               onClick={handleCloseAll}
-              className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors text-sm font-medium"
+              className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors text-sm font-medium"
             >
               <Trash2 size={14} />
               全部关闭

@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { X, RefreshCw, Search, Pin } from 'lucide-react';
 import { AppGrid, type AppGridHandle } from '@/components/AppGrid';
-import { useScrcpyContext } from '@/contexts/ScrcpyContext';
+import { useScrcpyActions } from '@/contexts/ScrcpyContext';
 import { useAdbStore } from '@/hooks/useAdbStore';
 import type { AppPickerConfig } from '@/contexts/AppPickerContext';
 
@@ -26,8 +26,7 @@ interface AppPickerProps {
 }
 
 export function AppPicker({ config, onClose }: AppPickerProps) {
-  const scrcpy = useScrcpyContext();
-  const { togglePin, getAllDeviceApps } = scrcpy;
+  const { togglePin, getAllDeviceApps } = useScrcpyActions();
   const appListVersion = useAdbStore((s) => s.appListVersion);
   const gridRef = useRef<AppGridHandle>(null);
   const [pinMode, setPinMode] = useState(false);
@@ -80,10 +79,10 @@ export function AppPicker({ config, onClose }: AppPickerProps) {
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl w-[680px] max-h-[80vh] flex flex-col overflow-hidden">
+      <div className="bg-slate-800/95 backdrop-blur-xl rounded-2xl shadow-2xl w-[680px] max-h-[80vh] flex flex-col overflow-hidden">
         {/* 头部 */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-          <h2 className="text-sm font-medium text-slate-800">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
+          <h2 className="text-sm font-medium text-slate-100">
             {title}
             {count > 0 && <span className="ml-1.5 text-slate-400">({count})</span>}
           </h2>
@@ -96,13 +95,13 @@ export function AppPicker({ config, onClose }: AppPickerProps) {
                 value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
                 placeholder="搜索应用..."
-                className="w-40 pl-8 pr-2 py-1 text-xs bg-slate-100 rounded-lg border border-slate-200 text-slate-900 placeholder-slate-400 outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-400/30 transition-colors"
+                className="w-40 pl-8 pr-2 py-1 text-xs bg-slate-700 rounded-lg border border-slate-600 text-slate-100 placeholder-slate-400 outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-400/30 transition-colors"
               />
             </div>
             {/* 置顶模式 */}
             <button
               onClick={() => setPinMode((v) => !v)}
-              className={`p-1 rounded-lg transition-colors ${pinMode ? 'text-accent-600 bg-accent-50' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}
+              className={`p-1 rounded-lg transition-colors ${pinMode ? 'text-accent-400 bg-accent-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-white/10'}`}
               title={pinMode ? '退出置顶模式' : '置顶模式'}
             >
               <Pin className="w-4 h-4" />
@@ -111,7 +110,7 @@ export function AppPicker({ config, onClose }: AppPickerProps) {
             <button
               onClick={handleRefresh}
               disabled={loading}
-              className={`p-1 rounded-lg transition-colors ${loading ? 'text-slate-300' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'}`}
+              className={`p-1 rounded-lg transition-colors ${loading ? 'text-slate-500' : 'text-slate-400 hover:text-slate-200 hover:bg-white/10'}`}
               title="更新应用列表"
             >
               <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
@@ -119,7 +118,7 @@ export function AppPicker({ config, onClose }: AppPickerProps) {
             {/* 关闭 */}
             <button
               onClick={onClose}
-              className="p-1 rounded-lg hover:bg-slate-100 transition-colors text-slate-500"
+              className="p-1 rounded-lg hover:bg-white/10 transition-colors text-slate-400"
             >
               <X size={16} />
             </button>

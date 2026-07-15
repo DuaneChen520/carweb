@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useScrcpyContext } from '@/contexts/ScrcpyContext';
+import { useScrcpyActions } from '@/contexts/ScrcpyContext';
 
 /**
  * ADR-0012：应用显示名解析。
@@ -25,7 +25,7 @@ export function resolveAppDisplayName(label: string | undefined, packageName: st
  * 单次渲染内多 app 共用一次缓存查询。
  */
 export function useAppLabels(packages: string[]): Map<string, string> {
-  const { getCachedAppLabels } = useScrcpyContext();
+  const { getCachedAppLabels } = useScrcpyActions();
   const key = packages.join(',');
 
   const [labels, setLabels] = useState<Map<string, string>>(

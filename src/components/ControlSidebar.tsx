@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Home, MonitorOff, Monitor, Maximize2, Minimize2, Power, Settings, Trash2, Volume2, VolumeX, AppWindow, Smartphone, Keyboard } from 'lucide-react';
-import { AppGridIcon } from './AppGridIcon';
+import { ArrowLeft, Home, Grid2X2, MonitorOff, Monitor, Maximize2, Minimize2, Power, Settings, Trash2, Volume2, VolumeX, AppWindow, Smartphone, Keyboard } from 'lucide-react';
 import { AppIcon } from './AppIcon';
 import { NeumorphicButton, ICON_SIZE } from './NeumorphicButton';
 import type { ResolutionPresetKey } from '../hooks/scrcpy';
 import { RESOLUTION_PRESETS } from '../hooks/scrcpy';
-import { useScrcpyContext } from '../contexts/ScrcpyContext';
+import { useScrcpyActions, useScrcpyAudio } from '../contexts/ScrcpyContext';
 import { CacheSettingsDialog, type DeviceCacheInfo } from './CacheSettingsDialog';
 import { PinDialog } from './PinDialog';
 import { useAdbStore } from '../hooks/useAdbStore';
@@ -66,8 +65,8 @@ export function ControlSidebar({
   onDesktopClick, onActivityManagerClick, onLaunchFullscreen, onOpenAppPicker, activityCount,
   audioStatus: propAudioStatus, isMuted: propIsMuted, setMuted: propSetMuted,
 }: ControlSidebarProps) {
-  const scrcpy = useScrcpyContext();
-  const { goBack, goHome, startApp, getAppIcon, getCachedAppLabels, parseAllApps, turnOffPhysicalScreen, turnOnPhysicalScreen, getAllDeviceApps, incrementLocalCount, syncWithDevice, audioStatus: ctxAudioStatus, isMuted: ctxIsMuted, setMuted: ctxSetMuted, audioRoute, setAudioRoute } = scrcpy;
+  const { goBack, goHome, startApp, getAppIcon, getCachedAppLabels, parseAllApps, turnOffPhysicalScreen, turnOnPhysicalScreen, getAllDeviceApps, incrementLocalCount, syncWithDevice, getCacheInfo, getAllDeviceSerials, getDeviceCacheInfo, clearDeviceAppCache, clearDevicePreferences, clearAll, setMuted: ctxSetMuted, setAudioRoute } = useScrcpyActions();
+  const { audioStatus: ctxAudioStatus, isMuted: ctxIsMuted, audioRoute } = useScrcpyAudio();
   // 桌面模式：优先使用 SessionManager 提供的音频状态；单屏模式回退到 context 单例
   const audioStatus = propAudioStatus ?? ctxAudioStatus;
   const isMuted = propIsMuted ?? ctxIsMuted;
@@ -164,19 +163,19 @@ export function ControlSidebar({
 
   return (
     <>
-      <div className="w-13 h-full flex flex-col items-center py-2 gap-1 bg-white border-r border-black/10">
-        <button
+      <div className="w-13 h-full flex flex-col items-center py-2 gap-1 bg-slate-950 border-r border-white/5">
+        <NeumorphicButton
+          variant="dark"
           onClick={() => {
             // §10 / ADR-0010：侧栏「全部应用」统一触发 AppPickerContext 浮窗
             onOpenAppPicker?.();
           }}
-          className="flex items-center justify-center w-13 h-[52px]"
           title="应用列表"
         >
-          <AppGridIcon />
-        </button>
+          <Grid2X2 size={ICON_SIZE} />
+        </NeumorphicButton>
 
-        <div className="w-8 h-px bg-black/10 my-1" />
+        <div className="w-8 h-px bg-white/10 my-1" />
 
         <div className="flex flex-col items-center gap-1 overflow-y-auto max-h-[calc(100vh-280px)] scrollbar-none">
           {pinnedApps.map((pkg) => (
@@ -213,7 +212,7 @@ export function ControlSidebar({
         <div className="flex flex-col items-center" style={{ gap: '12px' }}>
 
         {toggleFullscreen && (
-          <NeumorphicButton
+          <NeumorphicButton variant="dark"
             onClick={toggleFullscreen}
             toggled={!!isFullscreen}
             title={isFullscreen ? '退出全屏' : '全屏'}
@@ -222,11 +221,11 @@ export function ControlSidebar({
           </NeumorphicButton>
         )}
 
-        <NeumorphicButton onClick={goBack} title="返回">
+        <NeumorphicButton variant="dark" onClick={goBack} title="返回">
           <ArrowLeft size={ICON_SIZE} />
         </NeumorphicButton>
         {/* §9.1 桌面按钮语义变更：从 goHome（Android Home intent）改为切换到 Web 桌面视图 */}
-        <NeumorphicButton
+        <NeumorphicButton variant="dark"
           onClick={onDesktopClick ?? goHome}
           title="桌面"
         >
@@ -235,7 +234,7 @@ export function ControlSidebar({
 
         {/* §9.1 新增活动进程按钮 */}
         {onActivityManagerClick && (
-          <NeumorphicButton
+          <NeumorphicButton variant="dark"
             onClick={onActivityManagerClick}
             title="活动进程"
           >
@@ -252,7 +251,7 @@ export function ControlSidebar({
         )}
 
         {isVirtualDisplay && turnOffPhysicalScreen && turnOnPhysicalScreen && (
-          <NeumorphicButton
+          <NeumorphicButton variant="dark"
             onClick={async () => {
               if (physicalScreenOn) {
                 await turnOffPhysicalScreen();
@@ -268,7 +267,7 @@ export function ControlSidebar({
         )}
 
         {audioStatus !== 'idle' && (
-          <NeumorphicButton
+          <NeumorphicButton variant="dark"
             onClick={() => setMuted(!isMuted)}
             toggled={!!isMuted}
             disabled={audioStatus === 'disabled' || audioStatus === 'errored'}
@@ -283,18 +282,18 @@ export function ControlSidebar({
         )}
 
         {handleStop && (
-          <NeumorphicButton onClick={handleStop} title="断开连接" color="#EF4444" toggledColor="#EF4444">
+          <NeumorphicButton variant="dark" onClick={handleStop} title="断开连接" color="#EF4444" toggledColor="#EF4444">
             <Power size={ICON_SIZE} />
           </NeumorphicButton>
         )}
 
-        <div className="w-8 h-px bg-black/10 my-1" />
+        <div className="w-8 h-px bg-white/10 my-1" />
 
         <div className="relative">
-          <NeumorphicButton
+          <NeumorphicButton variant="dark"
             onClick={async () => {
               if (!showSettings) {
-                const info = await scrcpy.getCacheInfo();
+                const info = await getCacheInfo();
                 setCacheInfo(info);
               }
               setShowSettings(!showSettings);
@@ -306,13 +305,13 @@ export function ControlSidebar({
 
           {showSettings && (
             <div
-              className="absolute bottom-full left-full mb-1 ml-1 bg-white/95 backdrop-blur-xl border border-slate-200 rounded-xl overflow-hidden z-50 min-w-[168px] shadow-float animate-scale-in"
+              className="absolute bottom-full left-full mb-1 ml-1 bg-slate-800/95 backdrop-blur-xl border border-slate-700 rounded-xl overflow-hidden z-50 min-w-[168px] shadow-float animate-scale-in"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="px-3 py-2.5 text-xs text-slate-600 space-y-2">
+              <div className="px-3 py-2.5 text-xs text-slate-400 space-y-2">
                 <div className="flex items-center justify-between gap-3">
                   <span>缓存大小</span>
-                  <span className="text-slate-900 font-mono tabular-nums">{formatCacheSize(cacheInfo?.size ?? 0)}</span>
+                  <span className="text-slate-100 font-mono tabular-nums">{formatCacheSize(cacheInfo?.size ?? 0)}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span>键盘模式</span>
@@ -324,7 +323,7 @@ export function ControlSidebar({
                       localStorage.setItem('carweb-keyboard-mode', next);
                     }}
                     className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] transition-colors ${
-                      keyboardMode === 'browser' ? 'bg-accent-100 text-accent-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      keyboardMode === 'browser' ? 'bg-accent-500/20 text-accent-400' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                     }`}
                   >
                     {keyboardMode === 'phone'
@@ -342,10 +341,10 @@ export function ControlSidebar({
                     }}
                     className={`px-2 py-0.5 rounded-md text-[10px] transition-colors ${
                       adbStore.deviceSerial && hasPin(adbStore.deviceSerial)
-                        ? 'bg-accent-100 text-accent-700'
+                        ? 'bg-accent-500/20 text-accent-400'
                         : adbStore.deviceSerial
-                          ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                          : 'bg-slate-50 text-slate-300 cursor-not-allowed'
+                          ? 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                          : 'bg-slate-800 text-slate-500 cursor-not-allowed'
                     }`}
                   >
                     {!adbStore.deviceSerial
@@ -360,7 +359,7 @@ export function ControlSidebar({
                   <button
                     onClick={() => setAudioRoute(audioRoute === 'browser' ? 'phone' : 'browser')}
                     className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] transition-colors ${
-                      audioRoute === 'browser' ? 'bg-accent-100 text-accent-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      audioRoute === 'browser' ? 'bg-accent-500/20 text-accent-400' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                     }`}
                   >
                     {audioRoute === 'browser'
@@ -374,7 +373,7 @@ export function ControlSidebar({
                     <button
                       onClick={toggleDisplayMode}
                       className={`px-2 py-0.5 rounded-md text-[10px] transition-colors ${
-                        useMirrorMode ? 'bg-accent-100 text-accent-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        useMirrorMode ? 'bg-accent-500/20 text-accent-400' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                       }`}
                     >
                       {useMirrorMode ? '镜像' : '虚拟屏'}
@@ -388,7 +387,7 @@ export function ControlSidebar({
                       <select
                         value={resolutionPreset}
                         onChange={(e) => changeResolutionPreset(e.target.value as ResolutionPresetKey)}
-                        className="px-2 py-0.5 rounded-md text-[10px] bg-slate-100 text-slate-700 border-none outline-none cursor-pointer focus-visible:ring-2 focus-visible:ring-accent-400"
+                        className="px-2 py-0.5 rounded-md text-[10px] bg-slate-700 text-slate-300 border-none outline-none cursor-pointer focus-visible:ring-2 focus-visible:ring-accent-400"
                       >
                         {RESOLUTION_PRESETS.map(p => (
                           <option key={p.key} value={p.key}>{p.label}</option>
@@ -401,11 +400,11 @@ export function ControlSidebar({
                   onClick={async () => {
                     setShowSettings(false);
                     try {
-                      const serials = await scrcpy.getAllDeviceSerials();
+                      const serials = await getAllDeviceSerials();
                       const deviceInfos: DeviceCacheInfo[] = await Promise.all(
                         serials.map(async (serial) => {
                           const deviceName = rememberedDevices.devices.find(d => d.id === serial)?.name ?? serial.slice(0, 8);
-                          const info = await scrcpy.getDeviceCacheInfo(serial);
+                          const info = await getDeviceCacheInfo(serial);
                           return { deviceSerial: serial, deviceName, ...info };
                         })
                       );
@@ -416,7 +415,7 @@ export function ControlSidebar({
                     }
                     setShowCacheSettings(true);
                   }}
-                  className="flex items-center gap-1.5 pt-1 border-t border-slate-200 mt-1 text-slate-500 hover:text-slate-900 transition-colors w-full"
+                  className="flex items-center gap-1.5 pt-1 border-t border-slate-700 mt-1 text-slate-500 hover:text-slate-100 transition-colors w-full"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>缓存设置</span>
@@ -443,15 +442,15 @@ export function ControlSidebar({
           onClose={() => setShowCacheSettings(false)}
           devices={cacheDevices}
           onClearDeviceAppCache={async (serial) => {
-            await scrcpy.clearDeviceAppCache(serial);
+            await clearDeviceAppCache(serial);
             refreshSidebarApps();
           }}
           onClearDevicePreferences={async (serial) => {
-            await scrcpy.clearDevicePreferences(serial);
+            await clearDevicePreferences(serial);
             refreshSidebarApps();
           }}
           onClearAll={async () => {
-            await scrcpy.clearAll();
+            await clearAll();
             setCacheDevices([]);
             setCacheInfo(null);
             setAppLabels(new Map());

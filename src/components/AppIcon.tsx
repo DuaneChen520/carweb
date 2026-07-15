@@ -51,7 +51,7 @@ export function AppIcon({ pkg, name, getAppIcon, onLaunch, compact, pinMode, isP
     <button
       ref={btnRef}
       onClick={() => onLaunch(pkg)}
-      className="flex flex-col items-center gap-1 p-1.5 rounded-lg hover:bg-black/10 transition-colors group relative"
+      className="flex flex-col items-center gap-1 p-1.5 rounded-lg hover:bg-white/10 transition-colors group relative"
       title={name}
     >
       {iconUrl ? (
@@ -72,7 +72,7 @@ export function AppIcon({ pkg, name, getAppIcon, onLaunch, compact, pinMode, isP
         </div>
       )}
       {!compact && (
-        <span className="text-[10px] text-black/50 truncate w-full text-center group-hover:text-black/80 transition-colors">
+        <span className="text-[10px] text-white/40 truncate w-full text-center group-hover:text-white/70 transition-colors">
           {displayName}
         </span>
       )}

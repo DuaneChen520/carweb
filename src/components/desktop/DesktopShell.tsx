@@ -91,7 +91,7 @@ export function DesktopShell({
   }, [leftApp, rightApp, onSwitchPaneApp, paneToFullscreen, closePane]);
 
   return (
-    <div className="w-full h-dvh flex bg-slate-200 overflow-hidden">
+    <div className="w-full h-dvh flex bg-slate-950 overflow-hidden">
       {/* 侧边栏：常驻，固定宽度 w-13 */}
       {sidebar && (
         <div className="flex-shrink-0">

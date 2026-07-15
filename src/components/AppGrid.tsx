@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { AppIcon } from './AppIcon';
-import { useScrcpyContext } from '@/contexts/ScrcpyContext';
+import { useScrcpyActions } from '@/contexts/ScrcpyContext';
 import { useAdbStore } from '@/hooks/useAdbStore';
 import { sortApps } from '@/lib/app-sorter';
 import { paginateApps } from '@/lib/app-pagination';
@@ -28,8 +28,7 @@ export const AppGrid = forwardRef<AppGridHandle, AppGridProps>(function AppGrid(
   { onLaunchApp, searchText, pinMode, onTogglePin },
   ref,
 ) {
-  const scrcpy = useScrcpyContext();
-  const { getAllDeviceApps, getAppIcon, getCachedAppLabels, incrementLocalCount, parseAllApps } = scrcpy;
+  const { getAllDeviceApps, getAppIcon, getCachedAppLabels, incrementLocalCount, parseAllApps } = useScrcpyActions();
   const appListVersion = useAdbStore((s) => s.appListVersion);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [deviceApps, setDeviceApps] = useState<DeviceAppRecord[]>([]);
@@ -40,9 +39,7 @@ export const AppGrid = forwardRef<AppGridHandle, AppGridProps>(function AppGrid(
     // 手动刷新：先全量重解析设备端应用元数据（清空数据/缓存失效后的恢复路径）。
     if (opts?.force) {
       try {
-        console.log('[AppGrid] 手动刷新：执行全量设备端重解析...');
         await parseAllApps();
-        console.log('[AppGrid] 全量重解析完成');
       } catch (e) {
         console.warn('[AppGrid] 全量重解析失败（将回退到缓存）:', e);
       }

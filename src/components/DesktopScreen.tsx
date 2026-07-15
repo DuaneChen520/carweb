@@ -24,7 +24,7 @@ import { ControlSidebar } from './ControlSidebar';
 import { ActivityManagerPanel } from './desktop/ActivityManagerPanel';
 import { useSessionManager } from '@/lib/session-manager';
 import { useAdbStore } from '@/hooks/useAdbStore';
-import { useScrcpyContext } from '@/contexts/ScrcpyContext';
+import { useScrcpyActions } from '@/contexts/ScrcpyContext';
 import { useAppPicker } from '@/contexts/AppPickerContext';
 import { DesktopStateStore } from '@/lib/desktop-state-store';
 import { calculateDpi } from '@/utils/display';
@@ -88,8 +88,7 @@ interface DesktopScreenProps {
 export function DesktopScreen({ onStop }: DesktopScreenProps) {
   const store = useAdbStore();
   const adb = store.adb;
-  const scrcpy = useScrcpyContext();
-  const { setAdb: setAppManagerAdb, syncAndParseIfNeeded } = scrcpy;
+  const { setAdb: setAppManagerAdb, syncAndParseIfNeeded } = useScrcpyActions();
 
   const setSessionManagerAdb = useSessionManager((s) => s.setAdb);
   const setPersistCallback = useSessionManager((s) => s.setPersistCallback);
@@ -137,7 +136,6 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
   useEffect(() => {
     setSessionManagerAdb(adb);
     if (adb) {
-      console.log('[DesktopScreen] 注入 AppManager adb，触发后台应用列表同步');
       setAppManagerAdb(adb);
       syncAndParseIfNeeded().catch((err) =>
         console.warn('[DesktopScreen] 后台同步应用列表失败:', err),
@@ -184,7 +182,6 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
       try {
         const state = await desktopStore.get(store.deviceSerial!);
         if (!state) {
-          console.log('[DesktopScreen] 无持久化分屏状态，显示空桌面');
           return;
         }
 

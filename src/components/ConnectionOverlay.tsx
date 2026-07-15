@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Monitor, Smartphone, Usb, Wifi, RefreshCw, AlertCircle, X } from 'lucide-react';
+import { Monitor, Smartphone, Usb, Wifi, RefreshCw, AlertCircle, X, CheckCircle2 } from 'lucide-react';
 import { useUsbConnection } from '../hooks/useUsbConnection';
 import { useWifiConnection } from '../hooks/useWifiConnection';
 import { useNetworkCheck } from '../hooks/useNetworkCheck';
@@ -166,6 +166,29 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
   }
 
   return (
+    <>
+      {/* Lever 4: 连接成功确认微交互 —— 独立于 fading 容器之外，全不透明度显示，与旧内容交叉淡入 */}
+      <div
+        className={`fixed inset-0 z-50 flex items-center justify-center transition-opacity duration-200 ${
+          fading ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        }`}
+      >
+        <div className="absolute inset-0 bg-slate-950/50 backdrop-blur-xl" />
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background:
+              'radial-gradient(60rem 40rem at 45% -10%, rgba(47,106,230,0.22), transparent 60%)',
+          }}
+        />
+        <div className="relative text-center animate-scale-in">
+          <div className="w-16 h-16 rounded-full bg-accent-500/20 flex items-center justify-center mx-auto mb-3">
+            <CheckCircle2 className="w-8 h-8 text-accent-400" />
+          </div>
+          <p className="text-white text-base font-medium">已连接</p>
+        </div>
+      </div>
+
     <div className={`fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 transition-opacity duration-300 ${fading ? 'opacity-0' : 'opacity-100'}`}>
       {/* 分层背景：暗色基底 + 顶部强调色径向光晕 + 细噪点，营造纵深 */}
       <div className="absolute inset-0 bg-slate-950/50 backdrop-blur-xl" />
@@ -173,17 +196,22 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
         className="absolute inset-0 pointer-events-none"
         style={{
           background:
-            'radial-gradient(60rem 40rem at 50% -10%, rgba(47,106,230,0.22), transparent 60%)',
+            'radial-gradient(60rem 40rem at 45% -10%, rgba(47,106,230,0.22), transparent 60%)',
         }}
       />
       <div className="absolute inset-0 pointer-events-none noise-overlay" />
 
       <div className="relative w-full max-w-md mt-[10vh] mb-8 animate-scale-in">
-        <div className="text-center mb-8">
-          <h1 className="text-5xl font-extrabold tracking-tight text-white mb-2 bg-gradient-to-b from-white to-slate-300 bg-clip-text text-transparent">
+        <div className="text-center mb-10">
+          <h1 className="text-5xl font-black tracking-tight text-white mb-2 bg-gradient-to-b from-white to-slate-300 bg-clip-text text-transparent">
             CARWEB
           </h1>
           <p className="text-slate-400">为手机拓展的浏览器大屏</p>
+          <div className="flex items-center justify-center gap-1.5 mt-4">
+            <div className="w-8 h-0.5 rounded-full bg-accent-500/40" />
+            <div className="w-1.5 h-1.5 rounded-full bg-accent-400/60" />
+            <div className="w-8 h-0.5 rounded-full bg-accent-500/40" />
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4 mb-6">
@@ -386,6 +414,8 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
           </div>
         </div>
       </div>
-    </div>
+
+      </div>
+    </>
   );
 }
