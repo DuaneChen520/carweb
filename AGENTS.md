@@ -6,6 +6,22 @@
 
 1.任何情况下，你都需要使用中文与我对话
 
+## 验证命令
+
+改动 `src/` 下任何代码后，以下三条命令必须全部通过后方可视为完成：
+
+| 命令 | 作用 | 何时必跑 |
+| --- | --- | --- |
+| `npm run test` | 运行 Vitest 全量测试（`vitest run`） | 改动 `src/` 后必跑 |
+| `npm run check` | TypeScript 类型检查（`tsc -b --noEmit`） | 改动 `src/` 后必跑 |
+| `npm run lint` | ESLint 静态检查（`eslint .`） | 改动 `src/` 后必跑 |
+
+仅改动文档（`*.md`）时可跳过；任一命令失败时须先修复再交付，不得带失败结果收尾。
+
+## 核心边界
+
+`src/lib/` 与 `src/hooks/scrcpy/` 是本项目的核心热点区（ADB 连接、scrcpy 会话、链路健康、应用信息缓存等关键逻辑集中于此）。对这两个目录的任何行为性改动，必须附带配套测试（新增或更新相邻的 `*.test.ts`），仅重命名/注释类改动除外。
+
 ## Agent skills
 
 ### Issue tracker

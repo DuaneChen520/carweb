@@ -2,7 +2,11 @@
 
 ## 状态
 
-已采纳
+已采纳且已落地（2026-07 确认）。实现位于 `src/lib/scrcpy-session.ts` 的 `ScrcpySession.start()`
+（虚拟屏分支的 `captureOrientation` 构造处，带 ADR-0011/ADR-0001 注释）。
+
+> 历史备注：本决策曾长期未落地（旧代码为 `Unlocked`，构成 open gap，见 CONTEXT.md 旧版记录），
+> 后随 ADR-0011 启动过渡收口一并实现。当前代码现状即本决策。
 
 ## 日期
 
@@ -41,5 +45,6 @@ captureOrientation: new ScrcpyCaptureOrientation(
 
 ## 关联
 
-- `CONTEXT.md` — 术语定义
-- `src/hooks/useScrcpy.ts` — 实现代码
+- `CONTEXT.md` — 术语定义（「方向锁定（captureOrientation）」一节）
+- `src/lib/scrcpy-session.ts` — 实现代码（`ScrcpySession.start()` 的 `captureOrientation` 选项）
+- ADR-0011 — 虚拟屏启动过渡（本决策随其实施落地）

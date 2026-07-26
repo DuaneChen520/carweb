@@ -54,11 +54,13 @@ CarWeb 是基于 **WebADB + Scrcpy** 的车机投屏 Web 应用：通过浏览�
 使用 Scrcpy `newDisplay` 参数在手机上创建一个**全新的虚拟显示屏**（非物理屏镜像），初始尺寸由车机浏览器窗口尺寸决定；
 并通过 **`flex_display=true`**（scrcpy 4.0 协议标志）将其声明为**可运行时 resize 的 flex 显示**。
 
-- 创建原语仍是 `new ScrcpyNewDisplay(width, height, dpi)`（`scrcpy-session.ts:293`），提供初始几何尺寸。
-- `flex_display=true` 由 `AdbScrcpyOptions4_0.serialize()` 追加（`src/lib/scrcpy4/options.ts:42`），
-  二者需配合使用（`options.ts:131` 注释「需配合 newDisplay」）——**flex_display 是 newDisplay 的增强，并非替代**。
+- 创建原语仍是 `new ScrcpyNewDisplay(width, height, dpi)`（`scrcpy-session.ts` 中 `ScrcpySession.start()`
+  构造 `newDisplay` 选项处），提供初始几何尺寸。
+- `flex_display=true` 由 `AdbScrcpyOptions4_0.serialize()` 追加（`src/lib/scrcpy4/options.ts` 的
+  `serialize()` 覆写中 `value.flexDisplay` 分支），二者需配合使用（`AdbScrcpyOptions4_0.Init` 的
+  `flexDisplay` 字段注释「需配合 newDisplay」）——**flex_display 是 newDisplay 的增强，并非替代**。
 - flex 显示支持运行时改分辨率：`FlexDisplayClient`（`src/lib/scrcpy4/flex-client.ts`）通过
-  `RESIZE_DISPLAY`（控制消息类型 21，`scrcpy4/options.ts:15`）发送 resize，无需重建显示。
+  `RESIZE_DISPLAY`（控制消息类型 21，`scrcpy4/options.ts` 的 `RESIZE_DISPLAY_TYPE` 常量）发送 resize，无需重建显示。
 
 ### 镜像模式（Mirror Mode）
 直接镜像手机物理屏幕（`displayId: 0`），不创建新虚拟屏。
@@ -76,38 +78,35 @@ CarWeb 是基于 **WebADB + Scrcpy** 的车机投屏 Web 应用：通过浏览�
 - **并发上限**：最多 3 个 streaming session（左 + 右 + 1 全屏）+ N 个 background session
   （仅占设备虚拟屏，不占浏览器解码资源）。
 
-## 方向锁定（captureOrientation）—— `Unlocked`，决策 gap 已确认但与「启动多次跳转」无关
+## 方向锁定（captureOrientation）—— `LockedInitial`，ADR-0001 决策已落地
 
-`ScrcpySession.start()` 当前对虚拟屏使用 `captureOrientation: ScrcpyCaptureOrientation.Unlocked`
-（见 `scrcpy-session.ts:294`）。
+`ScrcpySession.start()` 当前对虚拟屏使用
+`captureOrientation: new ScrcpyCaptureOrientation(ScrcpyLockOrientation.LockedInitial, ScrcpyOrientation.Orient0)`
+（`scrcpy-session.ts` 中紧随 `newDisplay` 选项的 `captureOrientation` 构造处，带 ADR-0011/ADR-0001 注释）。
 
-**决策状态（open gap）**：ADR-0001（早期文档，非当前事实源）曾决定锁定到初始方向（`LockedInitial`），
-但该决策**从未落到当前 `ScrcpySession` 代码**（代码仍为 `Unlocked`）。
+**决策状态（已收口）**：ADR-0001 决定锁定到初始方向（`LockedInitial`）。该决策曾长期未落地
+（旧代码为 `Unlocked`，构成 open gap），现已实现于 `ScrcpySession`：锁定的是「虚拟屏创建时的初始方向」，
+而初始方向由窗口宽高比（`displayConfig`）决定；运行时改分辨率由 flex display resize 承担，灵活性不受影响。
 
-**与本次现象的关系**：用户实测**未出现**方向旋转导致的「画面跳动」，因此该 gap **不是**「应用启动多次跳转」的根因。
-「多次跳转」应按**应用启动流程**分析（见下节），而非归咎于方向锁。
-
-## 应用启动流程（App Launch Flow）——「多次跳转/慢启动」的嫌疑步骤
+## 应用启动流程（App Launch Flow）——历史「多次跳转/慢启动」嫌疑步骤均已收口
 
 应用启动由 `SessionManager.launchOnPane/launchFullscreen` → `ScrcpySession.start` → `ScrcpySession.startAppOnDisplay`
-→ `adb-commands.startAppOnDisplay` 串联完成。按此顺序，存在以下**会产生可见过渡/延迟**的步骤：
+串联完成。历史上产生可见过渡/延迟的步骤及其现状：
 
-1. **`killScrcpyServer(adb)` 在每次启动开头执行**（session-manager.ts:342 / 401）：
-   其实现为 `pkill -f scrcpy`（`adb-commands.ts:421`），会**杀掉设备上全部 scrcpy server**，
-   而非仅清残留。多窗格/多实例场景下会误杀其它正在运行的 session；单实例下也是「先全杀再重建」的激进路径，增加延迟。
-2. **虚拟屏创建后 `forceStopPackage(homePkg)`**（scrcpy-session.ts:394）：
-   新建的虚拟屏会先显示系统 Launcher，随即被强杀 → 出现「Launcher 闪现 → 黑屏 → 应用出现」的可见过渡。
-3. **`startAppOnDisplay` 的双路径回退**（adb-commands.ts:332-394）：
-   - 策略1：`am start -W --display <id> -n <comp>`，随后**无条件 `sleep(2000)`**（:352）。
-   - 若 ROM 忽略 `--display`（应用落到了主屏），策略2：**先在主屏 `am start`**（:361）→ `sleep(2500)` →
-     `am task move-to-display <id>`（:369）→ `sleep(1500)`。应用会**先在主屏出现、再被搬到虚拟屏**，
-     这是最典型的「多次跳转」可见动画；整条回退路径累计 ~6s 等待。
+1. **不再于每次启动前全局杀 server**：`launchOnPane/launchFullscreen` 已移除启动开头的
+   `killScrcpyServer`（见 `session-manager.ts` 中 `launchOnPane` 内的 T6 注释）。各会话有独立 `scid`
+   反向隧道，残留 server 不再阻塞新会话。全局 `pkill -f scrcpy`（`adb-commands.ts` 的 `killScrcpyServer`）
+   仅在两处兜底：USB 连接引导（`useUsbConnection.ts` 的 `connectOnce`）与冷启动对账
+   （`session-manager.ts` 的 `reconcileVirtualDisplaysOnColdStart`，仅 0 会话冷启动窗口，ADR-0014）。
+2. **虚拟屏创建后不再强杀 Launcher**：原「`forceStopPackage(homePkg)` 导致 Launcher 闪现 → 黑屏 →
+   应用出现」的路径已删除；`forceStopPackage` 现仅在 `closeApp`（关闭 app）时对目标包调用。
+3. **`startAppOnDisplay` 改用原生控制消息**：`ScrcpySession.startAppOnDisplay` 通过 scrcpy server
+   原生 `startApp`（控制消息 type 16）直接在本会话附着的虚拟屏启动 app（见该方法的 T2 注释），
+   取代旧的 `am start --display` + 「主屏启动 + `move-to-display` 搬运」双路径回退与三个 sleep（累计 ~6s）；
+   「先在主屏出现再被搬进虚拟屏」的跳转不复存在，也不依赖 ROM 是否支持 `am --display`。
 4. **`AppLaunchingOverlay` 已删除**：原零引用死代码（全屏深色遮罩、无任何 import/渲染），其"启动过渡"角色由
-   ADR-0011 的 `AppTransitionPlaceholder`（浅色+图标统一占位）取代；用户看到的启动动画来自**真实显示内容的过渡**
-   （Launcher 强杀、主屏→虚拟屏搬运），而非该 DOM 覆盖层。
-
-> 诊断「多次跳转」时优先确认策略2是否触发（看 `[launch-diag]` 日志中「策略1 后 进程存活 / display分段」），
-> 以及 Launcher 强杀的可见过渡是否可合并进启动序列以消除闪烁。
+   ADR-0011 的 `AppTransitionPlaceholder`（浅色+图标统一占位）取代；启动期的视觉过渡来自真实显示内容变化，
+   而非该 DOM 覆盖层。
 
 ## 分辨率预设（Resolution Preset）
 用户可选虚拟屏画质档位，在保持窗口宽高比前提下按比例缩放（`useScrcpySession.ts` 的 `RESOLUTION_PRESETS`）：
@@ -152,16 +151,17 @@ Android 概念：`sw(dp) = min(width_px, height_px) × 160 / dpi`。标准大屏
 
 `connectionStatus` 的 `disconnected` 既是「应用层有意关闭」也是「物理/传输真掉线」的**共用信号**，
 二者在 `useAdbStore.disconnect()` → `adb.close()` → `adb.disconnected` 回调链中被混写，
-且 `App.tsx:101` 在 `overlay=hidden` 时**无条件**将 `disconnected` 解读为「使用中真掉线」并弹
+且 `App.tsx` 中「`connectionStatus === 'disconnected' && overlayState === 'hidden'`」的 effect
+在 `overlay=hidden` 时**无条件**将 `disconnected` 解读为「使用中真掉线」并弹
 “USB 连接已断开” overlay。这是「已绑定设备连接时误弹断线」的根因。
 
 - **有意断开（intentional disconnect）**：由代码主动发起的关闭——`tryAutoConnectUsb` 开头的前置
-  `store.disconnect()`（`useUsbConnection.ts:82`）、`handleStop`（`App.tsx:164`）、
-  `beforeunload` 的 `adb.close()`（`App.tsx:39`）。**不应**触发“使用中掉线”overlay。
+  `store.disconnect()`（`useUsbConnection.ts`）、`handleStop`（`App.tsx`）、
+  `beforeunload` 监听内的 `adb.close()`（`App.tsx` 的 `handleBeforeUnload`）。**不应**触发“使用中掉线”overlay。
 - **真实掉线（real drop）**：用户拔线 / USB 传输异常导致 `adb.disconnected` 在**无有意关闭标记**下触发。
-  **应**触发“使用中掉线”overlay（由 `App.tsx:101` 承接）。
+  **应**触发“使用中掉线”overlay（由上述 `App.tsx` 的 `disconnected + overlay=hidden` effect 承接）。
 - **修复不变量（提案）**：`adb.disconnected` 回调需按「是否有意关闭标记」分流——
   有意 → 置 `idle` 且不写 `disconnected`；真实 → 写 `disconnected`。细节见 `docs/adr/0007-isolate-intentional-vs-real-disconnect.md`。
-- **`reconnecting` overlay**：`ConnectionOverlay.tsx:113-121` 的“USB 连接已断开”提示，
-  唯一由 `App.tsx:101`（`disconnected` + `overlay=hidden`）触发；mirror 路径另由 `LinkSupervisor`
-  的 `disconnected/failed` 经 `subscribeLinkState` 承接（`App.tsx:109-116`）。
+- **`reconnecting` overlay**：`ConnectionOverlay.tsx` 中「USB 连接已断开」文案分支的提示，
+  唯一由上述 `App.tsx` 的 `disconnected + overlay=hidden` effect 触发；mirror 路径另由 `LinkSupervisor`
+  的 `disconnected/failed` 经 `subscribeLinkState` 订阅 effect 承接（`App.tsx`）。

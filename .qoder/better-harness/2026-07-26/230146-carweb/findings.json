@@ -1,0 +1,185 @@
+{
+  "summary": {
+    "projectName": "carweb",
+    "locale": "zh-CN",
+    "modelId": "agent-work-loop-v4",
+    "reportContractVersion": 25,
+    "overview": "项目侧领域上下文密度罕见地高（CONTEXT.md + 16 篇 ADR + 116 个被追踪测试文件），但三类入口文档已发生可验证漂移；交付边界上 push master 即构建部署，部署前没有任何质量门；本 30 天窗口会话证据不可用（证据源缺失/被禁用），行为习惯与学习回路只能保持未观察。",
+    "aiAgentPractice": {
+      "inspectedSurfaces": [
+        "Rules",
+        "Workflows"
+      ],
+      "coverageRows": [
+        {
+          "surface": "Rules",
+          "scopes": [
+            "Project"
+          ],
+          "count": 2,
+          "paths": [
+            "AGENTS.md",
+            "DESIGN.md"
+          ]
+        },
+        {
+          "surface": "Workflows",
+          "scopes": [
+            "Project"
+          ],
+          "count": 1,
+          "paths": [
+            ".github/workflows/deploy.yml"
+          ]
+        },
+        {
+          "surface": "Skills",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        },
+        {
+          "surface": "Custom Agents",
+          "scopes": [
+            "Project"
+          ],
+          "count": 0
+        }
+      ]
+    },
+    "assignmentSummaries": [],
+    "dimensions": [
+      {
+        "id": "task-understanding",
+        "label": "任务理解",
+        "score": 56,
+        "summary": "CONTEXT.md 与 ADR 体系提供了少见的领域上下文密度，但唯一入口 AGENTS.md 极薄、行号级引用已实测漂移、核心边界与 vendored 目录性质均未声明。",
+        "findingRefs": [
+          "context-md-line-references-drift",
+          "agents-md-missing-validation-and-core-boundary",
+          "vendored-upstream-no-boundary",
+          "readme-structure-drift"
+        ]
+      },
+      {
+        "id": "controlled-execution",
+        "label": "可控执行",
+        "score": 60,
+        "summary": "README 提供标准 npm 启动路径，patch-package 补丁依赖已在 postinstall 声明；本次未实际执行启动或校验，权限行为无会话证据，仅有声明性证据。",
+        "findingRefs": []
+      },
+      {
+        "id": "change-validation",
+        "label": "改动验证",
+        "score": 64,
+        "summary": "test/check/lint 脚本齐备，测试与热点源码在提交历史中同步演进（13 组源码/测试共变候选），但本次未运行任何检查，且测试落点存在双轨布局。",
+        "findingRefs": [
+          "dual-test-layout-src-lib"
+        ]
+      },
+      {
+        "id": "reliable-delivery",
+        "label": "可靠交付",
+        "score": 40,
+        "summary": "唯一 CI 通路在部署 GitHub Pages 前不运行任何验收检查，验收机制缺失；回滚路径未文档化，外部 CI 历史状态未访问。",
+        "findingRefs": [
+          "deploy-without-quality-gates"
+        ]
+      },
+      {
+        "id": "learning-capture",
+        "label": "经验沉淀",
+        "score": 38,
+        "summary": "已完成有界审查，但窗口内会话证据不可用（0 个合格会话，源根缺失/被禁用），重复流程/知识需求无法闭合，该缺口保留在证据边界内；项目 Skills 为 0 且无可追溯的重复会话候选，本轮不提出任何资产增删主张。建议先核实会话证据源配置，再在证据可用的窗口重跑评估。",
+        "findingRefs": []
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "deploy-without-quality-gates",
+      "title": "推送 master 即直接部署，lint、类型检查与测试没有任何机械执行点",
+      "severity": "High",
+      "reason": "事实：.github/workflows/deploy.yml 仅执行 npm ci → npm run build → 部署 GitHub Pages，.github/workflows/ 下无其他门禁 workflow，也无 pre-commit 钩子引用 package.json 中已存在的 lint/check/test 脚本（lead 已打开该 workflow 核实）。推断：agent 或人一旦漏跑本地校验，未经验证的变更会直接发布到公开页面，合并验收与部署防线合一且无门。不确定性：CI 历史运行结果与测试当前是否通过均未验证（本次未执行任何测试/构建）。",
+      "expectedOutput": [
+        "部署以 check、lint、test 全部通过为前提，任一失败即中止发布。"
+      ],
+      "expectedArtifact": "Workflow",
+      "aiFixPrompt": "/better-harness fix this issue\n\n在 .github/workflows/deploy.yml 的 build job 中、npm run build 之前，插入 npm run check、npm run lint、npm run test 三个步骤（或新增一个部署前置的独立校验 workflow），使部署以三者通过为前提。保持现有 GitHub Pages 发布步骤不变。\n\n## Validation\n\n- 本地依次运行 npm run check、npm run lint、npm run test，确认当前基线全部通过\n- 检查 workflow YAML 语法有效，且校验步骤位于 build/部署之前并会在失败时中止 job",
+      "dimensionRefs": [
+        "reliable-delivery"
+      ]
+    },
+    {
+      "id": "context-md-line-references-drift",
+      "title": "CONTEXT.md 的行号级代码引用已实测漂移，会把 agent 引到错误位置",
+      "severity": "Medium",
+      "reason": "事实：抽查 3 处行号引用均错位——文档称 new ScrcpyNewDisplay(...) 在 scrcpy-session.ts:293，实际在 484 行（lead 复核）；pkill 实际在 adb-commands.ts:268 而文档写 421；flex_display 实际在 options.ts:58 而文档写 42。CONTEXT.md 是 docs/agents/domain.md 指定的探索前必读事实源，最后更新于 2026-07-14，其后发生多次大重构且无任何机械校验手段；文档另自述 ADR-0001（方向锁定）从未落地，冲突长期未收口。推断：agent 会基于错位引用读取错误上下文且不易察觉。不确定性：其余数十处行号引用未全量核查，属抽样推断。",
+      "expectedOutput": [
+        "CONTEXT.md 的代码引用可通过符号名稳定定位，不再依赖易腐的精确行号。"
+      ],
+      "expectedArtifact": "Doc",
+      "aiFixPrompt": "/better-harness fix this issue\n\n将 CONTEXT.md 中的精确行号引用降级为「文件 + 符号名/搜索锚点」形式（例如 scrcpy-session.ts 中 ScrcpyNewDisplay 构造处），优先修正已确认漂移的三处（scrcpy-session.ts、adb-commands.ts、scrcpy4/options.ts），并顺带核对其余行号引用；同时收口 ADR-0001 的状态描述（标注 superseded 或说明现状即为决策）。\n\n## Validation\n\n- 对修改后的每处引用用 rg 按符号名搜索，确认能唯一定位到目标代码\n- 确认 CONTEXT.md 不再包含已知错位的行号引用",
+      "dimensionRefs": [
+        "task-understanding"
+      ]
+    },
+    {
+      "id": "agents-md-missing-validation-and-core-boundary",
+      "title": "AGENTS.md 不含验证命令与核心边界，agent 只能翻 package.json 猜",
+      "severity": "Medium",
+      "reason": "事实：AGENTS.md 全文 21 行，仅有中文沟通规则与 issue-tracker/triage/domain-docs 三个指针，完全不提 npm run test/check/lint 及何时必跑，也不声明核心区。证据包显示：584 个源文件仅 1 份 AGENTS.md（低于该规模建议最小值 3），核心代码边界配置缺失（coreCodeRules=missing，只能推断），而 src/lib（180 天 80 commits）与 src/hooks/scrcpy 是高置信核心候选。推断：agent 的任务入口缺失『怎么验证』与『哪里是核心』两类关键路由。不确定性：agent 实际因此走错路属结构性推断，无会话事故记录。",
+      "expectedOutput": [
+        "新会话 agent 从 AGENTS.md 即可获知验证命令与核心边界，无需翻查猜测。"
+      ],
+      "expectedArtifact": "Rules",
+      "aiFixPrompt": "/better-harness fix this issue\n\n在根 AGENTS.md 增补两节：(1) 验证命令面——npm run test / npm run check / npm run lint 各自的作用与何时必跑（改动 src/ 后必须全部通过）；(2) 核心边界声明——src/lib 与 src/hooks/scrcpy 为核心热点区，改动需带配套测试。保持现有中文沟通规则与三个指针不变。\n\n## Validation\n\n- 通读修改后的 AGENTS.md，确认新增内容与 package.json scripts 实际名称一致\n- 确认三个既有文档指针未被破坏",
+      "dimensionRefs": [
+        "task-understanding"
+      ]
+    },
+    {
+      "id": "vendored-upstream-no-boundary",
+      "title": "734 个 vendored 上游文件混入检索面，且无「仅参考、勿改」声明",
+      "severity": "Medium",
+      "reason": "事实：ya-webadb-main/ 是上游 monorepo 的完整拷贝，git 追踪 734 个文件，自初始提交后零改动；实际依赖走 npm 包 @yume-chan/* 加 patches/ 补丁，但 AGENTS.md、README、CONTEXT.md 均未声明该目录性质与禁改边界。已观察到的后果：本次证据包已把其中 apps/cli/src/index.ts 误识别为项目入口候选，说明工具侧检索确实被污染，该目录占分析源文件的约 85%。推断：agent 存在将其当作可修改代码的风险。不确定性：尚无 agent 实际误改它的事故记录。",
+      "expectedOutput": [
+        "agent 在检索与改动决策时能明确将 ya-webadb-main/ 识别为只读参考，不再当作可修改代码。"
+      ],
+      "expectedArtifact": "Rules",
+      "aiFixPrompt": "/better-harness fix this issue\n\n在根 AGENTS.md 增加一条边界声明：ya-webadb-main/ 为只读上游参考拷贝，任何功能改动都不应发生在该目录；真实依赖是 npm 包 @yume-chan/* 加 patches/ 目录中的 patch-package 补丁。可同时在 ya-webadb-main/ 目录内就近放置一份简短说明。不要在本次修复中移动或删除该目录。\n\n## Validation\n\n- 确认 AGENTS.md 新增声明与 package.json 依赖及 patches/ 现状一致\n- 确认未改动 ya-webadb-main/ 内任何源文件",
+      "dimensionRefs": [
+        "task-understanding"
+      ]
+    },
+    {
+      "id": "dual-test-layout-src-lib",
+      "title": "src/lib 测试布局双轨并存，同一被测面出现两处近似重名测试",
+      "severity": "Low",
+      "reason": "事实：src/lib/ 下同层存在 co-located 测试（如 apk-parser.test.ts）与集中式 __tests__/ 目录，且无文档化落点规则；scrcpy4 options 同时被 src/lib/__tests__/scrcpy4-options.test.ts 与 src/lib/scrcpy4/__tests__/options.test.ts 覆盖，30 天窗口内两者均在活跃演进。推断：agent 修改后判断『该跑/该改哪些测试』的路由不明确，新测试落点靠猜。不确定性：两个 options 测试的实际覆盖是否重叠未做内容比对；vitest 全量收集不受影响（默认行为推断，未运行验证）。",
+      "expectedOutput": [
+        "同一被测面只有一个测试归属地，新测试落点有明确的文档化规则。"
+      ],
+      "expectedArtifact": "Doc",
+      "aiFixPrompt": "/better-harness fix this issue\n\n先比对 src/lib/__tests__/scrcpy4-options.test.ts 与 src/lib/scrcpy4/__tests__/options.test.ts 的覆盖内容，将其合并到一个落点；然后在 AGENTS.md（或 src/lib 就近说明）中文档化单一测试落点规则（co-located 或集中式二选一），后续新测试遵循该规则。\n\n## Validation\n\n- 合并后运行 npm run test，确认全量通过且无用例丢失\n- 确认文档化规则与合并后的实际布局一致",
+      "dimensionRefs": [
+        "change-validation"
+      ]
+    },
+    {
+      "id": "readme-structure-drift",
+      "title": "README 的项目结构段落描述早期目录，首入口即误导",
+      "severity": "Low",
+      "reason": "事实：README.md 的项目结构段落列出已不存在的 src/components/ConnectionPanel.tsx（lead 已用当前目录核实不存在），且缺失 src/lib、src/contexts、src/components/desktop 等当前主体目录；README 最后更新于 2026-07-01，早于其后的多次重构。推断：README 是新会话 agent 与新读者的第一入口，漂移的结构图会给出错误的心智模型。不确定性：README 其余段落（快速开始、原理说明）未逐条核对时效性。",
+      "expectedOutput": [
+        "README 结构段落与当前代码树一致，首次进入项目的读者获得正确的模块地图。"
+      ],
+      "expectedArtifact": "Doc",
+      "aiFixPrompt": "/better-harness fix this issue\n\n用当前真实目录结构更新 README.md 的项目结构段落：移除已不存在的文件（如 ConnectionPanel.tsx），补充 src/lib、src/contexts、src/hooks/scrcpy、src/components/desktop 等当前主体目录，粒度保持到目录级即可，避免再次列举易漂移的单文件清单。\n\n## Validation\n\n- 将更新后的结构段落与实际目录树逐项比对，确认无幻影文件与重大缺漏",
+      "dimensionRefs": [
+        "task-understanding"
+      ]
+    }
+  ]
+}
