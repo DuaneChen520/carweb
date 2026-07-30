@@ -9,7 +9,7 @@ const ipaStubPath = resolve(__dirname, 'src/lib/ipa-stub.ts');
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/carweb/',
+  base: './',
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
