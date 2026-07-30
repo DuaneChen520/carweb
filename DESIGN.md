@@ -69,52 +69,48 @@
 
 ### 3.0 字体加载（阿里巴巴普惠体 3.0）
 
-- 默认字体即 **阿里巴巴普惠体 3.0（Alibaba PuHuiTi 3.0）**——一款同时覆盖中文与拉丁字符的开源无衬线，原生提供 **7 个字重**（35 ExtraLight → 95 Black）。这是全站唯一主字族。
-- **自托管** 7 个字重文件于 `public/fonts/puhuiti/`，通过 `@font-face` 逐档映射（见下）；字体随构建产物走，不依赖外部 CDN，杜绝断链。
-- `@font-face` 模板（文件名按官方发布包对应调整）：
+- 默认字体即 **阿里巴巴普惠体 3.0（Alibaba PuHuiTi 3.0）**——一款同时覆盖中文与拉丁字符的开源无衬线，永久免费商用。这是全站**唯一主字族**，不叠加 Outfit 或任何系统字体。
+- **自托管 4 个字重于** `public/fonts/puhuiti/`（界面实际渲染的字重：Regular 400 / Medium 500 / SemiBold 600 / Black 900），通过 `@font-face` 逐档映射；字体随构建产物走，不依赖外部 CDN，杜绝断链。
+- 字重文件来自官方 3.0 字体（经 npm 包 `@pinhai/ali-fonts`@1.0.4 打包的 woff2），从 jsDelivr 拉取后落地 `public/fonts/puhuiti/`。
+- 仅自托管**界面真实使用**的 4 档字重——未使用的 Light 300 / Bold 700 / ExtraBold 800 属死重（约 16MB），已剔除，避免无谓增大仓库与部署包体积。
+- `@font-face` 实际映射（CSS `font-weight` 命中，文件名即官方 3.0 字重名）：
 
 ```css
-/* 阿里巴巴普惠体 3.0 —— 7 字重 */
-@font-face { font-family: "PuHuiTi 3.0"; font-weight: 200; src: url("/fonts/puhuiti/ExtraLight.woff2") format("woff2"); font-display: swap; }
-@font-face { font-family: "PuHuiTi 3.0"; font-weight: 300; src: url("/fonts/puhuiti/Light.woff2")     format("woff2"); font-display: swap; }
-@font-face { font-family: "PuHuiTi 3.0"; font-weight: 400; src: url("/fonts/puhuiti/Regular.woff2")    format("woff2"); font-display: swap; }
-@font-face { font-family: "PuHuiTi 3.0"; font-weight: 500; src: url("/fonts/puhuiti/Medium.woff2")     format("woff2"); font-display: swap; }
-@font-face { font-family: "PuHuiTi 3.0"; font-weight: 700; src: url("/fonts/puhuiti/Bold.woff2")       format("woff2"); font-display: swap; }
-@font-face { font-family: "PuHuiTi 3.0"; font-weight: 800; src: url("/fonts/puhuiti/Heavy.woff2")      format("woff2"); font-display: swap; }
-@font-face { font-family: "PuHuiTi 3.0"; font-weight: 900; src: url("/fonts/puhuiti/Black.woff2")      format("woff2"); font-display: swap; }
+/* 阿里巴巴普惠体 3.0 —— 4 字重（界面实际渲染） */
+@font-face { font-family: "Alibaba PuHuiTi 3.0"; font-weight: 400; src: url("/fonts/puhuiti/Regular.woff2")    format("woff2"); font-display: swap; }
+@font-face { font-family: "Alibaba PuHuiTi 3.0"; font-weight: 500; src: url("/fonts/puhuiti/Medium.woff2")     format("woff2"); font-display: swap; }
+@font-face { font-family: "Alibaba PuHuiTi 3.0"; font-weight: 600; src: url("/fonts/puhuiti/SemiBold.woff2")   format("woff2"); font-display: swap; }
+@font-face { font-family: "Alibaba PuHuiTi 3.0"; font-weight: 900; src: url("/fonts/puhuiti/Black.woff2")      format("woff2"); font-display: swap; }
 ```
 
-- 若改用第三方 CDN，必须核验链接有效（本系统禁止失效字体链接）。
-- 七档字重务必**全部映射并可被 CSS `font-weight` 命中**，不可只挂 1–2 档而浪费 7 字重能力。
+- 四档字重**全部映射并可被 CSS `font-weight` 命中**，覆盖界面实际用到的 400/500/600/900（含界面常用的 SemiBold 600 与强提醒用的 Black 900）。
 
 ### 3.1 字族
 
-- **默认（中文 + 拉丁）**：`"PuHuiTi 3.0", "PingFang SC", "Microsoft YaHei", -apple-system, sans-serif`
-  —— 普惠体本身含拉丁字形，作为唯一主字族；系统中文栈仅作降级回退。**禁用 `Inter`**。
-- **等宽（遥测数字 / 时间戳 / scrcpy 链路读数）**：`"Geist Mono", "JetBrains Mono", ui-monospace, monospace`
+- **默认（中文 + 拉丁）**：`"Alibaba PuHuiTi 3.0", sans-serif`
+  —— 普惠体本身含拉丁字形，作为唯一主字族；`sans-serif` 仅作最后的通用回退。**禁用 `Outfit` / `Inter` 等任何其它字体**。
+- **等宽（遥测数字 / 时间戳 / scrcpy 链路读数）**：`"Alibaba PuHuiTi 3.0", sans-serif`
+  —— 按「唯一字体」要求，`font-mono` 同样指向阿里巴巴普惠体 3.0（配合 `tabular-nums` 保证数字等宽对齐），不再引入 Geist Mono / JetBrains Mono。
   —— 普惠体为比例字体，密集数字列对齐仍走等宽；密度 ≥ 7 时所有数字（码率、分辨率、延迟、PID）**必须使用等宽**。
 
-### 3.2 七字重排印层级（有效利用 PuHuiTi 3.0 全字重）
+### 3.2 四字重排印层级（实际渲染字重）
 
 | PuHuiTi 字重 | CSS 字重 | 角色 | 用途 |
 |---|---|---|---|
-| 35 ExtraLight | 200 | 氛围极细 | 超大号空态数字、引导细描（仅大字号，慎用） |
-| 45 Light | 300 | 次级引导 | 空态插画配文、副标题、说明性大标 |
 | 55 Regular | 400 | 正文基准 | Body 描述、列表项、帮助文字 |
 | 65 Medium | 500 | 元数据 | 设备名、时间戳、状态文本、列表强调项 |
-| 75 Bold | 700 | 结构标题 | 面板标题 Heading、按钮 Control、标签 |
-| 85 Heavy | 800 | 主标 / 读数 | Display 主标题、关键遥测读数（码率 / 分辨率） |
+| 75 SemiBold | 600 | 结构标题 | 面板标题 Heading、按钮 Control、标签 |
 | 95 Black | 900 | 最高强调 | 告警标题、品牌标、极少数强提醒 |
 
-- **层级靠 7 档字重差 + 颜色建立**，不靠一味放大字号；相邻层级至少跨一档字重以保证可辨。
-- 实例映射：Display = 85 Heavy｜Heading = 75 Bold｜Body = 55 Regular｜Meta = 65 Medium｜Control = 75 Bold；超大号氛围数字用 35/45，告警用 95 Black。
+- **层级靠 4 档字重差 + 颜色建立**，不靠一味放大字号；相邻层级至少跨一档字重以保证可辨。
+- 实例映射：Display = 95 Black｜Heading = 75 SemiBold｜Body = 55 Regular｜Meta = 65 Medium｜Control = 75 SemiBold；告警用 95 Black。
 - 标题缩放统一用 `clamp()`；正文单行 ≤ **65ch**；正文最小 `1rem`(16px)，`14px` 仅限密集元数据。
 
 ### 3.3 禁用
 
 - ❌ `Inter`、泛用系统默认无衬线（在追求质感处）。
 - ❌ 衬线字体（`Times New Roman`/`Georgia`/`Garamond`）——**仪表盘 / 软件 UI 一律禁止衬线**。
-- ❌ 只用到 2–3 档字重而浪费普惠体 7 字重能力；❌ 纯装饰性超大标题。
+- ❌ 引入界面未使用的字重（Light/Bold/ExtraBold）而徒增部署体积；❌ 纯装饰性超大标题。
 
 ---
 

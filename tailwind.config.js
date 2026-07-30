@@ -8,30 +8,11 @@ export default {
     },
     extend: {
       fontFamily: {
-        // Latin/数字用 Outfit（有性格的几何 grotesk），CJK 回退到系统字体，
-        // 保证离线车机环境下优雅降级。
-        sans: [
-          "Outfit",
-          "-apple-system",
-          "BlinkMacSystemFont",
-          "Segoe UI",
-          "PingFang SC",
-          "Microsoft YaHei",
-          "Noto Sans SC",
-          "Helvetica",
-          "Arial",
-          "sans-serif",
-          "Apple Color Emoji",
-          "Segoe UI Emoji",
-        ],
-        mono: [
-          "ui-monospace",
-          "SFMono-Regular",
-          "Menlo",
-          "Consolas",
-          "Liberation Mono",
-          "monospace",
-        ],
+        // 全局唯一字体：阿里巴巴普惠体 3.0（Alibaba PuHuiTi 3.0），自托管于
+        // /public/fonts/puhuiti/，覆盖 Latin + CJK；离线车机环境无外链依赖。
+        // 仅保留 sans-serif 作为最后的通用回退（mono 同样指向该字体）。
+        sans: ["Alibaba PuHuiTi 3.0", "sans-serif"],
+        mono: ["Alibaba PuHuiTi 3.0", "sans-serif"],
       },
       colors: {
         // 单一考究强调色：沉稳、略去饱和的深邃 azure，取代通用 AI 蓝。

@@ -1,11 +1,45 @@
+/* ============================================================
+   阿里巴巴普惠体 3.0（Alibaba PuHuiTi 3.0）— 全局唯一字体，自托管
+   来源：官方 3.0 字体（经 @pinhai/ali-fonts 打包的 woff2）
+   字体文件位于 /public/fonts/puhuiti/，随构建产物走，不依赖任何外部 CDN，
+   杜绝离线车机环境下的断链风险。覆盖 Latin + CJK + 希腊/西里尔字母。
+   ============================================================ */
+@font-face {
+  font-family: "Alibaba PuHuiTi 3.0";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/puhuiti/Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Alibaba PuHuiTi 3.0";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/puhuiti/Medium.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Alibaba PuHuiTi 3.0";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/puhuiti/SemiBold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Alibaba PuHuiTi 3.0";
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src: url("/fonts/puhuiti/Black.woff2") format("woff2");
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  font-family: "Outfit", -apple-system, BlinkMacSystemFont, "Segoe UI",
-    "PingFang SC", "Microsoft YaHei", "Noto Sans SC", Helvetica, Arial,
-    sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  /* 全局唯一字体：阿里巴巴普惠体 3.0（覆盖 Latin + CJK），仅保留通用回退 */
+  font-family: "Alibaba PuHuiTi 3.0", sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
