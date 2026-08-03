@@ -212,7 +212,6 @@ describe('SessionManager 状态机', () => {
       await useSessionManager.getState().fullscreenToDesktop();
       const bgBefore = useSessionManager.getState().getApp(bgId!);
       expect(bgBefore?.state).toBe('background');
-      const displayIdBefore = bgBefore?.displayId ?? 100;
 
       const fullId = await useSessionManager.getState().launchFullscreen('com.test.dup', { width: 1920, height: 1080 });
 
@@ -224,12 +223,13 @@ describe('SessionManager 状态机', () => {
       expect(state.fullscreenSessionId).toBe(bgId);
       expect(state.apps.find((a) => a.sessionId === bgId)?.state).toBe('foreground-fullscreen');
 
-      // T5：resume 到全屏时，start() 以 attach 模式传入原 displayId（不 newDisplay、不重建屏）
+      // 2026-08-04（推翻 T5 attach 恢复，S2-P0-9）：resume 不再 attach 旧屏
+      // （scrcpy 无保留虚拟屏能力，旧屏已随 server 退出回收），一律 newDisplay 重建
       const bgSession = state.sessions[bgId!]!.session as unknown as { start: ReturnType<typeof vi.fn> };
       expect(bgSession.start).toHaveBeenCalledWith(
         expect.anything(),
         expect.anything(),
-        displayIdBefore,
+        undefined, // 不再传入原 displayId（attach 模式废弃）
         undefined,
         expect.objectContaining({ audio: false }), // ADR-0015：pane 不带音频，由专用采集连接统一承载
       );
@@ -404,12 +404,12 @@ describe('SessionManager 状态机', () => {
       const app = state.apps.find((a) => a.sessionId === bgId);
       expect(app?.state).toBe('foreground-pane');
 
-      // T5：resume 时 start() 以 attach 模式传入原 displayId（复用原虚拟屏，不 newDisplay）
+      // 2026-08-04（推翻 T5 attach 恢复，S2-P0-9）：resume 不再 attach 旧屏，一律 newDisplay 重建
       const bgSession = state.sessions[bgId!]!.session as unknown as { start: ReturnType<typeof vi.fn> };
       expect(bgSession.start).toHaveBeenCalledWith(
         expect.anything(),
         expect.anything(),
-        app?.displayId ?? 100,
+        undefined, // 不再传入原 displayId（attach 模式废弃）
         undefined,
         expect.objectContaining({ audio: false }), // ADR-0015：pane 不带音频
       );

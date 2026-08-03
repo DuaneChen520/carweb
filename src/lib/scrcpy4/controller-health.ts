@@ -29,6 +29,11 @@ const RECOVERABLE_ERROR_PATTERN =
 export interface ControllerHealthOptions {
   /** 可恢复错误重试次数上限，默认 3。到达上限后进入 DEAD。 */
   maxRetries?: number;
+  /**
+   * 日志标签（如会话 id）。多会话并发（分屏 + 全屏 + 专用音频连接）时，
+   * DEGRADED/DEAD 日志必须能区分归属会话，否则无法定位触控失效来自哪个通道。
+   */
+  tag?: string;
 }
 
 type StateChangeListener = (state: ControllerHealthState) => void;
@@ -37,10 +42,17 @@ export class ControllerHealth {
   private _state: ControllerHealthState = 'IDLE';
   private retryCount = 0;
   private readonly maxRetries: number;
+  private readonly tag: string | undefined;
   private listeners: StateChangeListener[] = [];
 
   constructor(opts: ControllerHealthOptions = {}) {
     this.maxRetries = opts.maxRetries ?? 3;
+    this.tag = opts.tag;
+  }
+
+  /** 日志前缀：带 tag 时 `[CtrlHealth:<tag>]`，否则 `[CtrlHealth]`。 */
+  private get logTag(): string {
+    return this.tag ? `[CtrlHealth:${this.tag}]` : '[CtrlHealth]';
   }
 
   get state(): ControllerHealthState {
@@ -81,7 +93,7 @@ export class ControllerHealth {
     const isRecoverable = RECOVERABLE_ERROR_PATTERN.test(msg);
 
     if (!isRecoverable) {
-      console.warn(`[CtrlHealth] DEAD (non-recoverable): ${msg}`);
+      console.warn(`${this.logTag} DEAD (non-recoverable): ${msg}`);
       this._state = 'DEAD';
       this.emit('DEAD');
       return;
@@ -92,11 +104,11 @@ export class ControllerHealth {
       case 'DEGRADED':
         this.retryCount++;
         if (this.retryCount > this.maxRetries) {
-          console.warn(`[CtrlHealth] DEAD: retries exhausted (${this.maxRetries})`);
+          console.warn(`${this.logTag} DEAD: retries exhausted (${this.maxRetries})`);
           this._state = 'DEAD';
           this.emit('DEAD');
         } else {
-          console.log(`[CtrlHealth] DEGRADED: recoverable error (attempt ${this.retryCount}/${this.maxRetries})`);
+          console.log(`${this.logTag} DEGRADED: recoverable error (attempt ${this.retryCount}/${this.maxRetries})`);
           this._state = 'DEGRADED';
           this.emit('DEGRADED');
         }

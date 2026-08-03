@@ -29,7 +29,6 @@ import {
   setRotationLocked,
   restoreRotation,
   getVirtualDisplayId,
-  killScrcpyServer,
   killScrcpyByPid,
   getScrcpyServerPids,
   captureDeviceSnapshot,
@@ -38,6 +37,68 @@ import type { RotationState } from '@/lib/adb-commands';
 
 /** 启动韧性用的简单延时（ADR-0014 D2）。 */
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * 视频流元数据等待超时（S2-P0-9）。
+ *
+ * server 未就绪（虚拟屏创建 / OpenGL capture 初始化阻塞，车机多 scrcpy server 并发
+ * 时常见）时 video socket 一直不发元数据 → `await client.videoStream` 无限挂起 →
+ * start() 卡死（controller 永远 unset → 触控全丢 + 占位层常显）。超时抛错让 start
+ * 走失败路径，避免无限卡。车机虚拟屏首次初始化通常 < 5s，8s 足够且不误伤。
+ */
+const VIDEO_STREAM_TIMEOUT_MS = 8000;
+
+/**
+ * 本次页面生命周期内是否已成功推送 scrcpy-server.jar（S2-P0-10 安全版）。
+ *
+ * 车机 USB 传输 732KB jar 是 start 慢的主要开销；jar 是构建产物、页面生命周期内固定，
+ * 因此同一页面内多次 start 只需推送一次。用浏览器模块级 flag（**不查询设备端**——
+ * 避免 adb stat 挂起教训），页面刷新/重连后重置 → 首次 start 必推（保证设备端 jar
+ * 为当前构建，冷启动对账删 jar 亦无影响）。
+ */
+let jarPushed = false;
+
+/** 给 Promise 加超时：超时后 reject，避免任何 await 无限挂起（S2-P0-9）。导出以便单测。 */
+export function withTimeout<T>(promise: Promise<T>, ms: number, timeoutMessage: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error(timeoutMessage)), ms)),
+  ]);
+}
+
+/**
+ * 判定「媒体流正常结束」错误。
+ *
+ * v3 的 BufferedReadableStream 在流正常结束（server 退出 / socket 关闭 / 主动取消）
+ * 时抛 ExactReadableEndedError——这是终止信号而非真错误。判定必须用 message
+ * 字面量而非 instanceof（项目既有经验）：
+ * - error.name 恒为 "Error"（构造器未设置 this.name）；
+ * - vite 依赖预构建 esbuild minify 后会改写类名（曾观察到 "Jl"），instanceof 不可靠；
+ * - message "ExactReadable ended" 是字符串字面量，minify 不变，100% 可靠。
+ */
+function isStreamEndedError(e: unknown): boolean {
+  return e instanceof Error && e.message.includes('ExactReadable');
+}
+
+/**
+ * 判定 canvas 的既有 WebGL context 是否已丢失。
+ *
+ * 复用 canvas 的二次 start（分屏 ↔ 全屏切换 / resumeBackground）时，旧 context 可能
+ * 已被浏览器回收（webglcontextlost；多 context 并发 + 车机 GPU 压力下更易触发）。
+ * 在 lost context 上 new WebGLVideoFrameRenderer 会 createProgram 失败（shader 编译
+ * 信息为 null → "Error: null"，见 @yume-chan webgl.js 抛错路径）→ 会话启动失败。
+ *
+ * 导出为独立函数以便单测（node 环境无 HTMLCanvasElement，传伪造 context 对象验证判定）。
+ */
+export function isCanvasContextLost(canvas: { getContext(id: string): unknown | null }): boolean {
+  try {
+    // 与 renderer 的 glCreateContext 一致：webgl2 优先，回退 webgl
+    const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+    return !!(gl as { isContextLost?: () => boolean } | null)?.isContextLost?.();
+  } catch {
+    return false;
+  }
+}
 
 /**
  * ADR-0014 深化诊断：在 AdbScrcpyExitedError 时结构化打印设备侧快照，
@@ -235,7 +296,8 @@ export class ScrcpySession {
   private adb: Adb | null = null;
   private rotationState: RotationState | null = null;
   private flexClient: FlexDisplayClient | null = null;
-  private health = new ControllerHealth();
+  /** 健康状态机：构造时带会话 id 标签，DEGRADED/DEAD 日志可区分多会话归属。 */
+  private health: ControllerHealth;
 
   /** scrcpy server PID，用于精确 kill（多实例并发时区分） */
   private serverPid: number | null = null;
@@ -257,6 +319,8 @@ export class ScrcpySession {
   // 若每次都告警会把控制台淹没、埋掉真正的报错。用此 flag 限制「无 AudioContext」告警每会话仅一次。
   private audioNoCtxWarned = false;
   private audioDisposed = false;
+  /** 触控丢弃告警限流（S2-P0-8）：原因（unset/DEAD）变化时重打，避免刷屏同时可跟踪状态变化。 */
+  private lastTouchDropReason: string | null = null;
   /** 本 session 是否被设计为承载音频。pane 为 false（音频交给专用采集连接），专用连接/镜像为 true。 */
   private audioEnabled = true;
 
@@ -281,10 +345,9 @@ export class ScrcpySession {
   constructor(id: string, callbacks: ScrcpySessionCallbacks, health?: ControllerHealth) {
     this.id = id;
     this.callbacks = callbacks;
-    // 允许外部注入共享的健康实例（如与 LinkSupervisor 共用同一个 ControllerHealth）。
-    if (health) {
-      this.health = health;
-    }
+    // 允许外部注入共享的健康实例（如与 LinkSupervisor 共用同一个 ControllerHealth）；
+    // 未注入时默认带会话 id 标签，使多会话并发的健康日志可定位归属。
+    this.health = health ?? new ControllerHealth({ tag: id });
 
     // 监听健康状态变化
     this.healthUnsubscribe = this.health.onStateChange((s) => {
@@ -438,100 +501,125 @@ export class ScrcpySession {
       }
 
       // 启动前记录已有 PID，用于启动后对比确定本次 PID
-      const attachMode = attachDisplayId != null;
+      // attach 模式（resumeBackground 接管旧虚拟屏）：用 { displayId } 直接 attach。
+      // let + 锁内可降级：旧虚拟屏随其 server 退出已被系统回收（scrcpy 无保留屏能力）
+      // 时 attach 必失败 → 降级 newDisplay 重建，后续 displayId 设置走重建分支（S2-P0-9）。
+      let attachMode = attachDisplayId != null;
       const useVirtualDisplay = attachMode || !!displayConfig;
       // 专用音频采集连接（audioOnly）也是独立的 scrcpy server 进程，需精确记录 PID，
-      // 否则 stop() 会回退到「全设备 killScrcpyServer」误杀同设备其它会话（含分屏 pane）。
+      // 否则 stop() 无法精确 kill 本会话的 server，误伤同设备其它会话（含分屏 pane）。
+      // pidsBefore 必须与 pidsAfter 同在 withLaunchMutex 锁内、与 pushServer+start 原子化：
+      // 并发会话若在锁外各自取 before/after，相互污染（把对方刚启动的 server 算作
+      // "本次新增"或漏算），导致 serverPid 错配 → stop 时 kill 错进程（S2-P0-5）。
       const trackPid = useVirtualDisplay || audioOnly;
-      const pidsBefore = trackPid ? await getScrcpyServerPids(adb) : [];
 
       let client!: AdbScrcpyClient<AdbScrcpyOptions4_0Type>;
 
-      // 串行化「pushServer + start」临界区，避免并发会话在设备端争夺同一
+      // 串行化「pushServer + start + PID 对比」临界区，避免并发会话在设备端争夺同一
       // localabstract:scrcpy 反向隧道（详见文件顶部 withLaunchMutex 注释）。
       await withLaunchMutex(async () => {
-        await AdbScrcpyClient.pushServer(
-          adb,
-          new ReadableStream({
-            start(controller) {
-              controller.enqueue(new Uint8Array(arrayBuffer));
-              controller.close();
-            },
-          }),
-          serverPath,
-        );
+        const pidsBefore = trackPid ? await getScrcpyServerPids(adb) : [];
 
-        const verifyOutput = await runAdbCommand(adb, `ls -la ${serverPath} 2>&1`);
-        if (verifyOutput.includes('No such file') || verifyOutput.includes('not found')) {
-          throw new Error('scrcpy-server.jar 推送验证失败：设备上未找到文件');
+        // S2-P0-10（安全版）：本次页面生命周期内已推送过 jar 则跳过重复推送。
+        // 车机 USB 传输 732KB 是 start 慢的主要开销（切应用/切 pane 每次重推）。
+        // 用浏览器模块级 flag（不查询设备端，零新增 adb 调用——避免 stat 挂起教训）：
+        // 页面加载/重连后首次 start 必推（保证 jar 为当前构建），生命周期内后续 start 跳过。
+        if (!jarPushed) {
+          await AdbScrcpyClient.pushServer(
+            adb,
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new Uint8Array(arrayBuffer));
+                controller.close();
+              },
+            }),
+            serverPath,
+          );
+
+          const verifyOutput = await runAdbCommand(adb, `ls -la ${serverPath} 2>&1`);
+          if (verifyOutput.includes('No such file') || verifyOutput.includes('not found')) {
+            throw new Error('scrcpy-server.jar 推送验证失败：设备上未找到文件');
+          }
+          jarPushed = true;
+        } else {
+          console.log(`[ScrcpySession:${this.id}] 本次生命周期已推送过 jar，跳过推送`);
         }
 
-        // attach 模式：接管已有虚拟屏（沿用 resumeBackground 的 keepActive 屏），
-        // 用 { displayId: attachDisplayId } 直接 attach，不再 newDisplay / 重建。
-        const displayOptions = audioOnly
-          ? { displayId: 0 }
-          : attachMode
-            ? { displayId: attachDisplayId }
-            : useVirtualDisplay
-              ? {
-                newDisplay: new ScrcpyNewDisplay(displayConfig.width, displayConfig.height, displayConfig.dpi ?? 320),
-                // 2026-08-04（推翻 ADR-0001 的 LockedInitial）：方向锁改为 Unlocked，
-                // 让虚拟屏方向跟随容器宽窄方向 —— 官方 scrcpy 4.0 flex display 的正确姿势。
-                //
-                // 官方 4.0 server（Genymobile/scrcpy NewDisplayCapture.java）机制：
-                // 1. 虚拟屏 Surface 本身不旋转：triggerResize 里
-                //    vdSize = (displayRotation % 2)==0 ? size : size.rotate()，跨轴 resize 时 Surface 保物理方向；
-                // 2. 方向补偿在 capture 的 OpenGL 过滤器：prepare() 每次 capture reset 重读
-                //    displayInfo.getRotation() → filter.addOrientation(...)，DisplayMonitor 检测
-                //    rotation 变化即 reset 重建，输出帧方向 = 虚拟屏当前 rotation；
-                // 3. videoSize = 旋转后逻辑尺寸，经 session packet 上报，客户端按此 contain 渲染即可。
-                //
-                // 为什么不能再用 LockedInitial（"@"）：
-                // - "@" 锁「首帧方向」，输出帧方向恒为首帧方向 —— 宽屏容器里仍是竖屏画面（黑边），
-                //   与「宽窄屏自由调整」的 flex 精神冲突；
-                // - server 端 prepare() 初始硬编码 displayRotation=0（virtualDisplay==null 分支），
-                //   而窄屏虚拟屏（w<h）在部分 ROM 上实际 rotation=90，首帧/锁定方向与真实错位 →
-                //   正是「特定分辨率、尤其窄屏下画面 90° 翻转」的机制来源；宽屏（w>h）rotation=0
-                //   与假设一致，故不触发。
-                //
-                // Unlocked（不传 --capture-orientation）下：方向 = 虚拟屏 rotation = 容器宽窄方向，
-                // 宽屏→横屏画面、窄屏→竖屏画面，始终方向正确且 flex 全开；跨轴瞬间的 1~2 帧
-                // rotation 过渡由 server DisplayMonitor+reset 自愈，客户端侧尺寸变化白闪由
-                // AppTransitionPlaceholder（ADR-0011）兜底。
-                captureOrientation: new ScrcpyCaptureOrientation(ScrcpyLockOrientation.Unlocked, ScrcpyOrientation.Orient0),
-                displayImePolicy: 'local' as const,
-                flexDisplay: true,
-                keepActive: true,
-                // T1: 禁用虚拟屏系统装饰（状态栏/导航栏/Launcher）。
-                // 关闭后虚拟屏只渲染 app，空屏不出 home 帧，从根上消除
-                // 「新屏首帧是 Launcher 桌面」这一跳（scrcpy --no-vd-system-decorations）。
-                vdSystemDecorations: false,
-              }
-            : { displayId: 0 };
+        // attach 模式选项（attachMode 为外层 let，attach 失败时降级为 newDisplay）
+        const buildOptions = () => {
+          const displayOptions = audioOnly
+            ? { displayId: 0 }
+            : attachMode
+              ? { displayId: attachDisplayId }
+              : useVirtualDisplay
+                ? {
+                  newDisplay: new ScrcpyNewDisplay(displayConfig.width, displayConfig.height, displayConfig.dpi ?? 320),
+                  // 2026-08-04（推翻 ADR-0001 的 LockedInitial）：方向锁改为 Unlocked，
+                  // 让虚拟屏方向跟随容器宽窄方向 —— 官方 scrcpy 4.0 flex display 的正确姿势。
+                  //
+                  // 官方 4.0 server（Genymobile/scrcpy NewDisplayCapture.java）机制：
+                  // 1. 虚拟屏 Surface 本身不旋转：triggerResize 里
+                  //    vdSize = (displayRotation % 2)==0 ? size : size.rotate()，跨轴 resize 时 Surface 保物理方向；
+                  // 2. 方向补偿在 capture 的 OpenGL 过滤器：prepare() 每次 capture reset 重读
+                  //    displayInfo.getRotation() → filter.addOrientation(...)，DisplayMonitor 检测
+                  //    rotation 变化即 reset 重建，输出帧方向 = 虚拟屏当前 rotation；
+                  // 3. videoSize = 旋转后逻辑尺寸，经 session packet 上报，客户端按此 contain 渲染即可。
+                  //
+                  // 为什么不能再用 LockedInitial（"@"）：
+                  // - "@" 锁「首帧方向」，输出帧方向恒为首帧方向 —— 宽屏容器里仍是竖屏画面（黑边），
+                  //   与「宽窄屏自由调整」的 flex 精神冲突；
+                  // - server 端 prepare() 初始硬编码 displayRotation=0（virtualDisplay==null 分支），
+                  //   而窄屏虚拟屏（w<h）在部分 ROM 上实际 rotation=90，首帧/锁定方向与真实错位 →
+                  //   正是「特定分辨率、尤其窄屏下画面 90° 翻转」的机制来源；宽屏（w>h）rotation=0
+                  //   与假设一致，故不触发。
+                  //
+                  // Unlocked（不传 --capture-orientation）下：方向 = 虚拟屏 rotation = 容器宽窄方向，
+                  // 宽屏→横屏画面、窄屏→竖屏画面，始终方向正确且 flex 全开；跨轴瞬间的 1~2 帧
+                  // rotation 过渡由 server DisplayMonitor+reset 自愈，客户端侧尺寸变化白闪由
+                  // AppTransitionPlaceholder（ADR-0011）兜底。
+                  captureOrientation: new ScrcpyCaptureOrientation(ScrcpyLockOrientation.Unlocked, ScrcpyOrientation.Orient0),
+                  displayImePolicy: 'local' as const,
+                  flexDisplay: true,
+                  // keepActive: false（2026-08-04 查证后修正，S2-P0-9）：
+                  // - scrcpy 官方无 "client 断开后保留虚拟屏" 选项（keep-display 不存在），
+                  //   虚拟屏随 server 进程退出必然被系统回收——attach 恢复（T5）不可行；
+                  // - 官方 keepActive 仅表示"保持设备唤醒"（userActivity），且 v3 @yume-chan
+                  //   4_0 的 keepActive 字段无序列化逻辑（从未传给 server），设 true 无意义；
+                  // - 显式置 false + attach 失败降级 newDisplay（见 retry 循环），
+                  //   resume 走重建屏路径，稳定可靠（分屏 pane 常驻不受影响）。
+                  keepActive: false,
+                  // T1: 禁用虚拟屏系统装饰（状态栏/导航栏/Launcher）。
+                  // 关闭后虚拟屏只渲染 app，空屏不出 home 帧，从根上消除
+                  // 「新屏首帧是 Launcher 桌面」这一跳（scrcpy --no-vd-system-decorations）。
+                  vdSystemDecorations: false,
+                }
+              : { displayId: 0 };
 
-        const options = new AdbScrcpyOptions4_0({
-          video,
-          ...(video
-            ? {
-                videoCodec: 'h264',
-                videoBitRate: displayConfig?.bitRate ?? 8000000,
-                maxFps: 60,
-              }
-            : {}),
-          audio: audioEnabled,
-          // 音频编解码器：与 AUDIO_CODEC_FALLBACK 单一旋钮联动，
-          // parseAudioStreamMetadata 对未知标签回退到同一值。默认 opus。
-          // negotiatedAudioCodec 允许专用音频连接在解码失败时改用 aac 重试（ADR-0016 自愈）。
-          audioCodec: negotiatedAudioCodec,
-          control,
-          ...(control ? { stayAwake: true, showTouches: false } : {}),
-          // audioOnly 模式下只存在音频 socket，设备名（sendDeviceMeta）会写入音频 socket
-          // 污染 codec 解析。官方 scrcpy 4.0 默认 sendDeviceMeta=true，此处显式关闭。
-          sendDeviceMeta: !audioOnly,
-          // 每会话独立隧道端点（见 generateScid）：并发会话互不抢占
-          scid,
-          ...displayOptions,
-        });
+          return new AdbScrcpyOptions4_0({
+            video,
+            ...(video
+              ? {
+                  videoCodec: 'h264',
+                  videoBitRate: displayConfig?.bitRate ?? 8000000,
+                  maxFps: 60,
+                }
+              : {}),
+            audio: audioEnabled,
+            // 音频编解码器：与 AUDIO_CODEC_FALLBACK 单一旋钮联动，
+            // parseAudioStreamMetadata 对未知标签回退到同一值。默认 opus。
+            // negotiatedAudioCodec 允许专用音频连接在解码失败时改用 aac 重试（ADR-0016 自愈）。
+            audioCodec: negotiatedAudioCodec,
+            control,
+            ...(control ? { stayAwake: true, showTouches: false } : {}),
+            // audioOnly 模式下只存在音频 socket，设备名（sendDeviceMeta）会写入音频 socket
+            // 污染 codec 解析。官方 scrcpy 4.0 默认 sendDeviceMeta=true，此处显式关闭。
+            sendDeviceMeta: !audioOnly,
+            // 每会话独立隧道端点（见 generateScid）：并发会话互不抢占
+            scid,
+            ...displayOptions,
+          });
+        };
+        let options = buildOptions();
 
         // 启动韧性（ADR-0014 D2）：设备端虚拟屏孤儿回收瞬态可能导致
         // AdbScrcpyExitedError（scrcpy server exited prematurely）。刷新/重连后，
@@ -563,6 +651,16 @@ export class ScrcpySession {
             break;
           } catch (e) {
             if (e instanceof AdbScrcpyExitedError && attempt < MAX_LAUNCH_RETRIES) {
+              if (attachMode) {
+                // attach 失败：旧虚拟屏已随其 server 退出被系统回收（scrcpy 无
+                // "client 断开保留虚拟屏"能力，keepActive 仅是防休眠且 v3 未序列化）。
+                // 降级为 newDisplay 重建，避免 resume 永久卡死（S2-P0-9）。
+                console.warn(
+                  `[ScrcpySession:${this.id}] attach display ${attachDisplayId} 失败（旧虚拟屏已被回收），降级 newDisplay 重建`,
+                );
+                attachMode = false;
+                options = buildOptions();
+              }
               console.warn(
                 `[ScrcpySession:${this.id}] start 提前退出(${(e as Error).message})，` +
                   `等待设备回收残留虚拟屏后重试 (${attempt + 1}/${MAX_LAUNCH_RETRIES + 1})`,
@@ -583,19 +681,20 @@ export class ScrcpySession {
         if (launchError && !client) {
           throw launchError;
         }
+
+        // 锁内原子化 PID 对比（并发会话严格串行，before/after 不互相污染）：
+        // start 成功则本会话 server 必然是最新出现的 PID（此前已排除 before 集合）。
+        if (trackPid) {
+          const pidsAfter = await getScrcpyServerPids(adb);
+          const newPids = pidsAfter.filter((p) => !pidsBefore.includes(p));
+          this.serverPid = newPids.length === 1 ? newPids[0]! : (pidsAfter[pidsAfter.length - 1] ?? null);
+          if (this.serverPid) {
+            console.log(`[ScrcpySession:${this.id}] 记录 server PID: ${this.serverPid}`);
+          }
+        }
       });
       this.client = client;
       this.adb = adb;
-
-      // 启动后对比 PID，确定本次启动的 server PID
-      if (trackPid) {
-        const pidsAfter = await getScrcpyServerPids(adb);
-        const newPids = pidsAfter.filter((p) => !pidsBefore.includes(p));
-        this.serverPid = newPids.length === 1 ? newPids[0]! : (pidsAfter[pidsAfter.length - 1] ?? null);
-        if (this.serverPid) {
-          console.log(`[ScrcpySession:${this.id}] 记录 server PID: ${this.serverPid}`);
-        }
-      }
 
       if (useVirtualDisplay) {
         try {
@@ -611,6 +710,11 @@ export class ScrcpySession {
       if (controller) {
         this.controller = controller;
         this.health.markHealthy();
+        console.log(`[ScrcpySession:${this.id}] controller 已建立（control=true, attach=${attachMode}）`);
+      } else if (control) {
+        // 仅需要 control 的会话（video 会话）才告警；audioOnly（control=false）无
+        // controller 属预期（专用音频连接只抓声音、不承载触控），不打噪音日志。
+        console.warn(`[ScrcpySession:${this.id}] controller 未建立（client.controller 为 null, control=${control}）`);
       }
 
       const flexClient = useVirtualDisplay ? new FlexDisplayClient({
@@ -670,6 +774,9 @@ export class ScrcpySession {
         isRunning: true,
         isVirtualDisplay: useVirtualDisplay,
       });
+      // 诊断（S2-P0-9）：start 完成标志。video 会话无"音频流已建立"日志，
+      // 若无本日志则 start 卡在 setupVideoStream/setupAudioStream/displayId 探测。
+      console.log(`[ScrcpySession:${this.id}] start 完成, displayId=${this.displayId}, isRunning=true`);
     } catch (error) {
       console.error(`[ScrcpySession:${this.id}] 启动失败:`, error);
       let message = '启动屏幕镜像失败';
@@ -710,13 +817,39 @@ export class ScrcpySession {
     const { WebCodecsVideoDecoder } = await import('@yume-chan/scrcpy-decoder-webcodecs');
     const { WebGLVideoFrameRenderer } = await import('@yume-chan/scrcpy-decoder-webcodecs/esm/video/render/webgl.js');
 
-    const videoStream = await client.videoStream;
+    // 超时兜底：server 未就绪（虚拟屏创建/GPU capture 初始化阻塞，车机多 server
+    // 并发时常见）时 videoStream 元数据可能一直不发 → await 无限挂起 → start 卡死
+    // （controller 永远 unset → 触控全丢 + 占位层常显，S2-P0-9）。必须超时抛错，
+    // 让 start 走失败路径（有日志、UI 有反馈），而非无限卡。
+    const videoStream = await withTimeout(
+      client.videoStream,
+      VIDEO_STREAM_TIMEOUT_MS,
+      `[ScrcpySession:${this.id}] 视频流元数据等待超时 (${VIDEO_STREAM_TIMEOUT_MS}ms)：server 视频未就绪（虚拟屏创建 / GPU capture 初始化阻塞？）`,
+    );
     if (!videoStream) {
       throw new Error('无法获取视频流');
     }
 
-    // v3：renderer 构造改为 options 形式；canvasSize:'external' 让 flex-client 独占 canvas 尺寸管理
-    const renderer = new WebGLVideoFrameRenderer({ canvas, canvasSize: 'external' });
+    // 复用 canvas（分屏↔全屏切换 / resumeBackground 二次 start）时旧 WebGL context
+    // 可能已被浏览器回收。lost context 上 new renderer 会 createProgram 失败
+    // （"Error: null"）→ 会话启动失败。检测到 lost 即用新 canvas 替换 DOM 旧节点并
+    // 更新 this._canvas（上层引用均动态读 this._canvas，无需额外通知）。
+    if (isCanvasContextLost(canvas)) {
+      console.warn(`[ScrcpySession:${this.id}] canvas WebGL context 已丢失，替换新 canvas 重建渲染`);
+      const fresh = document.createElement('canvas');
+      fresh.className = canvas.className;
+      fresh.style.cssText = canvas.style.cssText;
+      if (canvas.parentElement) {
+        canvas.parentElement.replaceChild(fresh, canvas);
+      }
+      canvas = fresh;
+      this._canvas = fresh;
+    }
+
+    // canvasSize 走默认 'video'：v3 renderer 自动按视频尺寸设置 canvas，首帧即可正常渲染，
+    // 无 'external' 模式下等待 flex-client 尺寸链路的延迟；flex-client 的 setCanvasSize
+    // 设的同样是视频尺寸，二者一致无冲突。
+    const renderer = new WebGLVideoFrameRenderer({ canvas });
     const decoder = new WebCodecsVideoDecoder({
       codec: videoStream.metadata.codec,
       renderer,
@@ -753,7 +886,12 @@ export class ScrcpySession {
           }
         }
       } catch (error) {
-        console.error(`[ScrcpySession:${this.id}] 视频流读取错误:`, error);
+        // 媒体流正常结束（server 退出 / stop 取消）是会话终止的正常信号而非错误，
+        // 静默退出即可——生命周期由 stop()/健康监护负责。
+        // 其它异常才是真正的流错误，保留 error 日志便于排查。
+        if (!isStreamEndedError(error)) {
+          console.error(`[ScrcpySession:${this.id}] 视频流读取错误:`, error);
+        }
       }
     };
 
@@ -761,14 +899,24 @@ export class ScrcpySession {
 
     this.videoCleanup = async () => {
       sizeUnsubscribe();
-      await reader.cancel();
+      // 流可能已因 server 退出 / 连接断开进入 errored 态，此时 cancel 会以
+      // ExactReadableEndedError reject。必须接住——否则 stop() 清理链在
+      // 「await this.videoCleanup()」处中断，后续 disposeAudio / kill server /
+      // 状态更新全部跳过，造成 WebGL context 与设备端进程泄漏（S2-P0-4）。
+      await reader.cancel().catch(() => {});
     };
   }
 
   // ===== 音频流 setup（内联自 useAudioDecoder） =====
 
   private async setupAudioStream(client: AdbScrcpyClient<AdbScrcpyOptions4_0Type>): Promise<void> {
-    const audioMeta = await client.audioStream;
+    // 与视频流同理：server 未就绪时音频元数据可能不发 → await 无限挂起（S2-P0-9）。
+    // audio:false 时 audioStream 立即为 undefined（不等待网络），超时不误伤。
+    const audioMeta = await withTimeout(
+      client.audioStream,
+      VIDEO_STREAM_TIMEOUT_MS,
+      `[ScrcpySession:${this.id}] 音频流元数据等待超时 (${VIDEO_STREAM_TIMEOUT_MS}ms)：server 音频未就绪`,
+    );
     if (!audioMeta) {
       // audio:false（分屏 pane）时 server 不提供音频流，属预期，不告警；
       // 仅当本 session 设计上应承载音频（audioEnabled）却拿不到流才告警。
@@ -895,7 +1043,16 @@ export class ScrcpySession {
             this.callbacks.onAudioStateChange?.({ status: 'errored', route: 'browser', muted: false });
           }
         } catch (e) {
-          console.warn(`[ScrcpySession:${this.id}] 音频流读取错误:`, e);
+          // 主动停止（disposeAudio 已置 audioDisposed）：静默退出，不触发上层自愈
+          if (this.audioDisposed) return;
+          // 媒体流正常结束（server 退出 / 连接断开）语义等同 while 循环正常结束，
+          // 非错误；audioOnly 连接据此通知上层自愈（ADR-0016）。
+          if (!isStreamEndedError(e)) {
+            console.warn(`[ScrcpySession:${this.id}] 音频流读取错误:`, e);
+          }
+          if (this.audioOnly) {
+            this.callbacks.onAudioStateChange?.({ status: 'errored', route: 'browser', muted: false });
+          }
         }
       };
 
@@ -944,13 +1101,25 @@ export class ScrcpySession {
         this.rotationState = null;
       }
 
-      // 视频解码清理
+      // 视频解码清理：每个清理步骤独立容错。
+      // 流已 errored（server 提前退出）时 videoCleanup 的 cancel 会以
+      // ExactReadableEndedError reject——若不做隔离，单个失败会把整条清理链带进
+      // catch，导致后续 disposeAudio / kill server / 状态更新全部跳过，
+      // 造成 WebGL context 与设备端 scrcpy 进程残留（S2-P0-4 泄漏根因）。
       if (this.videoCleanup) {
-        await this.videoCleanup();
+        const cleanup = this.videoCleanup;
         this.videoCleanup = null;
+        await cleanup().catch((e) => {
+          console.warn(`[ScrcpySession:${this.id}] 视频流清理失败（已忽略，继续清理）:`, e);
+        });
       }
       if (this.videoDecoder) {
-        this.videoDecoder.dispose();
+        try {
+          this.videoDecoder.dispose();
+        } catch (e) {
+          // WebGL context 已丢失时 dispose 可能失败，忽略但保留日志
+          console.warn(`[ScrcpySession:${this.id}] videoDecoder.dispose 失败（已忽略）:`, e);
+        }
         this.videoDecoder = null;
       }
 
@@ -983,13 +1152,17 @@ export class ScrcpySession {
         this.client = null;
       }
 
-      // PID 精确 kill（多实例安全）
+      // PID 精确 kill（多实例安全）。
+      // 注意：不提供「PID 不可用时全杀」降级——`pkill -f scrcpy` 会误杀同设备其它
+      // 运行中会话（全屏 pane / 专用音频连接），是「start 失败 → stop → 全部会话
+      // 被连带杀死」连锁的根因（S2-P0-5）。
+      // - 正常启动的会话：PID 追踪已在互斥锁内原子化，serverPid 必然非 null；
+      // - start 失败（client 为 null，serverPid 为 null）：失败的 server 已自行退出
+      //   （Aborted）或残留孤儿进程，由冷启动对账（0 会话时 killScrcpyServer）统一清理；
+      // - v3 的 client.close() 已可靠关闭本 server 的 socket → 进程退出，无需额外 kill。
       if (adb && this.serverPid !== null) {
         await killScrcpyByPid(adb, this.serverPid).catch(() => {});
         this.serverPid = null;
-      } else if (adb) {
-        // 降级：PID 不可用时全杀（仅在单实例场景安全）
-        await killScrcpyServer(adb, true).catch(() => {});
       }
 
       this.displayId = null;
@@ -1027,7 +1200,7 @@ export class ScrcpySession {
       this.audioWorkletNode = null;
     }
     if (this.audioCtx) {
-      this.audioCtx.close();
+      this.audioCtx.close().catch(() => {});
       this.audioCtx = null;
     }
   }
@@ -1046,7 +1219,23 @@ export class ScrcpySession {
     buttons: number;
   }): Promise<void> {
     const controller = this.health.tryGetController(this.controllerRefAdapter);
-    if (!controller) return;
+    if (!controller) {
+      // 诊断（S2-P0-8）：controller 缺失 / health DEAD 时触控静默丢弃。
+      // HoverMove（鼠标悬停，action=7）丢弃不打日志——车机上无意义且高频，
+      // 用户"未点击"也会因鼠标移动触发，易被误读为点击失败（S2-P0-9 教训）。
+      // 仅真实按键事件（Down/Move/Up 等）在原因（unset/DEAD）变化时打一条 warn。
+      const isHover = message.action === 7; // AndroidMotionEventAction.HoverMove
+      if (!isHover) {
+        const reason = this.controller === null ? 'unset' : `present(${this.health.state})`;
+        if (this.lastTouchDropReason !== reason) {
+          this.lastTouchDropReason = reason;
+          console.warn(
+            `[ScrcpySession:${this.id}] 触控被丢弃: controller=${this.controller === null ? 'unset' : 'present'}, health=${this.health.state}`,
+          );
+        }
+      }
+      return;
+    }
 
     try {
       await controller.injectTouch(message);
@@ -1055,6 +1244,10 @@ export class ScrcpySession {
       const msg = error instanceof Error ? error.message : String(error);
       if (!msg.includes('Socket closed')) {
         console.error(`[ScrcpySession:${this.id}] 触摸事件转发错误:`, error);
+      } else {
+        // controller 通道已关闭（本会话被 stop / 设备端断开 / server 退出）。
+        // 保留一条带会话 id 的 warn，便于多会话并发时定位「哪个会话的触控失效」。
+        console.warn(`[ScrcpySession:${this.id}] 触摸事件转发失败: 控制器通道已关闭 (Socket closed, health=${this.health.state})`);
       }
       this.health.reportError(error);
     }

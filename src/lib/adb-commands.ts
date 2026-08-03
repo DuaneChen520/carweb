@@ -215,43 +215,45 @@ export async function getVirtualDisplayId(adb: Adb): Promise<number | null> {
   try {
     const output = await runAdbCommand(adb, 'dumpsys display');
 
-    const viewportMatches = [...output.matchAll(/DisplayViewport\{[^}]*type=VIRTUAL[^}]*displayId=(\d+)[^}]*uniqueId='[^']*scrcpy[^']*'[^}]*\}/g)];
+    // 分支 1：DisplayViewport（VIRTUAL + uniqueId 含 scrcpy）→ 取 id 最大的屏。
+    // 虚拟屏 id 由系统单调递增分配，最大 id = 最新创建——多屏共存（backgroundify
+    // 保留的 keepActive 旧屏 + 刚 newDisplay 的新屏）时必须取最新，否则 app.displayId
+    // 错配 → resume 时 attach 到旧屏（S2-P0-7）。
+    const viewportMatches = [
+      ...output.matchAll(
+        /DisplayViewport\{[^}]*type=VIRTUAL[^}]*displayId=(\d+)[^}]*uniqueId='[^']*scrcpy[^']*'[^}]*\}/g,
+      ),
+    ];
     if (viewportMatches.length > 0) {
-      return parseInt(viewportMatches[viewportMatches.length - 1]![1]!, 10);
+      const ids = viewportMatches.map((m) => parseInt(m[1]!, 10));
+      return Math.max(...ids);
     }
 
-    const lines = output.split('\n');
-    const scrcpyDisplays: Array<{ id: number; hasOwnContent: boolean; hasTouchVirtual: boolean; isPrivate: boolean; }> = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i]!;
-      if (line.includes('DisplayDeviceInfo')) {
-        let displayId: number | null = null;
-        for (let j = i + 1; j < Math.min(i + 10, lines.length); j++) {
-          const idMatch = lines[j]!.match(/mDisplayId=(\d+)/);
-          if (idMatch) { displayId = parseInt(idMatch[1]!, 10); break; }
-          if (lines[j]!.includes('DisplayDeviceInfo')) break;
-        }
-        if (line.includes('scrcpy') && displayId !== null) {
-          scrcpyDisplays.push({
-            id: displayId,
-            hasOwnContent: line.includes('FLAG_OWN_CONTENT_ONLY'),
-            hasTouchVirtual: line.includes('touch VIRTUAL'),
-            isPrivate: line.includes('FLAG_PRIVATE'),
-          });
-        }
-      }
-    }
-
-    return scrcpyDisplays.find(d => d.hasOwnContent)?.id
-      ?? scrcpyDisplays.find(d => d.hasTouchVirtual)?.id
-      ?? scrcpyDisplays.find(d => !d.isPrivate)?.id
-      ?? scrcpyDisplays[scrcpyDisplays.length - 1]?.id
-      ?? null;
+    // 分支 2：DisplayDeviceInfo 兜底（同一"最新优先"语义）
+    return pickLatestScrcpyDisplay(parseScrcpyDisplays(output));
   } catch (error) {
     console.warn('[DEBUG-restore] 获取虚拟屏 displayId 失败:', error);
     return null;
   }
+}
+
+/**
+ * 从设备快照的 scrcpy 虚拟屏列表中选出「最新创建」的屏。
+ *
+ * 多屏共存场景（keepActive 保留的旧屏 + 刚 newDisplay 的新屏）下必须选 id 最大的：
+ * 系统为虚拟屏分配单调递增 id，最大 id = 最新创建。旧实现 fallback 分支取
+ * 「第一个 hasOwnContent」，在多屏时会选中旧屏 → app.displayId 错配 → resume 时
+ * attach 到错误屏幕（S2-P0-7）。导出为独立函数以便单测（纯函数，无需 ADB）。
+ */
+export function pickLatestScrcpyDisplay(disps: ScrcpyDisplayInfo[]): number | null {
+  if (disps.length === 0) return null;
+  const byIdDesc = [...disps].sort((a, b) => b.id - a.id);
+  return (
+    byIdDesc.find((d) => d.ownContent)?.id ??
+    byIdDesc.find((d) => d.touchVirtual)?.id ??
+    byIdDesc.find((d) => !d.isPrivate)?.id ??
+    byIdDesc[0]!.id
+  );
 }
 
 

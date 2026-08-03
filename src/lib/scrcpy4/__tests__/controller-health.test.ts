@@ -166,4 +166,29 @@ describe('ControllerHealth', () => {
     h.reportError(new Error('Socket closed'));
     expect(h.state).toBe('DEAD');
   });
+
+  it('带 tag 时 DEGRADED/DEAD 日志带会话前缀（多会话定位）', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const h = new ControllerHealth({ maxRetries: 3, tag: 'session-abc' });
+
+    h.markHealthy();
+    h.reportError(new Error('Socket closed'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[CtrlHealth:session-abc] DEGRADED'));
+
+    for (let i = 0; i < 3; i++) h.reportError(new Error('Socket closed'));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('[CtrlHealth:session-abc] DEAD'));
+
+    warnSpy.mockRestore();
+    logSpy.mockRestore();
+  });
+
+  it('不带 tag 时日志保持默认前缀', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const h = new ControllerHealth({ maxRetries: 3 });
+    h.markHealthy();
+    h.reportError(new Error('Socket closed'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('[CtrlHealth] DEGRADED'));
+    logSpy.mockRestore();
+  });
 });

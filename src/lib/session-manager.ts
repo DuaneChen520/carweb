@@ -346,14 +346,21 @@ export const useSessionManager = create<SessionManagerState>((set, get) => ({
     if (!adb) return;
 
     // start 会复用 session 的 canvas（如果存在）。
-    // T5：若 app 已记录 displayId（keepActive 保住的虚拟屏），以 attach 模式
-    // 接管原屏而非 newDisplay，画面瞬间回前台、无重建跳动。
+    // 2026-08-04（推翻 T5 的 attach 恢复，S2-P0-9 查证）：
+    // - scrcpy 官方无 "client 断开后保留虚拟屏" 能力（无 keep-display 选项），
+    //   keepActive 仅是防休眠（userActivity）且 v3 未序列化——backgroundify 后
+    //   旧虚拟屏必被系统回收；
+    // - 实测 attach 旧屏（app.displayId）存在两条失败路径：抛错（已降级 newDisplay）
+    //   或 attach 成功但 server 数秒后退出（Socket closed 触控失效）——均不可靠；
+    // - 因此 resume 一律 newDisplay 重建屏 + 重新启动 app（稳定可靠，app 重新加载）。
     // 注意：pane 恢复也必须是 audio:false（音频由专用采集连接统一承担，ADR-0015）。
-    await session.start(adb, displayConfig, app.displayId ?? undefined, undefined, { audio: false });
+    await session.start(adb, displayConfig, undefined, undefined, { audio: false });
 
-    // 重新在 displayId 上启动 app
-    if (app.displayId !== null) {
-      await session.startAppOnDisplay(app.packageName);
+    // 在新屏上启动 app，并回写新 displayId（旧 app.displayId 已随旧屏回收失效）
+    await session.startAppOnDisplay(app.packageName);
+    const newDisplayId = session.displayId;
+    if (newDisplayId !== null) {
+      get()._updateAppState(sessionId, { displayId: newDisplayId });
     }
   },
 
