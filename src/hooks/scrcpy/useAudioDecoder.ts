@@ -4,15 +4,10 @@ import type { AdbScrcpyOptions4_0 } from '@/lib/scrcpy4';
 import type { AudioState } from './audio/types';
 
 /**
- * scrcpy 音频流原始包格式：MediaStreamRawPacket
- * 8 bytes PTS (big-endian uint64) + 4 bytes data length (big-endian uint32) + N bytes data
- *
- * 注意：AdbScrcpyOptions4_0 把 createMediaStreamTransformer 覆盖为恒等透传，
- * 音频流没有被解析为包对象，仍然是原始字节流。此处需手动解析。
+ * scrcpy 音频流（v3 升级后）：上游 createMediaStreamTransformer 已把音频字节流
+ * 解析为 ScrcpyAudioStreamPacket（{type:'configuration', data} / {type:'data', keyframe?, pts?, data}），
+ * 此处直接消费包对象，无需手动 12 字节解析。
  */
-const PTS_CONFIG = 1n << 63n;   // 标准 MediaStream 配置包标志
-const PTS_CONFIG_4 = 1n << 62n; // scrcpy 4.0 视频格式（兼容音频也可能用）
-
 export function useAudioDecoder() {
   const workerRef = useRef<Worker | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -20,11 +15,10 @@ export function useAudioDecoder() {
   const routeRef = useRef<'browser' | 'phone'>('browser');
   const mutedRef = useRef(false);
   const disposeRef = useRef(false);
-  const readerRef = useRef<ReadableStreamDefaultReader<any> | null>(null);
-  const audioBufRef = useRef<Uint8Array>(new Uint8Array(0));
+  const readerRef = useRef<ReadableStreamDefaultReader<unknown> | null>(null);
 
   const setupAudioStream = useCallback(async (
-    client: AdbScrcpyClient<AdbScrcpyOptions4_0<true>>,
+    client: AdbScrcpyClient<AdbScrcpyOptions4_0>,
     onStateChange?: (state: AudioState) => void,
   ) => {
     const audioMeta = await client.audioStream;
@@ -98,12 +92,10 @@ export function useAudioDecoder() {
         }
       };
 
-      // 5. Connect scrcpy audio stream
-      // 注意：音频流是原始字节（Uint8Array），需要手动解析为包对象
+      // 5. Connect scrcpy audio stream（v3：流已是 ScrcpyAudioStreamPacket 包对象）
       const { codec, stream: audioStream } = audioMeta;
       const reader = audioStream.getReader();
       readerRef.current = reader;
-      audioBufRef.current = new Uint8Array(0);
 
       const pump = async () => {
         try {
@@ -111,55 +103,34 @@ export function useAudioDecoder() {
             const { done, value } = await reader.read();
             if (done) break;
 
-            // value 是 Uint8Array 原始字节，非包对象
-            // 注意：类型标注为 ScrcpyMediaStreamPacket，但运行时是 Uint8Array
-            const chunk = value as unknown as Uint8Array;
-            const merged = new Uint8Array(audioBufRef.current.byteLength + chunk.byteLength);
-            merged.set(audioBufRef.current, 0);
-            merged.set(chunk, audioBufRef.current.byteLength);
-            audioBufRef.current = merged;
-
-            // 尽可能多地解析出完整包
-            while (audioBufRef.current.byteLength >= 12) {
-              const dv = new DataView(audioBufRef.current.buffer, audioBufRef.current.byteOffset, audioBufRef.current.byteLength);
-              const pts = dv.getBigUint64(0, false);  // big-endian
-              const size = dv.getUint32(8, false);    // big-endian
-              const totalLen = 12 + size;
-              if (audioBufRef.current.byteLength < totalLen) break;
-
-              const data = audioBufRef.current.slice(12, totalLen);
-              const isConfig = (pts & PTS_CONFIG) !== 0n || (pts & PTS_CONFIG_4) !== 0n;
-
-              if (isConfig) {
-                const codecStr = codec.webCodecId || 'opus';
-                const desc = data.byteLength > 0 ? data.slice(0) : undefined;
-                worker.postMessage(
-                  {
-                    type: 'configure',
-                    codec: codecStr,
-                    description: desc,
-                    // S2-P0-3：以 AudioContext 实际采样率为输出目标（解码 worker 侧重采样）
-                    targetSampleRate: audioCtxRef.current?.sampleRate ?? 48000,
+            // v3：上游已解析为包对象，直接消费，无需手动 12 字节解析
+            const packet = value as { type: string; data: Uint8Array; pts?: bigint };
+            if (packet.type === 'configuration') {
+              const codecStr = codec.webCodecId || 'opus';
+              const desc = packet.data.byteLength > 0 ? packet.data.slice(0) : undefined;
+              worker.postMessage(
+                {
+                  type: 'configure',
+                  codec: codecStr,
+                  description: desc,
+                  // S2-P0-3：以 AudioContext 实际采样率为输出目标（解码 worker 侧重采样）
+                  targetSampleRate: audioCtxRef.current?.sampleRate ?? 48000,
+                },
+                desc ? [desc.buffer] : []
+              );
+            } else {
+              const dataBuf = packet.data.slice(0).buffer;
+              worker.postMessage(
+                {
+                  type: 'data',
+                  chunk: {
+                    type: 'key' as const,
+                    data: dataBuf,
+                    timestamp: Number(packet.pts ?? 0n),
                   },
-                  desc ? [desc.buffer] : []
-                );
-              } else {
-                const dataBuf = data.slice(0).buffer;
-                const realPts = pts & ((1n << 61n) - 1n); // 用 61-bit PTS 掩码
-                worker.postMessage(
-                  {
-                    type: 'data',
-                    chunk: {
-                      type: 'key' as const,
-                      data: dataBuf,
-                      timestamp: Number(realPts),
-                    },
-                  },
-                  [dataBuf]
-                );
-              }
-
-              audioBufRef.current = audioBufRef.current.slice(totalLen);
+                },
+                [dataBuf]
+              );
             }
           }
         } catch (e) {

@@ -8,11 +8,12 @@ export interface RotationState {
 export async function runAdbCommand(adb: Adb, command: string | string[]): Promise<string> {
   if (adb.subprocess.shellProtocol) {
     const cmd = Array.isArray(command) ? command.join(' ') : command;
-    const result = await adb.subprocess.shellProtocol.spawnWaitText(cmd);
+    // v3：spawnWaitText → spawn(...).wait().toString()
+    const result = await adb.subprocess.shellProtocol.spawn(cmd).wait().toString();
     return result.stdout.trim();
   } else {
     const args = Array.isArray(command) ? ['sh', '-c', `${command.join(' ')} 2>&1`] : ['sh', '-c', `${command} 2>&1`];
-    const result = await adb.subprocess.noneProtocol.spawnWaitText(args);
+    const result = await adb.subprocess.noneProtocol.spawn(args).wait().toString();
     return result.trim();
   }
 }

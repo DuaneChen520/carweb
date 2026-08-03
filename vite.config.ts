@@ -37,7 +37,6 @@ export default defineConfig({
   },
   test: {
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
-    exclude: ['ya-webadb-main/**'],
     setupFiles: ['./src/test/setup.ts'],
   },
   plugins: [

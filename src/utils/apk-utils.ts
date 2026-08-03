@@ -61,7 +61,7 @@ async function downloadResourcesArsc(adb: Adb, apkPath: string): Promise<ArrayBu
  */
 export async function getApkPath(adb: Adb, pkg: string): Promise<string | null> {
   try {
-    const output = await adb.subprocess.noneProtocol.spawnWaitText(['pm', 'path', pkg]);
+    const output = await adb.subprocess.noneProtocol.spawn(['pm', 'path', pkg]).wait().toString();
     const match = output.match(/^package:(.+)$/m);
     return match ? match[1]!.trim() : null;
   } catch {
@@ -145,7 +145,7 @@ export async function extractIconFromApk(adb: Adb, pkg: string): Promise<string 
     }
 
     // Fallback: scan for icon files by filename
-    const listOutput = await adb.subprocess.noneProtocol.spawnWaitText(['unzip', '-l', apkPath]);
+    const listOutput = await adb.subprocess.noneProtocol.spawn(['unzip', '-l', apkPath]).wait().toString();
     const iconCandidates: string[] = [];
 
     for (const line of listOutput.split('\n')) {

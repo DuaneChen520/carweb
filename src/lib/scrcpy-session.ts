@@ -15,10 +15,10 @@
 
 import type { AdbScrcpyClient } from '@yume-chan/adb-scrcpy';
 import { AdbScrcpyExitedError } from '@yume-chan/adb-scrcpy';
-import type { ScrcpyControlMessageWriter } from '@yume-chan/scrcpy';
+import type { ScrcpyControlMessageWriter, ScrcpyVideoStreamPacket } from '@yume-chan/scrcpy';
 import { ScrcpyNewDisplay, ScrcpyCaptureOrientation, ScrcpyLockOrientation, ScrcpyOrientation, AndroidKeyCode, AndroidKeyEventAction } from '@yume-chan/scrcpy';
-import { FlexDisplayClient, serializeResizeDisplay, RESIZE_DISPLAY_TYPE, ControllerHealth, AUDIO_CODEC_FALLBACK } from '@/lib/scrcpy4';
-import type { AdbScrcpyOptions4_0 as AdbScrcpyOptions4_0Type, Scrcpy4MediaPacket } from '@/lib/scrcpy4';
+import { FlexDisplayClient, ControllerHealth, AUDIO_CODEC_FALLBACK } from '@/lib/scrcpy4';
+import type { AdbScrcpyOptions4_0 as AdbScrcpyOptions4_0Type } from '@/lib/scrcpy4';
 import type { ControllerHealthState } from '@/lib/scrcpy4';
 import type { Adb } from '@yume-chan/adb';
 import type { WebCodecsVideoDecoder } from '@yume-chan/scrcpy-decoder-webcodecs';
@@ -142,16 +142,6 @@ export interface StartOptions {
    * 由 SessionManager 改用 "aac" 重试，走本覆盖通道，不改全局默认值。
    */
   audioCodecOverride?: typeof AUDIO_CODEC_FALLBACK;
-  /**
-   * 服务端音频缓冲（ms），透传 `--audio-buffer`（S2-P0-2）。
-   * 默认 150ms（车机档）；定制 server 不识别时由 SessionManager 关闭该字段（真机验证后）。
-   */
-  audioBufferMs?: number;
-  /**
-   * 服务端音频输出缓冲（ms），透传 `--audio-output-buffer`（S2-P0-2）。
-   * 默认不传（官方默认 10ms），仅破音时由上层显式设置。
-   */
-  audioOutputBufferMs?: number;
 }
 
 export interface SessionState {
@@ -173,11 +163,6 @@ export interface ScrcpySessionCallbacks {
   /** 音频解码失败（codec 不匹配或流损坏）时回调；专用音频连接据此触发 opus→aac 自愈（ADR-0016）。 */
   onAudioDecodeError?: (sessionId: string) => void;
 }
-
-// 音频流原始包解析常量（与 useAudioDecoder 一致）
-const PTS_CONFIG = 1n << 63n;
-const PTS_CONFIG_4 = 1n << 62n;
-const PTS_MASK = (1n << 61n) - 1n;
 
 /**
  * 模块级启动互斥锁。
@@ -245,7 +230,7 @@ export class ScrcpySession {
   // ===== 持有的资源 =====
   /** session 拥有的 canvas 元素，start() 时创建，跨 pane/fullscreen 复用 */
   private _canvas: HTMLCanvasElement | null = null;
-  private client: AdbScrcpyClient<AdbScrcpyOptions4_0Type<true>> | null = null;
+  private client: AdbScrcpyClient<AdbScrcpyOptions4_0Type> | null = null;
   private controller: ScrcpyControlMessageWriter | null = null;
   private adb: Adb | null = null;
   private rotationState: RotationState | null = null;
@@ -264,7 +249,6 @@ export class ScrcpySession {
   private audioCtx: AudioContext | null = null;
   private audioWorkletNode: AudioWorkletNode | null = null;
   private audioReader: ReadableStreamDefaultReader<unknown> | null = null;
-  private audioBuf: Uint8Array = new Uint8Array(0);
   private audioRoute: 'browser' | 'phone' = 'browser';
   private audioMuted = false;
   /** 仅音频采集连接（ADR-0015）：true 时 video/control 关闭，只抓整机音频；供 setupAudioStream 内部判读 */
@@ -461,7 +445,7 @@ export class ScrcpySession {
       const trackPid = useVirtualDisplay || audioOnly;
       const pidsBefore = trackPid ? await getScrcpyServerPids(adb) : [];
 
-      let client!: AdbScrcpyClient<AdbScrcpyOptions4_0Type<true>>;
+      let client!: AdbScrcpyClient<AdbScrcpyOptions4_0Type>;
 
       // 串行化「pushServer + start」临界区，避免并发会话在设备端争夺同一
       // localabstract:scrcpy 反向隧道（详见文件顶部 withLaunchMutex 注释）。
@@ -539,11 +523,6 @@ export class ScrcpySession {
           // parseAudioStreamMetadata 对未知标签回退到同一值。默认 opus。
           // negotiatedAudioCodec 允许专用音频连接在解码失败时改用 aac 重试（ADR-0016 自愈）。
           audioCodec: negotiatedAudioCodec,
-          // S2-P0-2：服务端音频缓冲透传（仅音频启用时生效；默认 150ms 车机档）
-          ...(audioEnabled ? { audioBufferMs: opts?.audioBufferMs ?? 150 } : {}),
-          ...(audioEnabled && opts?.audioOutputBufferMs
-            ? { audioOutputBufferMs: opts.audioOutputBufferMs }
-            : {}),
           control,
           ...(control ? { stayAwake: true, showTouches: false } : {}),
           // audioOnly 模式下只存在音频 socket，设备名（sendDeviceMeta）会写入音频 socket
@@ -577,7 +556,9 @@ export class ScrcpySession {
                 ),
               ),
             ]);
-            client = await startWithTimeout;
+            // v3 泛型为完整 Init 类型（start 返回 Tolerant<具体init>），
+            // 与声明的 Tolerant<Init> 逆变不兼容；运行时一致，此处断言收窄。
+            client = (await startWithTimeout) as AdbScrcpyClient<AdbScrcpyOptions4_0Type>;
             launchError = null;
             break;
           } catch (e) {
@@ -632,8 +613,6 @@ export class ScrcpySession {
         this.health.markHealthy();
       }
 
-      const resizeTypeByte = RESIZE_DISPLAY_TYPE;
-
       const flexClient = useVirtualDisplay ? new FlexDisplayClient({
         sendResize: async (w, h) => {
           const ctrl = this.health.tryGetController(this.controllerRefAdapter);
@@ -642,8 +621,8 @@ export class ScrcpySession {
             return;
           }
           try {
-            const bytes = serializeResizeDisplay(resizeTypeByte, w, h);
-            await ctrl.write(bytes);
+            // v3：改用 ScrcpyControlMessageWriter.resizeDisplay（上游原生序列化，取代自研 5 字节）
+            await ctrl.resizeDisplay({ width: w, height: h });
             this.health.markHealthy();
           } catch (error) {
             console.warn(`[FlexResize:${this.id}] sendResize failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -666,7 +645,7 @@ export class ScrcpySession {
           this.updateState({ videoWidth: w, videoHeight: h });
           this.callbacks.onVideoSize(w, h);
           flexClient?.onDecoderSizeChanged(w, h);
-        }, flexClient ? (w, h, clientResized) => flexClient.onSessionPacket(w, h, clientResized) : undefined);
+        }, flexClient ? (w, h, isClientResize) => flexClient.onSessionPacket(w, h, isClientResize) : undefined);
       }
 
       if (flexClient && displayConfig) {
@@ -723,10 +702,10 @@ export class ScrcpySession {
   // ===== 视频流 setup（内联自 useVideoDecoder） =====
 
   private async setupVideoStream(
-    client: AdbScrcpyClient<AdbScrcpyOptions4_0Type<true>>,
+    client: AdbScrcpyClient<AdbScrcpyOptions4_0Type>,
     canvas: HTMLCanvasElement,
     onSizeChanged: (width: number, height: number) => void,
-    onSessionPacket?: (width: number, height: number, clientResized: boolean) => void,
+    onSessionPacket?: (width: number, height: number, isClientResize: boolean) => void,
   ): Promise<void> {
     const { WebCodecsVideoDecoder } = await import('@yume-chan/scrcpy-decoder-webcodecs');
     const { WebGLVideoFrameRenderer } = await import('@yume-chan/scrcpy-decoder-webcodecs/esm/video/render/webgl.js');
@@ -736,7 +715,8 @@ export class ScrcpySession {
       throw new Error('无法获取视频流');
     }
 
-    const renderer = new WebGLVideoFrameRenderer(canvas);
+    // v3：renderer 构造改为 options 形式；canvasSize:'external' 让 flex-client 独占 canvas 尺寸管理
+    const renderer = new WebGLVideoFrameRenderer({ canvas, canvasSize: 'external' });
     const decoder = new WebCodecsVideoDecoder({
       codec: videoStream.metadata.codec,
       renderer,
@@ -757,9 +737,11 @@ export class ScrcpySession {
           const { done, value } = await reader.read();
           if (done) break;
 
-          const packet = value as Scrcpy4MediaPacket;
+          // v3 的 AdbScrcpyVideoStream.stream 已由上游 createMediaStreamTransformer
+          // 解析为 ScrcpyVideoStreamPacket；session 包不写解码器，通知 flex-client。
+          const packet = value as ScrcpyVideoStreamPacket;
           if (packet.type === 'session') {
-            onSessionPacket?.(packet.width, packet.height, packet.clientResized);
+            onSessionPacket?.(packet.width, packet.height, packet.isClientResize);
             continue;
           }
 
@@ -785,7 +767,7 @@ export class ScrcpySession {
 
   // ===== 音频流 setup（内联自 useAudioDecoder） =====
 
-  private async setupAudioStream(client: AdbScrcpyClient<AdbScrcpyOptions4_0Type<true>>): Promise<void> {
+  private async setupAudioStream(client: AdbScrcpyClient<AdbScrcpyOptions4_0Type>): Promise<void> {
     const audioMeta = await client.audioStream;
     if (!audioMeta) {
       // audio:false（分屏 pane）时 server 不提供音频流，属预期，不告警；
@@ -870,76 +852,44 @@ export class ScrcpySession {
       const { codec, stream: audioStream } = audioMeta;
       const reader = audioStream.getReader();
       this.audioReader = reader;
-      this.audioBuf = new Uint8Array(0);
 
       const pump = async () => {
-        let debugPktCount = 0;
-        let debugFirstChunk = true;
         try {
           while (!this.audioDisposed) {
             const { done, value } = await reader.read();
             if (done) break;
 
-            const chunk = value as unknown as Uint8Array;
-            if (debugFirstChunk) {
-              debugFirstChunk = false;
-              const preview = Array.from(chunk.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ');
-              console.log(`[DEBUG-a3f2] 音频 pump 首个 chunk: ${chunk.byteLength} 字节, 前16: ${preview}`);
-            }
-            const merged = new Uint8Array(this.audioBuf.byteLength + chunk.byteLength);
-            merged.set(this.audioBuf, 0);
-            merged.set(chunk, this.audioBuf.byteLength);
-            this.audioBuf = merged;
-
-            while (this.audioBuf.byteLength >= 12) {
-              const dv = new DataView(this.audioBuf.buffer, this.audioBuf.byteOffset, this.audioBuf.byteLength);
-              const pts = dv.getBigUint64(0, false);
-              const size = dv.getUint32(8, false);
-              const totalLen = 12 + size;
-              if (this.audioBuf.byteLength < totalLen) break;
-
-              const data = this.audioBuf.slice(12, totalLen);
-              const isConfig = (pts & PTS_CONFIG) !== 0n || (pts & PTS_CONFIG_4) !== 0n;
-
-              if (isConfig) {
-                const codecStr = codec.webCodecId || 'opus';
-                const desc = data.byteLength > 0 ? data.slice(0) : undefined;
-                const descHex = desc ? Array.from(desc.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ') : '(空)';
-                console.log(`[DEBUG-a3f2] 配置包: codec=${codecStr}, desc ${desc?.byteLength ?? 0} 字节, hex: ${descHex}`);
-                worker.postMessage(
-                  {
-                    type: 'configure',
-                    codec: codecStr,
-                    description: desc,
-                    // S2-P0-3：以 AudioContext 实际采样率为输出目标（解码 worker 侧重采样）
-                    targetSampleRate: this.audioCtx?.sampleRate ?? 48000,
+            // v3：上游 createMediaStreamTransformer 已把音频字节流解析为
+            // ScrcpyAudioStreamPacket（configuration / data），无需手动 12 字节解析。
+            const packet = value as { type: string; data: Uint8Array; pts?: bigint };
+            if (packet.type === 'configuration') {
+              const codecStr = codec.webCodecId || 'opus';
+              const desc = packet.data.byteLength > 0 ? packet.data.slice(0) : undefined;
+              worker.postMessage(
+                {
+                  type: 'configure',
+                  codec: codecStr,
+                  description: desc,
+                  // S2-P0-3：以 AudioContext 实际采样率为输出目标（解码 worker 侧重采样）
+                  targetSampleRate: this.audioCtx?.sampleRate ?? 48000,
+                },
+                desc ? [desc.buffer] : []
+              );
+            } else {
+              const dataBuf = packet.data.slice(0).buffer;
+              worker.postMessage(
+                {
+                  type: 'data',
+                  chunk: {
+                    type: 'key' as const,
+                    data: dataBuf,
+                    timestamp: Number(packet.pts ?? 0n),
                   },
-                  desc ? [desc.buffer] : []
-                );
-              } else {
-                debugPktCount++;
-                if (debugPktCount <= 3) {
-                  console.log(`[DEBUG-a3f2] 音频包 #${debugPktCount}: ${data.byteLength} 字节`);
-                }
-                const dataBuf = data.slice(0).buffer;
-                const realPts = pts & PTS_MASK;
-                worker.postMessage(
-                  {
-                    type: 'data',
-                    chunk: {
-                      type: 'key' as const,
-                      data: dataBuf,
-                      timestamp: Number(realPts),
-                    },
-                  },
-                  [dataBuf]
-                );
-              }
-
-              this.audioBuf = this.audioBuf.slice(totalLen);
+                },
+                [dataBuf]
+              );
             }
           }
-          console.log(`[DEBUG-a3f2] 音频 pump 结束, 共 ${debugPktCount} 个音频包`);
           // 音频流结束（server 退出或 socket 关闭）——通知上层以便重启专用音频连接
           if (this.audioOnly) {
             this.callbacks.onAudioStateChange?.({ status: 'errored', route: 'browser', muted: false });

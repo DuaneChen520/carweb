@@ -1,11 +1,19 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- test mocks require any casts */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { runAdbCommand } from '../adb-commands';
 import { getMediaSession, dispatchMediaKey } from '../media-commands';
 
 /**
  * 构造一个 fake adb：记录传入命令，并按队列返回 stdout。
- * runAdbCommand 走 shellProtocol 分支：调用 spawnWaitText(cmd) 并取 .stdout.trim()。
+ * v3 结构：subprocess.shellProtocol.spawn(cmd) 返回「Promise 且带 .wait() 方法」的组合对象
+ * （AdbSpawner 类型），wait() 返回带 .toString() 的 LazyPromise（resolve 为 {stdout, stderr, exitCode}）。
  */
+function makeWaitable(stdout: string) {
+  const lazy: any = Promise.resolve(new Uint8Array(0));
+  lazy.toString = () => Promise.resolve({ stdout, stderr: '', exitCode: 0 });
+  return lazy;
+}
+
 function makeFakeAdb(responses: string[] | (() => string)) {
   const calls: string[] = [];
   const queue = Array.isArray(responses) ? [...responses] : null;
@@ -15,9 +23,11 @@ function makeFakeAdb(responses: string[] | (() => string)) {
   const adb: any = {
     subprocess: {
       shellProtocol: {
-        spawnWaitText: vi.fn(async (cmd: string) => {
+        spawn: vi.fn((cmd: string) => {
           calls.push(cmd);
-          return { stdout: resolver() };
+          const p: any = Promise.resolve({});
+          p.wait = () => makeWaitable(resolver());
+          return p;
         }),
       },
     },
@@ -54,7 +64,9 @@ Sessions: #1 active
     const adb: any = {
       subprocess: {
         shellProtocol: {
-          spawnWaitText: vi.fn().mockRejectedValue(new Error('adb error')),
+          spawn: vi.fn(async () => {
+            throw new Error('adb error');
+          }),
         },
       },
     };
@@ -75,16 +87,18 @@ describe('dispatchMediaKey', () => {
     const adb: any = {
       subprocess: {
         shellProtocol: {
-          spawnWaitText: vi.fn(async () => {
+          spawn: vi.fn(() => {
             if (first) { first = false; throw new Error('dispatch not available'); }
-            return { stdout: '' };
+            const p: any = Promise.resolve({});
+            p.wait = () => makeWaitable('');
+            return p;
           }),
         },
       },
     };
     await dispatchMediaKey(adb, 'next');
-    expect(adb.subprocess.shellProtocol.spawnWaitText).toHaveBeenNthCalledWith(1, 'cmd media_session dispatch next');
-    expect(adb.subprocess.shellProtocol.spawnWaitText).toHaveBeenNthCalledWith(2, 'input keyevent 87');
+    expect(adb.subprocess.shellProtocol.spawn).toHaveBeenNthCalledWith(1, 'cmd media_session dispatch next');
+    expect(adb.subprocess.shellProtocol.spawn).toHaveBeenNthCalledWith(2, 'input keyevent 87');
   });
 
   it('maps previous to keyevent 88 on fallback', async () => {
@@ -92,22 +106,26 @@ describe('dispatchMediaKey', () => {
     const adb: any = {
       subprocess: {
         shellProtocol: {
-          spawnWaitText: vi.fn(async () => {
+          spawn: vi.fn(() => {
             if (first) { first = false; throw new Error('fail'); }
-            return { stdout: '' };
+            const p: any = Promise.resolve({});
+            p.wait = () => makeWaitable('');
+            return p;
           }),
         },
       },
     };
     await dispatchMediaKey(adb, 'previous');
-    expect(adb.subprocess.shellProtocol.spawnWaitText).toHaveBeenNthCalledWith(2, 'input keyevent 88');
+    expect(adb.subprocess.shellProtocol.spawn).toHaveBeenNthCalledWith(2, 'input keyevent 88');
   });
 
   it('does not throw when both dispatch and fallback fail', async () => {
     const adb: any = {
       subprocess: {
         shellProtocol: {
-          spawnWaitText: vi.fn().mockRejectedValue(new Error('always fails')),
+          spawn: vi.fn(async () => {
+            throw new Error('always fails');
+          }),
         },
       },
     };

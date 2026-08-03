@@ -98,7 +98,8 @@ export class DeviceAppParser {
 
     const arrayBuffer = await this.fetchDexData();
     console.log(`[DeviceAppParser] 推送 DEX 到设备: ${targetPath}`);
-    const sync = await adb.sync();
+    // v3：adb.sync 从方法变为属性（AdbSync.Service 实例），不再 await
+    const sync = adb.sync;
     await sync.write({
       filename: targetPath,
       file: new ReadableStream({
@@ -119,7 +120,7 @@ export class DeviceAppParser {
 
     const arrayBuffer = await this.fetchQuickDexData();
     console.log(`[DeviceAppParser] 推送 Quick DEX 到设备: ${targetPath}`);
-    const sync = await adb.sync();
+    const sync = adb.sync;
     await sync.write({
       filename: targetPath,
       file: new ReadableStream({
@@ -194,7 +195,7 @@ echo "APP_PROCESS EXIT CODE: $?" >&2
     const scriptPath = targetPath || DeviceAppParser.SCRIPT_PATH;
 
     console.log(`[DeviceAppParser] 推送脚本到设备: ${scriptPath}`);
-    const sync = await adb.sync();
+    const sync = adb.sync;
     await sync.write({
       filename: scriptPath,
       file: new ReadableStream({
@@ -206,7 +207,7 @@ echo "APP_PROCESS EXIT CODE: $?" >&2
     });
 
     // Make script executable
-    await adb.subprocess.noneProtocol.spawnWaitText(['chmod', '755', scriptPath]);
+    await adb.subprocess.noneProtocol.spawn(['chmod', '755', scriptPath]).wait();
     console.log('[DeviceAppParser] 脚本推送完成');
   }
 
@@ -225,7 +226,7 @@ echo "APP_PROCESS EXIT CODE: $?" >&2
 
     let resultPromise: Promise<string>;
     if (adb.subprocess.shellProtocol) {
-      resultPromise = adb.subprocess.shellProtocol.spawnWaitText(['sh', DeviceAppParser.SCRIPT_PATH])
+      resultPromise = adb.subprocess.shellProtocol.spawn(['sh', DeviceAppParser.SCRIPT_PATH]).wait().toString()
         .then((waitResult) => {
           // Combine stdout and stderr for debugging
           const combined = waitResult.stdout + waitResult.stderr;
@@ -234,7 +235,7 @@ echo "APP_PROCESS EXIT CODE: $?" >&2
           return combined;
         });
     } else {
-      resultPromise = adb.subprocess.noneProtocol.spawnWaitText(['sh', DeviceAppParser.SCRIPT_PATH]);
+      resultPromise = adb.subprocess.noneProtocol.spawn(['sh', DeviceAppParser.SCRIPT_PATH]).wait().toString();
     }
 
     const timeoutPromise = new Promise<never>((_, reject) =>
@@ -261,7 +262,7 @@ echo "APP_PROCESS EXIT CODE: $?" >&2
 
     let resultPromise: Promise<string>;
     if (adb.subprocess.shellProtocol) {
-      resultPromise = adb.subprocess.shellProtocol.spawnWaitText(['sh', DeviceAppParser.QUICK_SCRIPT_PATH])
+      resultPromise = adb.subprocess.shellProtocol.spawn(['sh', DeviceAppParser.QUICK_SCRIPT_PATH]).wait().toString()
         .then((waitResult) => {
           const combined = waitResult.stdout + waitResult.stderr;
           console.log(`[DeviceAppParser] Quick stdout: ${waitResult.stdout.substring(0, 200)}`);
@@ -269,7 +270,7 @@ echo "APP_PROCESS EXIT CODE: $?" >&2
           return combined;
         });
     } else {
-      resultPromise = adb.subprocess.noneProtocol.spawnWaitText(['sh', DeviceAppParser.QUICK_SCRIPT_PATH]);
+      resultPromise = adb.subprocess.noneProtocol.spawn(['sh', DeviceAppParser.QUICK_SCRIPT_PATH]).wait().toString();
     }
 
     const timeoutPromise = new Promise<never>((_, reject) =>
@@ -344,9 +345,9 @@ echo "APP_PROCESS EXIT CODE: $?" >&2
     const command = `rm -f '${targetPath}' '${DeviceAppParser.QUICK_SCRIPT_PATH}'`;
 
     if (adb.subprocess.shellProtocol) {
-      await adb.subprocess.shellProtocol.spawnWaitText(command);
+      await adb.subprocess.shellProtocol.spawn(command).wait();
     } else {
-      await adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', command]);
+      await adb.subprocess.noneProtocol.spawn(['sh', '-c', command]).wait();
     }
 
     console.log('[DeviceAppParser] Quick 清理完成');
@@ -424,9 +425,9 @@ echo "APP_PROCESS EXIT CODE: $?" >&2
     const command = `rm -f '${targetPath}' '${DeviceAppParser.SCRIPT_PATH}'`;
 
     if (adb.subprocess.shellProtocol) {
-      await adb.subprocess.shellProtocol.spawnWaitText(command);
+      await adb.subprocess.shellProtocol.spawn(command).wait();
     } else {
-      await adb.subprocess.noneProtocol.spawnWaitText(['sh', '-c', command]);
+      await adb.subprocess.noneProtocol.spawn(['sh', '-c', command]).wait();
     }
 
     console.log('[DeviceAppParser] 清理完成');

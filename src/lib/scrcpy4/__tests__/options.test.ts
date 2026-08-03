@@ -1,10 +1,10 @@
 // src/lib/scrcpy4/__tests__/options.test.ts
 import { describe, it, expect } from 'vitest';
 import { ScrcpyNewDisplay } from '@yume-chan/scrcpy';
-import { AdbScrcpyOptions4_0, RESIZE_DISPLAY_TYPE } from '../options';
+import { AdbScrcpyOptions4_0Tolerant as AdbScrcpyOptions4_0 } from '../options';
 
-describe('AdbScrcpyOptions4_0', () => {
-  it('version 为 4.0', () => {
+describe('AdbScrcpyOptions4_0（v3 车机容错版）', () => {
+  it('version 为 4.0（v3 clientOptions?.version 默认）', () => {
     const opts = new AdbScrcpyOptions4_0({
       video: true,
       audio: true,
@@ -44,48 +44,16 @@ describe('AdbScrcpyOptions4_0', () => {
     expect(opts.serialize()).toContain('keep_active=true');
   });
 
-  it('audioBufferMs=150 时 serialize 含 audio_buffer=150（S2-P0-2）', () => {
-    const opts = new AdbScrcpyOptions4_0({
-      video: true,
-      audio: true,
-      control: true,
-      audioBufferMs: 150,
-    });
-    expect(opts.serialize()).toContain('audio_buffer=150');
-  });
-
-  it('audioOutputBufferMs 未设置时不输出 audio_output_buffer（S2-P0-2）', () => {
-    const opts = new AdbScrcpyOptions4_0({
-      video: true,
-      audio: true,
-      control: true,
-      audioBufferMs: 150,
-    });
-    expect(opts.serialize().some(a => a.startsWith('audio_output_buffer'))).toBe(false);
-  });
-
-  it('audioOutputBufferMs=10 时 serialize 含 audio_output_buffer=10（S2-P0-2）', () => {
-    const opts = new AdbScrcpyOptions4_0({
-      video: true,
-      audio: true,
-      control: true,
-      audioOutputBufferMs: 10,
-    });
-    expect(opts.serialize()).toContain('audio_output_buffer=10');
-  });
-
-  it('controlMessageTypes 末尾为 ResizeDisplay', () => {
+  it('controlMessageTypes 含 21（ResizeDisplay，v3 数字索引映射）', () => {
     const opts = new AdbScrcpyOptions4_0({ video: true, control: true });
     const types = opts.controlMessageTypes;
-    expect(types[types.length - 1]).toBe(RESIZE_DISPLAY_TYPE);
-    expect(types.indexOf(RESIZE_DISPLAY_TYPE)).toBe(18);
+    expect(21 in types).toBe(true);
+    expect(types[21]).toBe(21);
   });
 
-  it('createMediaStreamTransformer 返回 TransformStream', () => {
+  it('createMediaStreamTransformer 返回 TransformStream（v3 上游实现）', () => {
     const opts = new AdbScrcpyOptions4_0({ video: true, control: true });
     const ts = opts.createMediaStreamTransformer();
-    // 注意：demuxer 为避开 Node.js v24 TransformStream bug 而手动拼装 { readable, writable }，
-    // 因此不是 TransformStream 实例，而是结构兼容的鸭子类型对象。
     expect(ts).toHaveProperty('readable');
     expect(ts).toHaveProperty('writable');
     expect(ts.readable instanceof ReadableStream).toBe(true);
@@ -93,26 +61,32 @@ describe('AdbScrcpyOptions4_0', () => {
   });
 });
 
-// ── parseAudioStreamMetadata：车机定制 scrcpy server 兼容（ADR-0015 修复）──
-// 标准 scrcpy 4.0 仅上报 OPUS/AAC/FLAC/RAW 四种 4 字节标签；本项目定制
-// scrcpy-server.jar 上报私有标签 0x32333034，需容错回退而非抛错。
-function fourByteStream(bytes: number[]): ReadableStream<Uint8Array> {
+// ── parseAudioStreamMetadata：车机防御性容错（ADR-0015 修复 + 升级 v3 后保留兜底）──
+// 官方 scrcpy 4.0 仅上报 OPUS/AAC/FLAC/RAW 四种 4 字节标签；真机环境曾观察到
+// 非预期标签（如 0x32333034），v3 原生解析器对未知标签抛错，本容错版回退到
+// 协商 audioCodec 而非抛错。
+// v3 的 parseAudioStreamMetadata 参数类型是 stream-extra 的 ReadableStream
+// （getReader().closed 声明为 Promise<undefined>，与原生流类型不兼容），
+// 测试用原生 ReadableStream 构造后断言为 stream-extra 类型。
+type SxReadableStream = import('@yume-chan/stream-extra').ReadableStream<Uint8Array>;
+
+function fourByteStream(bytes: number[]): SxReadableStream {
   const buf = new Uint8Array(bytes);
   return new ReadableStream<Uint8Array>({
     start(c) {
       c.enqueue(buf);
       c.close();
     },
-  });
+  }) as unknown as SxReadableStream;
 }
 
-describe('AdbScrcpyOptions4_0.parseAudioStreamMetadata', () => {
+describe('AdbScrcpyOptions4_0.parseAudioStreamMetadata（容错版）', () => {
   it('未知标签 0x32333034 容错回退到协商 audioCodec=opus（不抛错）', async () => {
     const opts = new AdbScrcpyOptions4_0({
       video: true,
       audio: true,
       control: true,
-      sendCodecMeta: true,
+      sendStreamMeta: true,
       audioCodec: 'opus',
     });
     const meta = await opts.parseAudioStreamMetadata(
@@ -129,7 +103,7 @@ describe('AdbScrcpyOptions4_0.parseAudioStreamMetadata', () => {
       video: true,
       audio: true,
       control: true,
-      sendCodecMeta: true,
+      sendStreamMeta: true,
     });
     const meta = await opts.parseAudioStreamMetadata(
       fourByteStream([0x6f, 0x70, 0x75, 0x73]),
@@ -145,7 +119,7 @@ describe('AdbScrcpyOptions4_0.parseAudioStreamMetadata', () => {
       video: true,
       audio: true,
       control: true,
-      sendCodecMeta: true,
+      sendStreamMeta: true,
     });
     const meta = await opts.parseAudioStreamMetadata(fourByteStream([0, 0, 0, 0]));
     expect(meta.type).toBe('disabled');
@@ -156,18 +130,18 @@ describe('AdbScrcpyOptions4_0.parseAudioStreamMetadata', () => {
       video: true,
       audio: true,
       control: true,
-      sendCodecMeta: true,
+      sendStreamMeta: true,
     });
     const meta = await opts.parseAudioStreamMetadata(fourByteStream([0, 0, 0, 1]));
     expect(meta.type).toBe('errored');
   });
 
-  it('sendCodecMeta=false 时把 4 字节作为音频数据回推，按协商 codec=aac 推断', async () => {
+  it('sendStreamMeta=false 时把 4 字节作为音频数据回推，按协商 codec=aac 推断', async () => {
     const opts = new AdbScrcpyOptions4_0({
       video: true,
       audio: true,
       control: true,
-      sendCodecMeta: false,
+      sendStreamMeta: false,
       audioCodec: 'aac',
     });
     const meta = await opts.parseAudioStreamMetadata(

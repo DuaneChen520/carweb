@@ -1,6 +1,7 @@
 import { useRef, useCallback, useMemo } from 'react';
 import type { AdbScrcpyClient } from '@yume-chan/adb-scrcpy';
-import type { AdbScrcpyOptions4_0, Scrcpy4MediaPacket } from '@/lib/scrcpy4';
+import type { AdbScrcpyOptions4_0 } from '@/lib/scrcpy4';
+import type { ScrcpyVideoStreamPacket } from '@yume-chan/scrcpy';
 import type { WebCodecsVideoDecoder } from '@yume-chan/scrcpy-decoder-webcodecs';
 
 export interface VideoDecoderState {
@@ -13,10 +14,10 @@ export function useVideoDecoder() {
   const cleanupRef = useRef<(() => Promise<void>) | null>(null);
 
   const setupVideoStream = useCallback(async (
-    client: AdbScrcpyClient<AdbScrcpyOptions4_0<true>>,
+    client: AdbScrcpyClient<AdbScrcpyOptions4_0>,
     canvas: HTMLCanvasElement,
     onSizeChanged: (width: number, height: number) => void,
-    onSessionPacket?: (width: number, height: number, clientResized: boolean) => void,
+    onSessionPacket?: (width: number, height: number, isClientResize: boolean) => void,
   ) => {
     const { WebCodecsVideoDecoder } = await import('@yume-chan/scrcpy-decoder-webcodecs');
     const { WebGLVideoFrameRenderer } = await import('@yume-chan/scrcpy-decoder-webcodecs/esm/video/render/webgl.js');
@@ -26,7 +27,8 @@ export function useVideoDecoder() {
       throw new Error('无法获取视频流');
     }
 
-    const renderer = new WebGLVideoFrameRenderer(canvas);
+    // v3：renderer 构造改为 options 形式；canvasSize:'external' 让 flex-client 独占 canvas 尺寸管理
+    const renderer = new WebGLVideoFrameRenderer({ canvas, canvasSize: 'external' });
     const decoder = new WebCodecsVideoDecoder({
       codec: videoStream.metadata.codec,
       renderer,
@@ -47,10 +49,10 @@ export function useVideoDecoder() {
           const { done, value } = await reader.read();
           if (done) break;
 
-          // 4.0 session 包：不写解码器，通知 flex-client
-          const packet = value as Scrcpy4MediaPacket;
+          // v3 的 stream 已是 ScrcpyVideoStreamPacket；session 包不写解码器，通知 flex-client
+          const packet = value as ScrcpyVideoStreamPacket;
           if (packet.type === 'session') {
-            onSessionPacket?.(packet.width, packet.height, packet.clientResized);
+            onSessionPacket?.(packet.width, packet.height, packet.isClientResize);
             continue;
           }
 

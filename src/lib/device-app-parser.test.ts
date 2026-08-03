@@ -2,6 +2,63 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { DeviceAppParser } from './device-app-parser';
 
+/**
+ * v3 mock 工具：
+ * - adb.sync 是属性（AdbSync.Service 实例），不再是方法；
+ * - subprocess.spawn(cmd) 返回「Promise 且带 .wait() 方法」的组合对象（AdbSpawner 类型）。
+ *   noneProtocol：wait().toString() → string
+ *   shellProtocol：wait().toString() → {stdout, stderr, exitCode}
+ *   cleanup 路径：wait()（await 得 Uint8Array，被忽略）
+ */
+function makeLazyString(result: string) {
+  const lazy: any = Promise.resolve(new Uint8Array(0));
+  lazy.toString = () => Promise.resolve(result);
+  return lazy;
+}
+
+function makeLazyShellResult(stdout: string, stderr = '') {
+  const lazy: any = Promise.resolve(new Uint8Array(0));
+  lazy.toString = () => Promise.resolve({ stdout, stderr, exitCode: 0 });
+  return lazy;
+}
+
+/** 构造带 sync 属性 + noneProtocol/shellProtocol spawn 的 fake adb。 */
+function makeMockAdb(options: {
+  json?: string;
+  shellJson?: string;
+  spawnImpl?: (cmd: string) => unknown;
+} = {}) {
+  const { json = '{"apps":[],"errors":[]}', shellJson, spawnImpl } = options;
+  const mockWrite = vi.fn().mockResolvedValue(undefined);
+  const impl = spawnImpl ?? (() => Promise.resolve({}));
+  const noneSpawn = vi.fn((cmd: string) => {
+    const p: any = impl(cmd);
+    if (p && typeof p.then === 'function' && !p.wait) {
+      p.wait = () => makeLazyString(json);
+    }
+    return p;
+  });
+  const shellSpawn = vi.fn((cmd: string) => {
+    const p: any = impl(cmd);
+    if (p && typeof p.then === 'function' && !p.wait) {
+      p.wait = () => makeLazyShellResult(shellJson ?? json);
+    }
+    return p;
+  });
+  return {
+    adb: {
+      sync: { write: mockWrite },
+      subprocess: {
+        noneProtocol: { spawn: noneSpawn },
+        shellProtocol: { spawn: shellSpawn },
+      },
+    } as any,
+    mockWrite,
+    noneSpawn,
+    shellSpawn,
+  };
+}
+
 describe('DeviceAppParser', () => {
   let parser: DeviceAppParser;
 
@@ -18,26 +75,17 @@ describe('DeviceAppParser', () => {
   });
 
   it('should push DEX file to device', async () => {
-    const mockWrite = vi.fn().mockResolvedValue(undefined);
-    const mockAdb = {
-      sync: vi.fn().mockResolvedValue({
-        write: mockWrite,
-      }),
-    } as any;
-
-    const result = await parser.pushDexToDevice(mockAdb, '/data/local/tmp/test.dex');
+    const { adb, mockWrite } = makeMockAdb();
+    const result = await parser.pushDexToDevice(adb, '/data/local/tmp/test.dex');
     expect(result).toBe(true);
     expect(mockWrite).toHaveBeenCalled();
   });
 
   it('should reject invalid target paths', async () => {
-    const mockAdb = {
-      sync: vi.fn().mockResolvedValue({ write: vi.fn() }),
-    } as any;
-
-    await expect(parser.pushDexToDevice(mockAdb, '/etc/passwd')).rejects.toThrow('Invalid target path');
-    await expect(parser.pushDexToDevice(mockAdb, 'relative/path.dex')).rejects.toThrow('Invalid target path');
-    await expect(parser.pushDexToDevice(mockAdb, '/data/local/tmp/evil; rm -rf /')).rejects.toThrow('Invalid target path');
+    const { adb } = makeMockAdb();
+    await expect(parser.pushDexToDevice(adb, '/etc/passwd')).rejects.toThrow('Invalid target path');
+    await expect(parser.pushDexToDevice(adb, 'relative/path.dex')).rejects.toThrow('Invalid target path');
+    await expect(parser.pushDexToDevice(adb, '/data/local/tmp/evil; rm -rf /')).rejects.toThrow('Invalid target path');
   });
 
   it('should throw on fetch failure', async () => {
@@ -45,11 +93,8 @@ describe('DeviceAppParser', () => {
       ok: false,
       statusText: 'Not Found',
     }));
-    const mockAdb = {
-      sync: vi.fn().mockResolvedValue({ write: vi.fn() }),
-    } as any;
-
-    await expect(parser.pushDexToDevice(mockAdb, '/data/local/tmp/test.dex')).rejects.toThrow('Failed to fetch DEX file');
+    const { adb } = makeMockAdb();
+    await expect(parser.pushDexToDevice(adb, '/data/local/tmp/test.dex')).rejects.toThrow('Failed to fetch DEX file');
   });
 
   it('should throw when fetch returns empty DEX', async () => {
@@ -57,26 +102,13 @@ describe('DeviceAppParser', () => {
       ok: true,
       arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
     }));
-    const mockAdb = {
-      sync: vi.fn().mockResolvedValue({ write: vi.fn() }),
-    } as any;
-
-    await expect(parser.pushDexToDevice(mockAdb, '/data/local/tmp/test.dex')).rejects.toThrow('DEX file is empty');
+    const { adb } = makeMockAdb();
+    await expect(parser.pushDexToDevice(adb, '/data/local/tmp/test.dex')).rejects.toThrow('DEX file is empty');
   });
 
   it('should execute DEX file on device', async () => {
-    const mockAdb = {
-      sync: vi.fn().mockResolvedValue({
-        write: vi.fn().mockResolvedValue(undefined),
-      }),
-      subprocess: {
-        noneProtocol: {
-          spawnWaitText: vi.fn().mockResolvedValue('{"apps":[],"errors":[]}'),
-        },
-      },
-    } as any;
-
-    const result = await parser.executeDex(mockAdb, '/data/local/tmp/test.dex');
+    const { adb } = makeMockAdb({ json: '{"apps":[],"errors":[]}' });
+    const result = await parser.executeDex(adb, '/data/local/tmp/test.dex');
     expect(result).toEqual({ apps: [], errors: [] });
   });
 
@@ -114,18 +146,10 @@ describe('DeviceAppParser', () => {
   });
 
   it('should cleanup DEX file from device', async () => {
-    const mockSpawn = vi.fn().mockResolvedValue('');
-    const mockAdb = {
-      subprocess: {
-        shellProtocol: {
-          spawnWaitText: mockSpawn,
-        },
-      },
-    } as any;
-
-    const result = await parser.cleanupDex(mockAdb, '/data/local/tmp/test.dex');
+    const { adb, shellSpawn } = makeMockAdb();
+    const result = await parser.cleanupDex(adb, '/data/local/tmp/test.dex');
     expect(result).toBe(true);
-    expect(mockSpawn).toHaveBeenCalledWith("rm -f '/data/local/tmp/test.dex' '/data/local/tmp/run-app-info.sh'");
+    expect(shellSpawn).toHaveBeenCalledWith("rm -f '/data/local/tmp/test.dex' '/data/local/tmp/run-app-info.sh'");
   });
 
   it('should parse all apps end-to-end', async () => {
@@ -133,82 +157,51 @@ describe('DeviceAppParser', () => {
       apps: [{ packageName: 'com.example', label: 'Example', iconBase64: null, versionCode: 1 }],
       errors: [],
     });
-    const mockAdb = {
-      sync: vi.fn().mockResolvedValue({
-        write: vi.fn().mockResolvedValue(undefined),
-      }),
-      subprocess: {
-        noneProtocol: {
-          spawnWaitText: vi.fn().mockResolvedValue(jsonPayload),
-        },
-        shellProtocol: {
-          spawnWaitText: vi.fn().mockResolvedValue({ stdout: jsonPayload, stderr: '' }),
-        },
-      },
-    } as any;
-
-    const result = await parser.parseAllApps(mockAdb);
+    const { adb } = makeMockAdb({ json: jsonPayload, shellJson: jsonPayload });
+    const result = await parser.parseAllApps(adb);
     expect(result.apps).toHaveLength(1);
     expect(result.apps[0].packageName).toBe('com.example');
   });
 
   it('should clean up DEX even when executeDex fails', async () => {
-    const mockAdb = {
-      sync: vi.fn().mockResolvedValue({
-        write: vi.fn().mockResolvedValue(undefined),
-      }),
+    // v3：executeDex 失败来自 spawn(...).wait().toString() reject（进程执行失败），
+    // 而非 spawn 本身 reject。cleanup 走 shellProtocol spawn(...).wait()（成功）。
+    const mockWrite = vi.fn().mockResolvedValue(undefined);
+    const makeRejectingSpawn = () => {
+      const p: any = Promise.resolve({});
+      const lazy: any = Promise.resolve(new Uint8Array(0));
+      lazy.toString = () => Promise.reject(new Error('execute failed'));
+      p.wait = () => lazy;
+      return p;
+    };
+    const adb: any = {
+      sync: { write: mockWrite },
       subprocess: {
-        noneProtocol: {
-          spawnWaitText: vi.fn().mockRejectedValue(new Error('execute failed')),
-        },
-        shellProtocol: {
-          spawnWaitText: vi.fn().mockResolvedValue(''),
-        },
+        noneProtocol: { spawn: vi.fn(makeRejectingSpawn) },
+        shellProtocol: { spawn: vi.fn(makeRejectingSpawn) },
       },
-    } as any;
-
-    await expect(parser.parseAllApps(mockAdb)).rejects.toThrow('execute failed');
+    };
+    await expect(parser.parseAllApps(adb)).rejects.toThrow('execute failed');
   });
 
   describe('Quick DEX', () => {
     it('should push Quick DEX file to device', async () => {
-      const mockWrite = vi.fn().mockResolvedValue(undefined);
-      const mockAdb = {
-        sync: vi.fn().mockResolvedValue({
-          write: mockWrite,
-        }),
-      } as any;
-
-      const result = await parser.pushQuickDexToDevice(mockAdb, '/data/local/tmp/test-quick.dex');
+      const { adb, mockWrite } = makeMockAdb();
+      const result = await parser.pushQuickDexToDevice(adb, '/data/local/tmp/test-quick.dex');
       expect(result).toBe(true);
       expect(mockWrite).toHaveBeenCalled();
     });
 
     it('should reject invalid quick dex target paths', async () => {
-      const mockAdb = {
-        sync: vi.fn().mockResolvedValue({ write: vi.fn() }),
-      } as any;
-
-      await expect(parser.pushQuickDexToDevice(mockAdb, '/etc/passwd')).rejects.toThrow('Invalid target path');
-      await expect(parser.pushQuickDexToDevice(mockAdb, 'relative/path.dex')).rejects.toThrow('Invalid target path');
+      const { adb } = makeMockAdb();
+      await expect(parser.pushQuickDexToDevice(adb, '/etc/passwd')).rejects.toThrow('Invalid target path');
+      await expect(parser.pushQuickDexToDevice(adb, 'relative/path.dex')).rejects.toThrow('Invalid target path');
     });
 
     it('should execute Quick DEX on device', async () => {
-      const mockAdb = {
-        sync: vi.fn().mockResolvedValue({
-          write: vi.fn().mockResolvedValue(undefined),
-        }),
-        subprocess: {
-          noneProtocol: {
-            spawnWaitText: vi.fn().mockResolvedValue('{"apps":[{"packageName":"com.test","versionCode":1}]}'),
-          },
-          shellProtocol: {
-            spawnWaitText: vi.fn().mockResolvedValue({ stdout: '{"apps":[{"packageName":"com.test","versionCode":1}]}', stderr: '' }),
-          },
-        },
-      } as any;
-
-      const result = await parser.executeQuickDex(mockAdb, '/data/local/tmp/test-quick.dex');
+      const quickJson = '{"apps":[{"packageName":"com.test","versionCode":1}]}';
+      const { adb } = makeMockAdb({ json: quickJson, shellJson: quickJson });
+      const result = await parser.executeQuickDex(adb, '/data/local/tmp/test-quick.dex');
       expect(result.apps).toHaveLength(1);
       expect(result.apps[0].packageName).toBe('com.test');
       expect(result.apps[0].versionCode).toBe(1);
@@ -246,35 +239,16 @@ describe('DeviceAppParser', () => {
     });
 
     it('should cleanup Quick DEX from device', async () => {
-      const mockSpawn = vi.fn().mockResolvedValue('');
-      const mockAdb = {
-        subprocess: {
-          shellProtocol: {
-            spawnWaitText: mockSpawn,
-          },
-        },
-      } as any;
-
-      const result = await parser.cleanupQuickDex(mockAdb, '/data/local/tmp/test-quick.dex');
+      const { adb, shellSpawn } = makeMockAdb();
+      const result = await parser.cleanupQuickDex(adb, '/data/local/tmp/test-quick.dex');
       expect(result).toBe(true);
-      expect(mockSpawn).toHaveBeenCalledWith("rm -f '/data/local/tmp/test-quick.dex' '/data/local/tmp/run-app-info-quick.sh'");
+      expect(shellSpawn).toHaveBeenCalledWith("rm -f '/data/local/tmp/test-quick.dex' '/data/local/tmp/run-app-info-quick.sh'");
     });
 
     it('should fetch quick package list end-to-end', async () => {
-      const mockWrite = vi.fn().mockResolvedValue(undefined);
-      const mockAdb = {
-        sync: vi.fn().mockResolvedValue({ write: mockWrite }),
-        subprocess: {
-          noneProtocol: {
-            spawnWaitText: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
-          },
-          shellProtocol: {
-            spawnWaitText: vi.fn().mockResolvedValue({ stdout: '{"apps":[{"packageName":"com.example","versionCode":1}]}', stderr: '' }),
-          },
-        },
-      } as any;
-
-      const result = await parser.fetchQuickPackageList(mockAdb);
+      const quickJson = '{"apps":[{"packageName":"com.example","versionCode":1}]}';
+      const { adb } = makeMockAdb({ json: quickJson, shellJson: quickJson });
+      const result = await parser.fetchQuickPackageList(adb);
       expect(result.apps).toHaveLength(1);
       expect(result.apps[0].packageName).toBe('com.example');
     });

@@ -1,7 +1,7 @@
 import { useCallback, useRef } from 'react';
-import { Adb, AdbDaemonTransport } from '@yume-chan/adb';
+import { Adb, adbDaemonAuthenticate } from '@yume-chan/adb';
 import { AdbDaemonWebUsbDevice, AdbDaemonWebUsbDeviceManager } from '@yume-chan/adb-daemon-webusb';
-import AdbWebCredentialStore from '@yume-chan/adb-credential-web';
+import { AdbWebCryptoCredentialManager, TangoIndexedDbStorage } from '@yume-chan/adb-credential-web';
 import { useAdbStore, type AdbStore } from './useAdbStore';
 import { killScrcpyServer } from '@/lib/adb-commands';
 import { retryConnectUsb, type RetryProgress } from '@/lib/usb-connect';
@@ -15,11 +15,16 @@ async function connectOnce(store: AdbStore, device: AdbDaemonWebUsbDevice): Prom
   let conn: Awaited<ReturnType<(typeof device)['connect']>> | null = null;
   try {
     conn = await device.connect();
-    const credentialManager = new AdbWebCredentialStore('carweb-adb-key');
-    const transport = await AdbDaemonTransport.authenticate({
+    // v3：AdbDaemonTransport.authenticate 移除，改用独立函数 adbDaemonAuthenticate；
+    // AdbWebCredentialStore → AdbWebCryptoCredentialManager（storage 用 IndexedDB 持久化）。
+    const credentialManager = new AdbWebCryptoCredentialManager(
+      new TangoIndexedDbStorage(),
+      'carweb-adb-key',
+    );
+    const transport = await adbDaemonAuthenticate({
       serial: device.serial,
       connection: conn,
-      credentialStore: credentialManager,
+      credentialManager,
     });
     const adb = new Adb(transport);
     await killScrcpyServer(adb, true);
@@ -34,8 +39,9 @@ async function connectOnce(store: AdbStore, device: AdbDaemonWebUsbDevice): Prom
       (error) => handleAdbDisconnected(store, adb, error),
     );
   } catch (error) {
-    // authenticate 失败后 USB 接口可能被占用，尝试释放以便下一轮重试
-    try { await restoreDevice({ reset: () => device.raw.reset(), close: () => device.raw.close() }); } catch {}
+    // authenticate 失败后 USB 接口可能被占用，尝试释放以便下一轮重试；
+    // 释放本身失败不阻塞原始错误抛出。
+    try { await restoreDevice({ reset: () => device.raw.reset(), close: () => device.raw.close() }); } catch { /* 忽略释放失败 */ }
     throw error;
   }
 }
