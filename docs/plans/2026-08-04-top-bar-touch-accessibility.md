@@ -2,7 +2,7 @@
 
 > 日期：2026-08-04
 > 范围：`PaneDropdown` / `FullscreenDropdown` / `PaneSelector`（虚拟屏顶部悬浮控件栏）
-> 状态：排查完成，待评审后实施
+> 状态：S4-1 / S4-2 已实施（2026-08-04，第四轮三组件结构终版）；S4-3 / S4-4 待实施
 
 ---
 
@@ -175,127 +175,135 @@ document.addEventListener('mousedown', handleClickOutside);
 
 ### 4.1 设计原则
 
-1. **视觉尺寸与热区解耦**——顶部栏是悬浮层，不能为满足 48px 而把视觉做得笨重。采用「小视觉 + `::after` 扩展热区」，热区 ≥48px，视觉保持轻盈。
+1. **触控目标直接做到 48px**——顶部栏是悬浮层，但 48px 工具栏按钮在车机屏上完全常规、并不笨重。直接采用「真实 48×48 按钮 + 20px 图标」（与项目 `NeumorphicButton` 的 `BTN=48` 一致），**不采用 `::after` 伪元素扩热区的取巧方案**。理由：真实 48px 按钮零歧义、零裁切、与侧边栏同源；`::after` 扩热区在相邻按钮间会**重叠 8px**（命中歧义，见 §7）且可能被祖先 `overflow-hidden` + `rounded-lg` 的圆角裁掉边角，复杂度换不来收益。
 2. **消除 absolute 叠放**——改用 flex 三段式，让浏览器负责避让，从根上杜绝 A-1 / A-2 类重叠。
 3. **消除重复**——`PaneDropdown` 与 `FullscreenDropdown` 结构 90% 重合，抽出共享原语。
 4. **对齐项目既有基线**——复用 `NeumorphicButton` 的 48px / icon 20px 常量语义，与侧边栏一致。
 
-### 4.2 新增原语：`TopBarButton`
+### 4.2 交互原语（第六轮终版）：`TopBarHandle` + 同款 `TopBarActionButton`，样式全统一
 
-新建 `src/components/desktop/TopBarButton.tsx`：
+> **第六轮反馈修订（2026-08-04，终版）**：用户要求**应用名、所有按钮均与上下拉按钮（`TopBarHandle`）同款样式，
+> 不再使用侧边栏样式、保持简洁**。最终统一风格：**无底色、白色（危险操作红色系）+ 双层 drop-shadow
+> 保可见、`active:scale-95` 按压缩放反馈**。应用名从深色胶囊标签改为纯白字 + 单层 drop-shadow。
+> 顶部栏从此无任何背景元素（无胶囊、无半透明底），与侧边栏 NeumorphicButton 风格彻底脱钩。
+> `NeumorphicButton` 的 `ariaLabel` 扩展保留（向后兼容，侧边栏未动）。
+>
+> 收起/展开把手为 `TopBarHandle`（`src/components/desktop/TopBarHandle.tsx`）：
+> **折叠态与展开态渲染的是同一个元素**（同一组件、同尺寸 48×48 热区 / 28px 图标、同一锚点），
+> 仅图标方向与 `expanded` 不同 → 两态位置**绝对一致**。
 
 ```tsx
-/**
- * TopBarButton —— 顶部悬浮栏专用触控按钮。
- *
- * S4-P0：视觉尺寸与触控热区解耦——
- * 视觉 32×32（不压迫悬浮栏），热区经 ::after 扩展至 48×48（Material 无障碍下限）。
- * 触屏无 hover，故反馈以 active: 为主、hover: 为辅。
- */
-import type { LucideIcon } from 'lucide-react';
-
-interface TopBarButtonProps {
-  icon: LucideIcon;
-  label: string;
-  onClick: () => void;
-  variant?: 'default' | 'danger';
-  expanded?: boolean;
-}
-
-export function TopBarButton({
-  icon: Icon, label, onClick, variant = 'default', expanded,
-}: TopBarButtonProps) {
-  const tone = variant === 'danger'
-    ? 'text-slate-300 active:text-red-300 active:bg-red-500/25 hover:text-red-400'
-    : 'text-slate-300 active:text-white active:bg-white/20 hover:text-white';
-
+// TopBarHandle.tsx —— 折叠/展开共用把手，无底色，drop-shadow 双影保可见
+export function TopBarHandle({ icon: Icon, label, expanded, onClick }: TopBarHandleProps) {
   return (
     <button
+      type="button"
       onClick={onClick}
       aria-label={label}
+      aria-expanded={expanded}
       title={label}
-      {...(expanded !== undefined ? { 'aria-expanded': expanded } : {})}
-      className={[
-        'relative flex items-center justify-center w-8 h-8 rounded-lg',
-        'transition-colors touch-manipulation shrink-0',
-        // 热区扩展至 48×48，不影响视觉尺寸与布局
-        "after:content-[''] after:absolute after:left-1/2 after:top-1/2",
-        'after:-translate-x-1/2 after:-translate-y-1/2 after:w-12 after:h-12',
-        tone,
-      ].join(' ')}
+      className="pointer-events-auto relative flex items-center justify-center w-12 h-12 rounded-full shrink-0
+                 text-white transition-transform touch-manipulation
+                 drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)] drop-shadow-[0_0_8px_rgba(0,0,0,0.45)]
+                 active:scale-95 active:text-white/85"
     >
-      <Icon size={18} aria-hidden />
+      <Icon size={28} aria-hidden />
     </button>
   );
 }
 ```
 
-要点：
-- 视觉 32×32、图标 18px，热区 48×48（B-1 解决）；
-- `aria-label` 必填，图标 `aria-hidden`（B-4 解决）；
-- `active:` 变体提供触屏按压反馈（B-3 解决）；
-- `variant="danger"` 让关闭键在静止态即有区分度，不依赖 hover。
+无障碍落实（B-1/B-3/B-4）：
+- 48×48 真实触控目标（`TopBarActionButton` / `TopBarHandle` 均 48px，B-1 解决）；
+- `active:scale-95` + 变色/加深提供触屏按压反馈（B-3 解决）；
+- 全部按钮 `label` 必传 → `aria-label`（B-4 解决）。
 
-### 4.3 顶部栏改为 flex 三段式
+### 4.3 顶部栏改为「居中胶囊工具条」（终版，用户 4 点反馈后修订）
 
-以 `FullscreenDropdown` 为例，展开态容器改为：
+> **实施反馈（2026-08-04）**：初版「全宽长条 + 收起靠右」被用户否定，提出 4 点意见，终版如下。
+> **新发现的 P0（问题 1）**：全屏时 `SplitPane` 仍挂载于 DOM，其容器 `relative` 且 **z-index:auto 不创建 stacking context**，
+> 导致内部 `PaneDropdown` 的 z-30 被提升到 `DesktopArea` 层级、盖过 `FullscreenOverlay` 的 z-10 → 全屏仍可见分屏控件。
+> 修复：`SplitPane` 容器加 `z-0`（创建 stacking context），整棵分屏子树钉在覆盖层之下。
+
+以 `FullscreenDropdown` 为例，**三组件紧贴布局**（第五轮终版）：
 
 ```tsx
-<div className="absolute top-2 left-2 right-2 z-30 pointer-events-none animate-fade-in">
-  <div className="flex items-center gap-2 bg-slate-900/80 backdrop-blur-md
-                  rounded-xl px-2 py-1.5 pointer-events-auto shadow-lg shadow-black/30">
+<div className="absolute top-2 inset-x-0 z-30 pointer-events-none animate-fade-in">
+  {/* 左半区(flex-1) | ②(shrink-0) | 右半区(flex-1)：
+      左右半区等宽 → ② 严格居中 = 屏幕中心；①③ 内容分别右/左对齐 → 紧贴②。
+      justify-center：折叠态仅②时也居中（flex 默认 flex-start 会顶到左侧）。
+      间距 gap-3 一致。 */}
+  <div className="flex items-center justify-center gap-3">
+    {/* ① 左半区：应用名，内容右对齐贴②（仅展开态） */}
+    {!collapsed && (
+      <div className="flex-1 min-w-0 flex justify-end pointer-events-none animate-fade-in">
+        <span className="max-w-[min(32vw,240px)] truncate text-white/90 text-sm
+                         bg-slate-900/85 backdrop-blur-md rounded-full px-3 py-1.5 shadow-lg shadow-black/40">
+          {displayName}
+        </span>
+      </div>
+    )}
 
-    {/* 左：应用名，弹性收缩 */}
-    <div className="flex-1 min-w-0 flex items-center gap-2 pl-1">
-      <span className="text-white/90 text-sm truncate">{displayName}</span>
+    {/* ② 上下拉（恒在、严格居中；折叠 ChevronDown / 展开 ChevronUp） */}
+    <div className="shrink-0 pointer-events-auto">
+      <TopBarHandle
+        icon={collapsed ? ChevronDown : ChevronUp}
+        label={collapsed ? '展开控件栏' : '收起控件栏'}
+        expanded={!collapsed}
+        onClick={toggle}
+      />
     </div>
 
-    {/* 中：收起 —— 参与 flex 布局，不再 absolute 居中 */}
-    <TopBarButton icon={ChevronUp} label="收起控件栏" onClick={toggle} expanded />
-
-    {/* 右：功能区，与中段留 8px 间距 */}
-    <div className="flex items-center gap-2 shrink-0">
-      <TopBarButton icon={SplitSquareHorizontal} label="分屏" onClick={...} />
-      <TopBarButton icon={X} label="关闭应用" variant="danger" onClick={...} />
-    </div>
+    {/* ③ 右半区：分屏 + 关闭，内容左对齐贴②（仅展开态） */}
+    {!collapsed && (
+      <div className="flex-1 flex justify-start items-center gap-2 pointer-events-auto animate-fade-in">
+        <TopBarActionButton icon={SplitSquareHorizontal} label="分屏" onClick={...} />
+        <TopBarActionButton icon={X} label="关闭应用" danger onClick={...} />
+      </div>
+    )}
   </div>
 </div>
 ```
 
-变化点：
-- 删除 `absolute inset-0` 居中层与 `absolute right-3` 右侧层 → **A-1 / A-2 同时消失**；
-- `gap-2` = 8px 满足 Material 间距（B-2 解决）；
-- `flex-1 min-w-0 truncate` 让应用名自适应收缩（A-3 解决）；
-- `z-30` 明确高于 `AppTransitionPlaceholder` 的 `z-20`（A-4 解决）；
-- 背景 `slate-900/80` 提升对比度，字号 `text-xs` → `text-sm`。
+> **踩坑记录（2026-08-04）**：
+> - grid 折叠态仅②一个子项时，auto-placement 会把它放进第一列 → 跑到左 1/3，须显式 `col-start` 钉列位；
+> - flex 折叠态仅②时默认 `justify-content: flex-start` → 顶到最左，容器须加 `justify-center`；
+> - 外层容器 `pointer-events-none` 下的子菜单必须显式 `pointer-events-auto`，否则触控穿透到虚拟屏。
 
-> 收起按钮不再严格居中，而是「靠右分组的左侧」。若产品上必须保持视觉居中，可在左段加等宽占位 `<div className="w-8 shrink-0" />` 配合 `justify-between`，仍不需要 absolute。
+**第五轮终版要点（用户多轮反馈收敛）**：
+> 用户点破根因：「把整个组件当整体居中，但上拉按钮在组件内，并未与下拉按钮同位」；
+> 「一直是一条横条，压根没变化」→ 去掉整条胶囊背景，三组件视觉分离；
+> 上下拉位置修正后，再要求**左右组件紧挨上下拉，而非贴边缘**。
 
-### 4.4 折叠态触发器
+- **② 严格居中（机制级保证）**：左右半区 `flex-1` 等宽 → ② 中心 = 屏幕中心；折叠态仅② + `justify-center` → 同样居中，两态同一结构、绝对一致；
+- **①③ 紧贴②**：①内容 `justify-end`（右对齐贴②）、③内容 `justify-start`（左对齐贴②），间距 `gap-3`（12px）一致；
+- ①应用名 `max-w-[min(32vw,240px)]`（分屏 `min(24vw,180px)`）+ `title` 兜底；
+- 子菜单：`absolute top-14 left-1/2 -translate-x-1/2 z-40 pointer-events-auto`（②正下方居中）。
+
+此前各轮落实保留：
+- **问题 1**：`SplitPane` 加 `z-0` 修复全屏穿透（见上）；
+- 折叠态无底色 + `drop-shadow` 双影保可见（问题 2）；
+- 白色系 `TopBarActionButton`（第三轮）；`z-30` 高于占位层。
+
+### 4.4 折叠态触发器（终版：统一 `TopBarHandle`）
+
+折叠态与展开态共用同一把手组件，仅图标方向与 `expanded` 不同：
 
 ```tsx
-<div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
-  <button
-    onClick={toggle}
-    aria-label="展开控件栏"
-    aria-expanded={false}
-    className="pointer-events-auto relative flex items-center justify-center
-               w-11 h-7 rounded-full bg-slate-900/70 text-slate-200
-               backdrop-blur-sm transition-colors touch-manipulation
-               active:bg-white/25 active:text-white
-               after:content-[''] after:absolute after:left-1/2 after:top-1/2
-               after:-translate-x-1/2 after:-translate-y-1/2 after:w-14 after:h-12
-               animate-fade-in"
-  >
-    <ChevronDown size={18} aria-hidden />
-  </button>
+{/* 折叠态 = 双态同结构中「左右组隐藏」：同一容器、同一把手元素，
+    透明无 padding，仅显示 ChevronDown 图标 */}
+<div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 pointer-events-none animate-fade-in">
+  <div className="flex items-center pointer-events-auto">
+    <TopBarHandle icon={ChevronDown} label="展开控件栏" expanded={false} onClick={toggle} />
+  </div>
 </div>
 ```
 
-- 视觉为 44×28 胶囊「把手」，语义比孤立箭头更清晰；
-- 热区 56×48（B-1 解决）；
-- 底色 `slate-900/70` + 图标 `slate-200`，对比度显著提升（B-5 解决）；
-- 补 `aria-expanded`。
+- **去掉底色圆形**：正常状态下零遮挡（问题 2）；
+- **可见性保障**：白色图标 + 双层 `drop-shadow`（近影保证锐利、远影保证在浅色画面上有晕圈），深浅画面均清晰；
+- **两态绝对一致（第三轮）**：折叠态与展开态是**同一个把手元素**（同一容器、同一锚点、同一套 CSS），仅左右组显隐与图标方向不同 → 位置不可能不一致；
+- 48×48 触控热区（B-1 解决），按压反馈为 `active:scale-95` + 轻微变暗；
+- `aria-expanded` 由 `expanded` prop 透传（B-4 一致性）。
 
 ### 4.5 破坏性操作防误触
 
@@ -389,7 +397,7 @@ interface TopBarShellProps {
 | 顶栏高度增加遮挡画面 | 展开态由 ~29px 增至 ~56px。缓解：顶栏为悬浮层不压缩画面尺寸；折叠态仅 28px 高把手；补充自动收起（4.7）。 |
 | 收起按钮不再绝对居中 | flex 方案下视觉重心右移。若不可接受，用等宽占位块实现居中，仍避免 absolute。 |
 | 二次确认增加操作步数 | 仅作用于不可逆的关闭操作；切换/全屏/分屏保持一步直达。 |
-| 热区 `::after` 重叠 | 相邻按钮 `gap-2`=8px、热区各外扩 8px，理论上边缘相接但不重叠；若改小间距需同步收窄热区。 |
+| 热区重叠（已在新方案中规避） | 原 `::after` 方案下相邻按钮 `gap-2`=8px、热区各外扩 8px → 命中区在间隙中**重叠 8px**，点击间隙会落在后序 DOM 按钮上，存在歧义。新方案改为**真实 48px 按钮**，相邻命中区以 8px 真实间隙分隔，零重叠、零裁切。 |
 
 ## 8. 参考
 

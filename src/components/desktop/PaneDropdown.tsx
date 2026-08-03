@@ -1,14 +1,19 @@
 /**
  * PaneDropdown —— 分屏应用顶部可折叠悬浮控件。
  *
- * 折叠态：仅居中显示 ChevronDown 箭头，点击展开完整顶部栏。
- * 展开态三段式布局：左（应用名 + 切换）| 中（ChevronUp 收起，绝对居中）| 右（全屏 + 关闭）
+ * 三组件布局（第五轮反馈 2026-08-04，与 FullscreenDropdown 一致）：
+ *   左半区(flex-1, 应用名+切换右对齐贴②) | ②上下拉(居中) | 右半区(flex-1, 全屏+关闭左对齐贴②)
+ *   → ② 严格钉在屏幕中心，①③ 紧贴②两侧（不贴边缘），间距 gap-3 一致。
+ * 折叠态 = 仅②（同一结构，仍居中，无遮挡）。
+ * - 行为统一（C-2）：任何改变布局/会话状态的动作前先收起。
  */
 
 import { useState, useRef } from 'react';
 import { Maximize2, X, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
 import type { AppInstance, PaneSlot } from '@/lib/session-manager';
 import { useAppDisplayName } from '@/lib/useAppDisplayName';
+import { TopBarHandle } from './TopBarHandle';
+import { TopBarActionButton } from './TopBarActionButton';
 
 interface PaneDropdownProps {
   pane: PaneSlot;
@@ -18,91 +23,82 @@ interface PaneDropdownProps {
   onClose: () => void;
 }
 
-export function PaneDropdown({ pane, app, onSwitch, onFullscreen, onClose }: PaneDropdownProps) {
+export function PaneDropdown({
+  app,
+  onSwitch,
+  onFullscreen,
+  onClose,
+}: PaneDropdownProps) {
   const [collapsed, setCollapsed] = useState(true);
   const menuRef = useRef<HTMLDivElement>(null);
   const displayName = useAppDisplayName(app.packageName);
 
   const toggle = () => setCollapsed((v) => !v);
 
-  if (collapsed) {
-    return (
-      <div
-        ref={menuRef}
-        className="absolute top-2 left-1/2 -translate-x-1/2 z-20 pointer-events-none"
-      >
-        <button
-          onClick={toggle}
-          className="pointer-events-auto p-1.5 rounded-full bg-slate-900/30 text-slate-400 hover:text-white hover:bg-white/10 backdrop-blur-sm transition-colors animate-fade-in"
-          title="展开控件栏"
-          aria-label="展开控件栏"
-        >
-          <ChevronDown size={14} />
-        </button>
-      </div>
-    );
-  }
-
   return (
     <div
       ref={menuRef}
-      className="absolute top-2 left-2 right-2 z-20 pointer-events-none animate-fade-in"
+      className="absolute top-2 inset-x-0 z-30 pointer-events-none animate-fade-in"
     >
-      <div className="relative bg-slate-800/60 backdrop-blur-md rounded-lg px-3 py-1.5 pointer-events-auto shadow-lg shadow-black/20">
-        {/* ChevronUp — 绝对居中，不受左右内容影响 */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <button
-            onClick={toggle}
-            className="pointer-events-auto p-1 rounded text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
-            title="收起"
-          >
-            <ChevronUp size={14} />
-          </button>
-        </div>
-
-        {/* 左：应用名 + 切换 */}
-        <div className="flex items-center gap-1 min-w-0">
-          <div
-            className="text-white/90 text-xs max-w-[120px] truncate"
-            title={app.packageName}
-          >
-            {displayName}
+      {/*
+        左半区(flex-1) | ②(shrink-0) | 右半区(flex-1)：
+        左右半区等宽 → ② 严格居中 = 屏幕中心；①③ 内容分别右/左对齐 → 紧贴②。
+        折叠态仅② → 仍居中。
+      */}
+      {/* justify-center：折叠态仅②时居中；展开态左右半区 flex-1 撑满，②仍居中 */}
+      <div className="flex items-center justify-center gap-3">
+        {/* ① 左半区：应用名 + 切换，内容右对齐贴②（仅展开态）；与上下拉同款：无底色 + 阴影保可见 */}
+        {!collapsed && (
+          <div className="flex-1 min-w-0 flex justify-end items-center gap-2 pointer-events-auto animate-fade-in">
+            <span
+              className="min-w-0 max-w-[min(24vw,180px)] truncate text-white/90 text-sm drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]"
+              title={displayName}
+            >
+              {displayName}
+            </span>
+            <TopBarActionButton
+              icon={RefreshCw}
+              label="切换应用"
+              onClick={() => {
+                setCollapsed(true);
+                onSwitch();
+              }}
+            />
           </div>
-          <button
-            onClick={() => {
-              setCollapsed(true);
-              onSwitch();
-            }}
-            className="p-1 rounded text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
-            title="切换应用"
-          >
-            <RefreshCw size={12} />
-          </button>
+        )}
+
+        {/* ② 上下拉按钮（恒在、严格居中；折叠 ChevronDown / 展开 ChevronUp） */}
+        <div className="shrink-0 pointer-events-auto">
+          <TopBarHandle
+            icon={collapsed ? ChevronDown : ChevronUp}
+            label={collapsed ? '展开控件栏' : '收起控件栏'}
+            expanded={!collapsed}
+            onClick={toggle}
+          />
         </div>
 
-        {/* 右：全屏 + 关闭 */}
-        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
-          <button
-            onClick={() => {
-              setCollapsed(true);
-              onFullscreen();
-            }}
-            className="p-1 rounded text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
-            title="全屏"
-          >
-            <Maximize2 size={12} />
-          </button>
-          <button
-            onClick={() => {
-              setCollapsed(true);
-              onClose();
-            }}
-            className="p-1 rounded text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-            title="关闭"
-          >
-            <X size={12} />
-          </button>
-        </div>
+        {/* ③ 右半区：全屏 + 关闭（危险红色系），内容左对齐贴②（仅展开态） */}
+        {!collapsed && (
+          <div className="flex-1 flex justify-start items-center gap-2 pointer-events-auto animate-fade-in">
+            <TopBarActionButton
+              icon={Maximize2}
+              label="全屏"
+              onClick={() => {
+                setCollapsed(true);
+                onFullscreen();
+              }}
+            />
+            <TopBarActionButton
+              icon={X}
+              label="关闭应用"
+              danger
+              onClick={() => {
+                setCollapsed(true);
+                onClose();
+              }}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

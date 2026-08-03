@@ -164,10 +164,12 @@ export function SplitPane({ pane, app, session, onOpenAppPicker, dropdown, resiz
     };
   }, [app, session, sessionIsRunning, resizeScale]);
 
+  // z-0：创建 stacking context，将本 pane 整棵子树（含 PaneDropdown 的 z-30）钉在
+  // 全屏覆盖层（FullscreenOverlay z-10）之下，防止全屏时泄漏显示分屏控件。
   return (
     <div
       data-pane={pane}
-      className="flex-1 h-full bg-slate-800 rounded-lg overflow-hidden relative border border-white/5"
+      className="flex-1 h-full bg-slate-800 rounded-lg overflow-hidden relative z-0 border border-white/5"
     >
       {app && session ? (
         <>

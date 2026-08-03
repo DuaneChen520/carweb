@@ -10,6 +10,8 @@ interface NeumorphicButtonProps {
   onClick?: () => void;
   toggled?: boolean;
   title?: string;
+  /** 无障碍标签（可选）：透传 aria-label，用于顶部栏等触控场景 */
+  ariaLabel?: string;
   color?: string;
   activeColor?: string;
   toggledColor?: string;
@@ -19,7 +21,7 @@ interface NeumorphicButtonProps {
 }
 
 export function NeumorphicButton({
-  children, onClick, toggled, title, color: explicitColor, activeColor: explicitActiveColor, toggledColor: explicitToggledColor, disabled, variant = 'light',
+  children, onClick, toggled, title, ariaLabel, color: explicitColor, activeColor: explicitActiveColor, toggledColor: explicitToggledColor, disabled, variant = 'light',
 }: NeumorphicButtonProps) {
   const [active, setActive] = useState(false);
 
@@ -104,6 +106,7 @@ export function NeumorphicButton({
       onPointerLeave={() => setActive(false)}
       onPointerCancel={() => setActive(false)}
       title={title}
+      aria-label={ariaLabel}
       disabled={disabled}
       style={{
         transition: 'all 300ms cubic-bezier(0.23, 1, 0.32, 1)',
