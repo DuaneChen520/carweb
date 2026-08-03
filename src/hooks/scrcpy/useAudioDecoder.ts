@@ -134,7 +134,13 @@ export function useAudioDecoder() {
                 const codecStr = codec.webCodecId || 'opus';
                 const desc = data.byteLength > 0 ? data.slice(0) : undefined;
                 worker.postMessage(
-                  { type: 'configure', codec: codecStr, description: desc },
+                  {
+                    type: 'configure',
+                    codec: codecStr,
+                    description: desc,
+                    // S2-P0-3：以 AudioContext 实际采样率为输出目标（解码 worker 侧重采样）
+                    targetSampleRate: audioCtxRef.current?.sampleRate ?? 48000,
+                  },
                   desc ? [desc.buffer] : []
                 );
               } else {

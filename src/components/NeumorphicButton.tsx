@@ -1,7 +1,9 @@
 import { useState } from 'react';
 
-const BTN = 36;
-export const ICON_SIZE = 16;
+// S3-P0-1（车机触控优化）：触控目标 36px → 48px（Material 无障碍下限）
+const BTN = 48;
+// 图标 16 → 20px（AAOS 次图标档，居中于 48px 触控区）
+export const ICON_SIZE = 20;
 
 interface NeumorphicButtonProps {
   children: React.ReactNode;
@@ -95,9 +97,12 @@ export function NeumorphicButton({
   return (
     <button
       onClick={disabled ? undefined : onClick}
-      onMouseDown={() => !disabled && setActive(true)}
-      onMouseUp={() => setActive(false)}
-      onMouseLeave={() => setActive(false)}
+      // S3-P0-2：按压反馈改 Pointer 事件（触屏可用、无合成 mouse 延迟）；
+      // pointercancel 兜底，拖出按钮后释放按压态
+      onPointerDown={() => !disabled && setActive(true)}
+      onPointerUp={() => setActive(false)}
+      onPointerLeave={() => setActive(false)}
+      onPointerCancel={() => setActive(false)}
       title={title}
       disabled={disabled}
       style={{

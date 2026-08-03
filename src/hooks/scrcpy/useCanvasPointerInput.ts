@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { AndroidMotionEventAction } from '@yume-chan/scrcpy';
 import type { ScrcpySession } from '@/lib/scrcpy-session';
 
@@ -19,12 +19,20 @@ import type { ScrcpySession } from '@/lib/scrcpy-session';
  *
  * 注意：canvas.width / canvas.height 即为视频帧像素尺寸（scrcpy-session.ts
  * 中 setupVideoStream 写入），可直接作为 injectTouch 的目标坐标空间。
+ *
+ * S1-P0-3（车机触控优化）：
+ * - 触屏（pointerType !== 'mouse'）未按下时忽略 pointermove，不再发送 HoverMove
+ *   —— 触屏悬停移动频率极高，会与真实 down/move/up 竞争控制 socket 带宽；
+ * - pointermove 按 requestAnimationFrame 节流：同一帧只发送最后一次坐标，
+ *   降低控制 socket 写队列拥塞（写失败 → ControllerHealth DEGRADED 的风险源）。
  */
 export function useCanvasPointerInput(session: ScrcpySession | null) {
-  const handlePointerEvent = useCallback(
+  // rAF 节流状态：待发送的最后一个 move 事件 + 进行中的 rAF 句柄
+  const pendingMoveRef = useRef<React.PointerEvent<HTMLDivElement> | null>(null);
+  const rafRef = useRef<number | null>(null);
+
+  const sendPointer = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
-      // 阻止默认行为（文本选择、触控滚动等）
-      e.preventDefault();
       if (!session) return;
 
       const canvas = session.canvas;
@@ -32,9 +40,6 @@ export function useCanvasPointerInput(session: ScrcpySession | null) {
 
       const rect = canvas.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) return;
-
-      // 音频由专用音频采集连接统一承载（ADR-0015），pane session 自身不持有音频；
-      // AudioContext 的唤醒由 DesktopScreen 的全局手势监听统一处理，此处无需调用。
 
       // 客户端坐标 → canvas 相对比例 → 视频帧像素坐标
       const relativeX = (e.clientX - rect.left) / rect.width;
@@ -86,6 +91,48 @@ export function useCanvasPointerInput(session: ScrcpySession | null) {
     },
     [session],
   );
+
+  const handlePointerEvent = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      // 阻止默认行为（文本选择、触控滚动等）
+      e.preventDefault();
+      if (!session) return;
+
+      // S1-P0-3：触屏未按下（buttons===0）时抑制 HoverMove，
+      // 仅保留鼠标悬停语义（pointerType === 'mouse'）
+      if (e.type === 'pointermove' && e.buttons === 0 && e.pointerType !== 'mouse') return;
+
+      // move 按 rAF 节流：同一帧只发最后一次坐标
+      if (e.type === 'pointermove') {
+        pendingMoveRef.current = e;
+        if (rafRef.current == null) {
+          rafRef.current = requestAnimationFrame(() => {
+            rafRef.current = null;
+            const ev = pendingMoveRef.current;
+            pendingMoveRef.current = null;
+            if (ev) sendPointer(ev);
+          });
+        }
+        return;
+      }
+
+      // down/up/cancel：冲刷掉未发送的 pending move，保证事件顺序（不发出 up 之后的 move）
+      if (rafRef.current != null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      pendingMoveRef.current = null;
+      sendPointer(e);
+    },
+    [session, sendPointer],
+  );
+
+  // 组件卸载时取消未执行的 rAF
+  useEffect(() => {
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
 
   return handlePointerEvent;
 }

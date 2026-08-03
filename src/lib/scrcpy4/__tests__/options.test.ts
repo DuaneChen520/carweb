@@ -44,6 +44,36 @@ describe('AdbScrcpyOptions4_0', () => {
     expect(opts.serialize()).toContain('keep_active=true');
   });
 
+  it('audioBufferMs=150 时 serialize 含 audio_buffer=150（S2-P0-2）', () => {
+    const opts = new AdbScrcpyOptions4_0({
+      video: true,
+      audio: true,
+      control: true,
+      audioBufferMs: 150,
+    });
+    expect(opts.serialize()).toContain('audio_buffer=150');
+  });
+
+  it('audioOutputBufferMs 未设置时不输出 audio_output_buffer（S2-P0-2）', () => {
+    const opts = new AdbScrcpyOptions4_0({
+      video: true,
+      audio: true,
+      control: true,
+      audioBufferMs: 150,
+    });
+    expect(opts.serialize().some(a => a.startsWith('audio_output_buffer'))).toBe(false);
+  });
+
+  it('audioOutputBufferMs=10 时 serialize 含 audio_output_buffer=10（S2-P0-2）', () => {
+    const opts = new AdbScrcpyOptions4_0({
+      video: true,
+      audio: true,
+      control: true,
+      audioOutputBufferMs: 10,
+    });
+    expect(opts.serialize()).toContain('audio_output_buffer=10');
+  });
+
   it('controlMessageTypes 末尾为 ResizeDisplay', () => {
     const opts = new AdbScrcpyOptions4_0({ video: true, control: true });
     const types = opts.controlMessageTypes;

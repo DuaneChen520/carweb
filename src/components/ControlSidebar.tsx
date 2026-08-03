@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, Home, Grid2X2, MonitorOff, Monitor, Maximize2, Minimize2, Power, Settings, Trash2, Volume2, VolumeX, AppWindow, Smartphone, Keyboard } from 'lucide-react';
 import { AppIcon } from './AppIcon';
 import { NeumorphicButton, ICON_SIZE } from './NeumorphicButton';
@@ -174,7 +174,7 @@ export function ControlSidebar({
 
   return (
     <>
-      <div className="w-13 h-full flex flex-col items-center py-2 gap-1 bg-slate-950 border-r border-white/5">
+      <div className="w-16 h-full flex flex-col items-center py-2 gap-1 bg-slate-950 border-r border-white/5">
         <span data-sidebar-trigger="true">
         <NeumorphicButton
           variant="dark"

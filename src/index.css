@@ -145,6 +145,28 @@ canvas {
   -webkit-user-select: none;
 }
 
+/* S3-P0-1：触屏全局防护——可交互元素消除双击缩放延迟、去掉点击高亮闪框 */
+button,
+select,
+input,
+textarea,
+[role="button"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* S3-P0-2：按压反馈兜底（触屏上 active 态即时可见） */
+button:active,
+[role="button"]:active {
+  transform: scale(0.96);
+}
+@media (prefers-reduced-motion: reduce) {
+  button:active,
+  [role="button"]:active {
+    transform: none;
+  }
+}
+
 /* 尊重系统「减少动态效果」偏好 */
 @media (prefers-reduced-motion: reduce) {
   *,

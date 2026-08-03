@@ -47,10 +47,49 @@ describe('ControllerHealth', () => {
     expect(health.state).toBe('DEAD');
   });
 
-  it('非 Socket closed 错误直接 DEAD', () => {
+  it('致命错误（非可恢复）直接 DEAD', () => {
     health.markHealthy();
     health.reportError(new TypeError('controller is undefined'));
     expect(health.state).toBe('DEAD');
+  });
+
+  it('可恢复瞬时错误（Backpressure）→ DEGRADED', () => {
+    health.markHealthy();
+    health.reportError(new Error('Backpressure failed'));
+    expect(health.state).toBe('DEGRADED');
+  });
+
+  it('可恢复瞬时错误（Cannot write to a CLOSED stream）→ DEGRADED', () => {
+    health.markHealthy();
+    health.reportError(new Error('Cannot write to a CLOSED writable stream'));
+    expect(health.state).toBe('DEGRADED');
+  });
+
+  it('可恢复瞬时错误重试成功 → 回 HEALTHY（计数清零，不累积成永久故障）', () => {
+    health.markHealthy();
+    health.reportError(new Error('Backpressure failed'));
+    expect(health.state).toBe('DEGRADED');
+    health.markHealthy();
+    expect(health.state).toBe('HEALTHY');
+    // 成功后再来一次瞬时错误仍只到 DEGRADED（计数已清零，不会误判 DEAD）
+    health.reportError(new Error('Backpressure failed'));
+    expect(health.state).toBe('DEGRADED');
+  });
+
+  it('可恢复瞬时错误连续重试用尽 → DEAD', () => {
+    health.markHealthy();
+    for (let i = 0; i < 3; i++) {
+      health.reportError(new Error('Backpressure failed'));
+      expect(health.state).toBe('DEGRADED');
+    }
+    health.reportError(new Error('Backpressure failed'));
+    expect(health.state).toBe('DEAD');
+  });
+
+  it('Socket closed 仍视为可恢复（DEGRADED 计数）', () => {
+    health.markHealthy();
+    health.reportError(new Error('Socket closed'));
+    expect(health.state).toBe('DEGRADED');
   });
 
   it('DEAD 态 tryGetController 返回 null', () => {
@@ -83,6 +122,19 @@ describe('ControllerHealth', () => {
     expect(health.state).toBe('DEAD');
     health.reset();
     expect(health.state).toBe('IDLE');
+  });
+
+  it('重置后计数归零，瞬时错误需重新累积才 DEAD', () => {
+    health.markHealthy();
+    health.reportError(new Error('Backpressure failed'));
+    health.reportError(new Error('Backpressure failed'));
+    health.reportError(new Error('Backpressure failed'));
+    health.reportError(new Error('Backpressure failed'));
+    expect(health.state).toBe('DEAD'); // maxRetries=3，第 4 次重试用尽
+    health.reset();
+    health.markHealthy(); // 模拟重连成功进入 HEALTHY
+    health.reportError(new Error('Backpressure failed'));
+    expect(health.state).toBe('DEGRADED'); // 计数已归零，重新从 DEGRADED 开始
   });
 
   it('状态转换发出 onStateChange 事件', () => {

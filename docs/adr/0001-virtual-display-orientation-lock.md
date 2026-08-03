@@ -2,11 +2,13 @@
 
 ## 状态
 
-已采纳且已落地（2026-07 确认）。实现位于 `src/lib/scrcpy-session.ts` 的 `ScrcpySession.start()`
-（虚拟屏分支的 `captureOrientation` 构造处，带 ADR-0011/ADR-0001 注释）。
+**已被 2026-08-04 决策推翻**：`LockedInitial` 已改为 `Unlocked`（`src/lib/scrcpy-session.ts` 虚拟屏分支
+`captureOrientation` 构造处，注释含完整论证）。原因：① `@` 锁首帧方向，宽屏容器仍显示竖屏画面，
+与 flex display「宽窄自由调整」冲突；② server 端初始假设 `displayRotation=0` 与窄屏虚拟屏（w<h）
+实际 rotation（部分 ROM 为 90）错位 → 窄屏 90° 翻转。`Unlocked` 下方向 = 虚拟屏 rotation = 容器宽窄方向，
+由官方 4.0 server 的 OpenGL 过滤器 + DisplayMonitor 自愈保证方向正确，flex 全开。
 
-> 历史备注：本决策曾长期未落地（旧代码为 `Unlocked`，构成 open gap，见 CONTEXT.md 旧版记录），
-> 后随 ADR-0011 启动过渡收口一并实现。当前代码现状即本决策。
+原决策历史（已废弃）：曾以 `LockedInitial` 落地（2026-07 确认），用于防止 app 请求旋转导致尺寸翻转。
 
 ## 日期
 

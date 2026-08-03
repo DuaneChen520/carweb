@@ -17,7 +17,7 @@ import type { AdbScrcpyClient } from '@yume-chan/adb-scrcpy';
 import { AdbScrcpyExitedError } from '@yume-chan/adb-scrcpy';
 import type { ScrcpyControlMessageWriter } from '@yume-chan/scrcpy';
 import { ScrcpyNewDisplay, ScrcpyCaptureOrientation, ScrcpyLockOrientation, ScrcpyOrientation, AndroidKeyCode, AndroidKeyEventAction } from '@yume-chan/scrcpy';
-import { AdbScrcpyOptions4_0, FlexDisplayClient, serializeResizeDisplay, RESIZE_DISPLAY_TYPE, ControllerHealth, AUDIO_CODEC_FALLBACK } from '@/lib/scrcpy4';
+import { FlexDisplayClient, serializeResizeDisplay, RESIZE_DISPLAY_TYPE, ControllerHealth, AUDIO_CODEC_FALLBACK } from '@/lib/scrcpy4';
 import type { AdbScrcpyOptions4_0 as AdbScrcpyOptions4_0Type, Scrcpy4MediaPacket } from '@/lib/scrcpy4';
 import type { ControllerHealthState } from '@/lib/scrcpy4';
 import type { Adb } from '@yume-chan/adb';
@@ -142,6 +142,16 @@ export interface StartOptions {
    * 由 SessionManager 改用 "aac" 重试，走本覆盖通道，不改全局默认值。
    */
   audioCodecOverride?: typeof AUDIO_CODEC_FALLBACK;
+  /**
+   * 服务端音频缓冲（ms），透传 `--audio-buffer`（S2-P0-2）。
+   * 默认 150ms（车机档）；定制 server 不识别时由 SessionManager 关闭该字段（真机验证后）。
+   */
+  audioBufferMs?: number;
+  /**
+   * 服务端音频输出缓冲（ms），透传 `--audio-output-buffer`（S2-P0-2）。
+   * 默认不传（官方默认 10ms），仅破音时由上层显式设置。
+   */
+  audioOutputBufferMs?: number;
 }
 
 export interface SessionState {
@@ -424,7 +434,6 @@ export class ScrcpySession {
     const MAX_LAUNCH_RETRIES = 1; // 共 2 次：首试 + 1 次自愈重试
     const RETRY_SETTLE_MS = 1000;
 
-    const startTime = Date.now();
     console.log(`[ScrcpySession:${this.id}] start 开始, displayConfig:`, displayConfig ? `${displayConfig.width}x${displayConfig.height}` : 'mirror');
     try {
       this.displayId = null;
@@ -482,21 +491,30 @@ export class ScrcpySession {
             : useVirtualDisplay
               ? {
                 newDisplay: new ScrcpyNewDisplay(displayConfig.width, displayConfig.height, displayConfig.dpi ?? 320),
-                // ADR-0011 / ADR-0001：锁定到虚拟屏「初始方向」（LockedInitial，"@"）。
+                // 2026-08-04（推翻 ADR-0001 的 LockedInitial）：方向锁改为 Unlocked，
+                // 让虚拟屏方向跟随容器宽窄方向 —— 官方 scrcpy 4.0 flex display 的正确姿势。
                 //
-                // 为什么是 LockedInitial 而不是硬编码 LockedPortrait/LockedLandscape：
-                // 虚拟屏由 ScrcpyNewDisplay(窗口宽, 窗口高) 创建——竖窗创建出的就是竖屏显示、
-                // 横窗就是横屏显示。LockedInitial 锁定的正是「这块显示创建时的初始方向」，
-                // 而那初始方向由窗口宽高比（displayConfig）决定。因此本行 == "锁=窗口宽高比"：
-                //   竖窗(分屏左/右) → 竖显示 → 锁竖；横窗/全屏 → 横显示 → 锁横。
-                // 硬编码 LockedPortrait/Landscape 反而更糟：横窗里硬锁竖会让横 app 侧着显示。
+                // 官方 4.0 server（Genymobile/scrcpy NewDisplayCapture.java）机制：
+                // 1. 虚拟屏 Surface 本身不旋转：triggerResize 里
+                //    vdSize = (displayRotation % 2)==0 ? size : size.rotate()，跨轴 resize 时 Surface 保物理方向；
+                // 2. 方向补偿在 capture 的 OpenGL 过滤器：prepare() 每次 capture reset 重读
+                //    displayInfo.getRotation() → filter.addOrientation(...)，DisplayMonitor 检测
+                //    rotation 变化即 reset 重建，输出帧方向 = 虚拟屏当前 rotation；
+                // 3. videoSize = 旋转后逻辑尺寸，经 session packet 上报，客户端按此 contain 渲染即可。
                 //
-                // 作用：app 启动若要求旋转整块屏 → 采集帧被锁在初始方向 → 不翻转 →
-                // 无 canvas 尺寸互换清屏 → 根除「白→黑→白」方向白闪（白闪A）。
-                // 注意：方向锁只防「翻转」，尺寸轴(RESIZE_DISPLAY)仍全开 —— 运行中改窗口大小
-                // 依然实时改分辨率、app 实时重布局，灵活性未牺牲。resize 本身的 canvas 清屏
-                // （白闪B）由 AppTransitionPlaceholder 统一占位动画兜底（见 SplitPane/FullscreenOverlay）。
-                captureOrientation: new ScrcpyCaptureOrientation(ScrcpyLockOrientation.LockedInitial, ScrcpyOrientation.Orient0),
+                // 为什么不能再用 LockedInitial（"@"）：
+                // - "@" 锁「首帧方向」，输出帧方向恒为首帧方向 —— 宽屏容器里仍是竖屏画面（黑边），
+                //   与「宽窄屏自由调整」的 flex 精神冲突；
+                // - server 端 prepare() 初始硬编码 displayRotation=0（virtualDisplay==null 分支），
+                //   而窄屏虚拟屏（w<h）在部分 ROM 上实际 rotation=90，首帧/锁定方向与真实错位 →
+                //   正是「特定分辨率、尤其窄屏下画面 90° 翻转」的机制来源；宽屏（w>h）rotation=0
+                //   与假设一致，故不触发。
+                //
+                // Unlocked（不传 --capture-orientation）下：方向 = 虚拟屏 rotation = 容器宽窄方向，
+                // 宽屏→横屏画面、窄屏→竖屏画面，始终方向正确且 flex 全开；跨轴瞬间的 1~2 帧
+                // rotation 过渡由 server DisplayMonitor+reset 自愈，客户端侧尺寸变化白闪由
+                // AppTransitionPlaceholder（ADR-0011）兜底。
+                captureOrientation: new ScrcpyCaptureOrientation(ScrcpyLockOrientation.Unlocked, ScrcpyOrientation.Orient0),
                 displayImePolicy: 'local' as const,
                 flexDisplay: true,
                 keepActive: true,
@@ -521,6 +539,11 @@ export class ScrcpySession {
           // parseAudioStreamMetadata 对未知标签回退到同一值。默认 opus。
           // negotiatedAudioCodec 允许专用音频连接在解码失败时改用 aac 重试（ADR-0016 自愈）。
           audioCodec: negotiatedAudioCodec,
+          // S2-P0-2：服务端音频缓冲透传（仅音频启用时生效；默认 150ms 车机档）
+          ...(audioEnabled ? { audioBufferMs: opts?.audioBufferMs ?? 150 } : {}),
+          ...(audioEnabled && opts?.audioOutputBufferMs
+            ? { audioOutputBufferMs: opts.audioOutputBufferMs }
+            : {}),
           control,
           ...(control ? { stayAwake: true, showTouches: false } : {}),
           // audioOnly 模式下只存在音频 socket，设备名（sendDeviceMeta）会写入音频 socket
@@ -884,7 +907,13 @@ export class ScrcpySession {
                 const descHex = desc ? Array.from(desc.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ') : '(空)';
                 console.log(`[DEBUG-a3f2] 配置包: codec=${codecStr}, desc ${desc?.byteLength ?? 0} 字节, hex: ${descHex}`);
                 worker.postMessage(
-                  { type: 'configure', codec: codecStr, description: desc },
+                  {
+                    type: 'configure',
+                    codec: codecStr,
+                    description: desc,
+                    // S2-P0-3：以 AudioContext 实际采样率为输出目标（解码 worker 侧重采样）
+                    targetSampleRate: this.audioCtx?.sampleRate ?? 48000,
+                  },
                   desc ? [desc.buffer] : []
                 );
               } else {

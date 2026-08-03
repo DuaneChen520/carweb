@@ -3,7 +3,7 @@
  *
  * 设计文档 §2.4 / §12 布局：
  * 替代当前 VirtualScreen 主区域，承载：
- * - ControlSidebar（常驻，固定宽度 w-13 ≈ 52px）
+ * - ControlSidebar（常驻，固定宽度 w-16 ≈ 64px，S3-P0-1 触控加宽）
  * - DesktopArea（侧边栏右侧剩余区域，flex-1）
  *   - SplitPane × 2（左右分屏，平分 DesktopArea 宽度）
  *   - FullscreenOverlay（覆盖 DesktopArea，不遮侧边栏，Task 6）
@@ -92,7 +92,7 @@ export function DesktopShell({
 
   return (
     <div className="w-full h-dvh flex bg-slate-950 overflow-hidden">
-      {/* 侧边栏：常驻，固定宽度 w-13 */}
+      {/* 侧边栏：常驻，固定宽度 w-16（S3-P0-1 触控加宽） */}
       {sidebar && (
         <div className="flex-shrink-0">
           {sidebar}

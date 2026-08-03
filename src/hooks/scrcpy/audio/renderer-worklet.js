@@ -1,33 +1,30 @@
-const STARTING_THRESHOLD = 0.1;
-const SPEED_UP_THRESHOLD = 0.25;
-const RECOVER_THRESHOLD = 0.15;
-const MAX_BUFFER = 0.35;
-const SAMPLE_RATE = 48000;
-
-const INPUT_HOP_SIZE = 3000;
-const SCALE = 0.9;
-const OUTPUT_HOP_SIZE = (INPUT_HOP_SIZE * SCALE) | 0;
-const WINDOW_SIZE = 6000;
-
-const WINDOW_WEIGHT_TABLE = new Float32Array(WINDOW_SIZE);
-for (let i = 0; i < WINDOW_SIZE / 2; i++) {
-  const value = Math.sin((i / WINDOW_SIZE) * Math.PI);
-  WINDOW_WEIGHT_TABLE[i] = value;
-  WINDOW_WEIGHT_TABLE[WINDOW_SIZE - i - 1] = value;
-}
+/**
+ * 车机音频播放 worklet（S2-P0-1 改造）。
+ *
+ * 变更说明（相对 ya-webadb pcm-player 衍生版本）：
+ * - 删除 WSOLA 变速播放（speedUp / SCALE=0.9 / WINDOW_WEIGHT_TABLE / processSpeedUp）：
+ *   变速在传输抖动时表现为「忽快忽慢、音调漂移」且让音频渲染线程过载（逐样本线性扫描），
+ *   是车机「音频卡顿不连贯」的直接来源之一；
+ * - 水位管理改为纯「起步缓冲 + 丢最旧（drop-oldest）+ underrun 静音」：
+ *   - STARTING_THRESHOLD：0.1s → 0.25s（攒够再播，避免启动即欠载）；
+ *   - MAX_BUFFER：0.35s → 0.8s（WebUSB 抖动缓冲），超限丢最旧 chunk，不做变速；
+ *   - underrun（无数据）：输出静音帧，等待下一包到达继续；
+ * - 采样率：解码 worker 输出前已统一重采样到 48000（decoder-worker.ts），此处不再处理。
+ *
+ * 实时安全：process() 内无数组扫描/求和（handleMessage 用增量计数器），仅顺序拷贝。
+ */
+const STARTING_THRESHOLD = 0.25; // 起步缓冲水位（秒）
+const MAX_BUFFER = 0.8;          // 最大缓冲水位（秒），超限丢最旧
+const SAMPLE_RATE = 48000;       // 解码输出已统一到 48000
 
 class Float32SourceProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
     this.channelCount = options.outputChannelCount?.[0] ?? 2;
-    this.readBuffer = new Float32Array(this.channelCount);
     this.chunks = [];
     this.chunkSampleCounts = [];
     this.totalSampleCount = 0;
     this.mode = 'starting';
-    this.readOffset = 0;
-    this.inputOffset = 0;
-    this.outputOffset = 0;
 
     this.port.onmessage = this.handleMessage.bind(this);
   }
@@ -39,10 +36,11 @@ class Float32SourceProcessor extends AudioWorkletProcessor {
       const float32 = new Float32Array(data.buffer);
       const sampleCount = float32.length / this.channelCount;
 
-      while (this.totalSampleCount > MAX_BUFFER * SAMPLE_RATE) {
+      // drop-oldest：缓冲超上限时丢弃最旧 chunk（保留既有机制，阈值已调大）
+      while (this.totalSampleCount > MAX_BUFFER * SAMPLE_RATE && this.chunks.length > 0) {
         this.chunks.shift();
-        this.chunkSampleCounts.shift();
-        this.totalSampleCount = this.chunkSampleCounts.reduce((a, b) => a + b, 0);
+        const dropped = this.chunkSampleCounts.shift() ?? 0;
+        this.totalSampleCount -= dropped;
       }
 
       this.chunks.push(float32);
@@ -53,9 +51,6 @@ class Float32SourceProcessor extends AudioWorkletProcessor {
       this.chunkSampleCounts = [];
       this.totalSampleCount = 0;
       this.mode = 'starting';
-      this.readOffset = 0;
-      this.inputOffset = 0;
-      this.outputOffset = 0;
     }
   }
 
@@ -65,6 +60,7 @@ class Float32SourceProcessor extends AudioWorkletProcessor {
 
     const outputLength = output[0].length;
 
+    // 起步缓冲：攒够 STARTING_THRESHOLD 才开播，避免 WebUSB 抖动导致启动即欠载
     if (this.mode === 'starting') {
       if (this.totalSampleCount < STARTING_THRESHOLD * SAMPLE_RATE) {
         for (let ch = 0; ch < this.channelCount; ch++) {
@@ -75,26 +71,8 @@ class Float32SourceProcessor extends AudioWorkletProcessor {
       this.mode = 'normal';
     }
 
-    if (this.mode === 'speedUp' && this.totalSampleCount < RECOVER_THRESHOLD * SAMPLE_RATE) {
-      this.mode = 'normal';
-      this.advanceInputOffset();
-      this.readOffset = 0;
-      this.inputOffset = 0;
-      this.outputOffset = 0;
-    }
-
-    if (this.mode === 'normal' && this.totalSampleCount > SPEED_UP_THRESHOLD * SAMPLE_RATE) {
-      this.mode = 'speedUp';
-      this.readOffset = 0;
-      this.inputOffset = 0;
-      this.outputOffset = 0;
-    }
-
-    if (this.mode === 'speedUp') {
-      this.processSpeedUp(output, outputLength);
-    } else {
-      this.processNormal(output, outputLength);
-    }
+    // 顺序拷贝；无数据（underrun）时输出静音帧
+    this.processNormal(output, outputLength);
 
     return true;
   }
@@ -132,90 +110,6 @@ class Float32SourceProcessor extends AudioWorkletProcessor {
       }
       outputIndex++;
     }
-  }
-
-  processSpeedUp(output, outputLength) {
-    for (let i = 0; i < outputLength; i++) {
-      let totalWeight = 0;
-
-      const firstWindow = Math.max(0,
-        Math.floor((this.outputOffset - WINDOW_SIZE) / OUTPUT_HOP_SIZE) + 1
-      );
-
-      let inWindowIndex = this.outputOffset - firstWindow * OUTPUT_HOP_SIZE;
-      let inputIndex = firstWindow * INPUT_HOP_SIZE + inWindowIndex;
-
-      for (let ch = 0; ch < this.channelCount; ch++) {
-        output[ch][i] = 0;
-      }
-
-      while (inputIndex > 0 && inWindowIndex >= 0) {
-        this.readSample(inputIndex - this.readOffset);
-        const weight = WINDOW_WEIGHT_TABLE[inWindowIndex];
-
-        for (let ch = 0; ch < this.channelCount; ch++) {
-          output[ch][i] += this.readBuffer[ch] * weight;
-        }
-        totalWeight += weight;
-
-        inputIndex += INPUT_HOP_SIZE - OUTPUT_HOP_SIZE;
-        inWindowIndex -= OUTPUT_HOP_SIZE;
-      }
-
-      if (totalWeight > 0) {
-        for (let ch = 0; ch < this.channelCount; ch++) {
-          output[ch][i] /= totalWeight;
-        }
-      }
-
-      this.outputOffset += 1;
-
-      if (firstWindow > 0) {
-        this.outputOffset -= OUTPUT_HOP_SIZE;
-        this.readOffset -= INPUT_HOP_SIZE;
-        this.inputOffset += (1 - SCALE) * INPUT_HOP_SIZE;
-      }
-    }
-
-    this.inputOffset += outputLength;
-
-    while (this.chunks.length > 0 && this.inputOffset >= this.chunkSampleCounts[0]) {
-      this.inputOffset -= this.chunkSampleCounts[0];
-      this.totalSampleCount -= this.chunkSampleCounts[0];
-      this.chunks.shift();
-      this.chunkSampleCounts.shift();
-    }
-  }
-
-  advanceInputOffset() {
-    let remaining = this.inputOffset;
-    while (this.chunks.length > 0 && remaining >= this.chunkSampleCounts[0]) {
-      remaining -= this.chunkSampleCounts[0];
-      this.totalSampleCount -= this.chunkSampleCounts[0];
-      this.chunks.shift();
-      this.chunkSampleCounts.shift();
-    }
-    if (this.chunks.length > 0 && remaining > 0) {
-      this.chunks[0] = this.chunks[0].subarray(remaining * this.channelCount);
-      this.chunkSampleCounts[0] -= remaining;
-      this.totalSampleCount -= remaining;
-    }
-  }
-
-  readSample(offset) {
-    let remaining = offset;
-    for (let i = 0; i < this.chunks.length; i++) {
-      const count = this.chunkSampleCounts[i];
-      if (remaining < count) {
-        const chunk = this.chunks[i];
-        for (let ch = 0; ch < this.channelCount; ch++) {
-          this.readBuffer[ch] = chunk[remaining * this.channelCount + ch];
-        }
-        return;
-      }
-      remaining -= count;
-    }
-    this.readBuffer.fill(0);
   }
 }
 

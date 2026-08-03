@@ -3,6 +3,8 @@ export interface ConfigureMessage {
   type: 'configure';
   codec: string;
   description?: Uint8Array;
+  /** 输出目标采样率（AudioContext.sampleRate）。解码 PCM 将重采样到该值（S2-P0-3），默认 48000。 */
+  targetSampleRate?: number;
 }
 
 export interface DataMessage {

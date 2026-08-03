@@ -57,6 +57,9 @@ export class AdbScrcpyOptions4_0<TVideo extends boolean> extends AdbScrcpyOption
     const value = this.value as AdbScrcpyOptions4_0.Init<TVideo>;
     if (value.flexDisplay) args.push('flex_display=true');
     if (value.keepActive) args.push('keep_active=true');
+    // S2-P0-2：服务端音频缓冲透传（车机抖动场景调大；定制 server 不识别则需真机验证后关闭）
+    if (value.audioBufferMs) args.push(`audio_buffer=${value.audioBufferMs}`);
+    if (value.audioOutputBufferMs) args.push(`audio_output_buffer=${value.audioOutputBufferMs}`);
     return args;
   }
 
@@ -257,5 +260,16 @@ export namespace AdbScrcpyOptions4_0 {
     flexDisplay?: boolean;
     /** --keep-active，防止虚拟屏息屏。 */
     keepActive?: boolean;
+    /**
+     * 服务端音频缓冲（`--audio-buffer`，毫秒）。官方 scrcpy 默认 50ms；
+     * 车机 WebUSB 抖动场景调大（如 150ms）可显著降低卡顿。
+     * 注意：车机定制 server 若不识别该参数会忽略/报错，需真机验证（S2-P0-2）。
+     */
+    audioBufferMs?: number;
+    /**
+     * 服务端音频输出缓冲（`--audio-output-buffer`，毫秒）。官方默认 10ms；
+     * 仅在出现机械音/破音时调整。默认不传。
+     */
+    audioOutputBufferMs?: number;
   };
 }

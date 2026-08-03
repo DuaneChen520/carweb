@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { useSessionManager, type AppInstance } from '@/lib/session-manager';
+import { useSessionManager } from '@/lib/session-manager';
 import { useAdbStore } from '@/hooks/useAdbStore';
 import type { ScrcpySession, SessionState } from '@/lib/scrcpy-session';
 import { killScrcpyServer } from '@/lib/adb-commands';
@@ -226,7 +226,13 @@ describe('SessionManager 状态机', () => {
 
       // T5：resume 到全屏时，start() 以 attach 模式传入原 displayId（不 newDisplay、不重建屏）
       const bgSession = state.sessions[bgId!]!.session as unknown as { start: ReturnType<typeof vi.fn> };
-      expect(bgSession.start).toHaveBeenCalledWith(expect.anything(), expect.anything(), displayIdBefore);
+      expect(bgSession.start).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        displayIdBefore,
+        undefined,
+        expect.objectContaining({ audio: false }), // ADR-0015：pane 不带音频，由专用采集连接统一承载
+      );
     });
   });
 
@@ -400,7 +406,13 @@ describe('SessionManager 状态机', () => {
 
       // T5：resume 时 start() 以 attach 模式传入原 displayId（复用原虚拟屏，不 newDisplay）
       const bgSession = state.sessions[bgId!]!.session as unknown as { start: ReturnType<typeof vi.fn> };
-      expect(bgSession.start).toHaveBeenCalledWith(expect.anything(), expect.anything(), app?.displayId ?? 100);
+      expect(bgSession.start).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        app?.displayId ?? 100,
+        undefined,
+        expect.objectContaining({ audio: false }), // ADR-0015：pane 不带音频
+      );
     });
 
     it('非 background 状态的 app 调用 resumeBackground 安全返回', async () => {

@@ -34,6 +34,8 @@ export function VirtualScreen({ active = false, displayMode = 'virtual', onStop 
   const hasStartedRef = useRef(false);
   const initialStartTimerRef = useRef<NodeJS.Timeout | null>(null);
   const initialStartDoneRef = useRef(false);
+  // S1-P2-5：AudioContext 唤醒收敛——首次交互仅调用一次，避免每条指针事件都发起异步 resume
+  const audioResumedRef = useRef(false);
 
   const { isStarting, isRunning, error, videoWidth, videoHeight, isVirtualDisplay, flexClient, flexClientRef } = useScrcpySession();
   const { startScrcpy, stopScrcpy, injectTouch, resumeAudio, startApp } = useScrcpyActions();
@@ -256,7 +258,15 @@ currentPresetRef.current = currentPreset;
   const handlePointerEvent = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
 
-    resumeAudio();
+    // S1-P2-5：唤醒收敛——仅首次交互唤醒 AudioContext（后续触摸不再重复发起 resume）
+    if (!audioResumedRef.current) {
+      audioResumedRef.current = true;
+      resumeAudio();
+    }
+
+    // S1-P0-3：抑制 HoverMove 洪水——触屏未按下（buttons===0）时忽略 move，
+    // 仅保留鼠标悬停语义（pointerType === 'mouse'）
+    if (e.type === 'pointermove' && e.buttons === 0 && e.pointerType !== 'mouse') return;
 
     const coords = screenToVideoCoords(e.clientX, e.clientY);
     if (!coords || !videoWidth || !videoHeight) return;
@@ -265,6 +275,13 @@ currentPresetRef.current = currentPreset;
     switch (e.type) {
       case 'pointerdown':
         action = AndroidMotionEventAction.Down;
+        // S1-P0-2：捕获指针，保证拖拽过程中 move/up 持续送达，
+        // 避免快速滑动拖出 canvas 时丢失 Up（设备端点触残留 → 触控失灵）
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId);
+        } catch {
+          /* 某些环境不支持捕获，忽略 */
+        }
         break;
       case 'pointermove':
         action = e.buttons > 0 ? AndroidMotionEventAction.Move : AndroidMotionEventAction.HoverMove;
@@ -325,6 +342,7 @@ currentPresetRef.current = currentPreset;
       <div
         ref={containerRef}
         className="flex-1 relative flex flex-col min-w-0"
+        style={{ touchAction: 'none' }}
       >
         <div className="flex-1 flex items-center justify-center overflow-hidden">
           {isStarting && (

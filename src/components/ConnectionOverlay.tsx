@@ -203,8 +203,9 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
 
       <div className="relative w-full max-w-md mt-[10vh] mb-8 animate-scale-in">
         <div className="text-center mb-10">
-          <h1 className="text-5xl font-black tracking-tight text-white mb-2 bg-gradient-to-b from-white to-slate-300 bg-clip-text text-transparent">
-            CARWEB
+          <h1 className="mb-2 flex items-baseline justify-center gap-1 font-black tracking-tight">
+            <span className="text-5xl bg-gradient-to-b from-white to-slate-300 bg-clip-text text-transparent">CARWEB</span>
+            <span className="text-2xl font-semibold text-slate-500 tracking-normal">.top</span>
           </h1>
           <p className="text-slate-400">为手机拓展的浏览器大屏</p>
           <div className="flex items-center justify-center gap-1.5 mt-4">
