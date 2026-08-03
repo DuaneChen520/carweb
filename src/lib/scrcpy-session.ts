@@ -48,16 +48,6 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  */
 const VIDEO_STREAM_TIMEOUT_MS = 8000;
 
-/**
- * 本次页面生命周期内是否已成功推送 scrcpy-server.jar（S2-P0-10 安全版）。
- *
- * 车机 USB 传输 732KB jar 是 start 慢的主要开销；jar 是构建产物、页面生命周期内固定，
- * 因此同一页面内多次 start 只需推送一次。用浏览器模块级 flag（**不查询设备端**——
- * 避免 adb stat 挂起教训），页面刷新/重连后重置 → 首次 start 必推（保证设备端 jar
- * 为当前构建，冷启动对账删 jar 亦无影响）。
- */
-let jarPushed = false;
-
 /** 给 Promise 加超时：超时后 reject，避免任何 await 无限挂起（S2-P0-9）。导出以便单测。 */
 export function withTimeout<T>(promise: Promise<T>, ms: number, timeoutMessage: string): Promise<T> {
   return Promise.race([
@@ -520,29 +510,23 @@ export class ScrcpySession {
       await withLaunchMutex(async () => {
         const pidsBefore = trackPid ? await getScrcpyServerPids(adb) : [];
 
-        // S2-P0-10（安全版）：本次页面生命周期内已推送过 jar 则跳过重复推送。
-        // 车机 USB 传输 732KB 是 start 慢的主要开销（切应用/切 pane 每次重推）。
-        // 用浏览器模块级 flag（不查询设备端，零新增 adb 调用——避免 stat 挂起教训）：
-        // 页面加载/重连后首次 start 必推（保证 jar 为当前构建），生命周期内后续 start 跳过。
-        if (!jarPushed) {
-          await AdbScrcpyClient.pushServer(
-            adb,
-            new ReadableStream({
-              start(controller) {
-                controller.enqueue(new Uint8Array(arrayBuffer));
-                controller.close();
-              },
-            }),
-            serverPath,
-          );
+        // 每次推送（S2-P0-10 结论）：scrcpy server 默认 cleanup 会在每次启动时经
+        // CleanUp.unlinkSelf 删除设备端 jar；v3 的 cleanup 字段只声明不序列化（无法关闭）。
+        // 故 jar 缓存/跳过推送不可行，必须每次推送（车机 USB 传输 732KB 为启动固有成本）。
+        await AdbScrcpyClient.pushServer(
+          adb,
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new Uint8Array(arrayBuffer));
+              controller.close();
+            },
+          }),
+          serverPath,
+        );
 
-          const verifyOutput = await runAdbCommand(adb, `ls -la ${serverPath} 2>&1`);
-          if (verifyOutput.includes('No such file') || verifyOutput.includes('not found')) {
-            throw new Error('scrcpy-server.jar 推送验证失败：设备上未找到文件');
-          }
-          jarPushed = true;
-        } else {
-          console.log(`[ScrcpySession:${this.id}] 本次生命周期已推送过 jar，跳过推送`);
+        const verifyOutput = await runAdbCommand(adb, `ls -la ${serverPath} 2>&1`);
+        if (verifyOutput.includes('No such file') || verifyOutput.includes('not found')) {
+          throw new Error('scrcpy-server.jar 推送验证失败：设备上未找到文件');
         }
 
         // attach 模式选项（attachMode 为外层 let，attach 失败时降级为 newDisplay）
@@ -610,7 +594,11 @@ export class ScrcpySession {
             // negotiatedAudioCodec 允许专用音频连接在解码失败时改用 aac 重试（ADR-0016 自愈）。
             audioCodec: negotiatedAudioCodec,
             control,
-            ...(control ? { stayAwake: true, showTouches: false } : {}),
+            // 2026-08-04（S2-P0-10）：移除 stayAwake:true——那是手机场景遗留（防投屏时
+            // 手机熄屏）；车机通电常亮不需要。注：曾尝试 cleanup:false 让 server 不删
+            // jar（CleanUp.unlinkSelf）以启用 jar 缓存，但核验发现 v3 的 cleanup 字段
+            // 只声明不序列化（同 keepActive），无效——jar 缓存方案不可行，保持每次推送。
+            ...(control ? { showTouches: false } : {}),
             // audioOnly 模式下只存在音频 socket，设备名（sendDeviceMeta）会写入音频 socket
             // 污染 codec 解析。官方 scrcpy 4.0 默认 sendDeviceMeta=true，此处显式关闭。
             sendDeviceMeta: !audioOnly,
