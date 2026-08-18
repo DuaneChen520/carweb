@@ -307,8 +307,8 @@ func doPairing(host string, port int, code string, publicKeyHex string) pairResp
 		return pairResponse{Success: false, Error: fmt.Sprintf("读取响应数据失败: %v", err)}
 	}
 
-	// 11. 解密对端 PeerInfo（sequence=1，第二次交换）
-	decryptedResponse, err := decryptAesGcm(aesKey, 1, encryptedResponse)
+	// 11. 解密对端 PeerInfo（sequence=0，服务端首次加密使用 enc_sequence_=0）
+	decryptedResponse, err := decryptAesGcm(aesKey, 0, encryptedResponse)
 	if err != nil {
 		return pairResponse{Success: false, Error: fmt.Sprintf("解密响应失败: %v", err)}
 	}
@@ -375,8 +375,14 @@ func doSpake2Exchange(conn *tls.Conn, password []byte) ([]byte, error) {
 
 // deriveAesKey 从 SPAKE2 共享密钥派生 AES-128-GCM 密钥
 // 使用 HKDF-SHA256（与 Android 实现一致）
+//
+// Android 实现: HKDF(sha256, secret=sharedKey, salt=NULL, info="adb pairing_auth aes-128-gcm key", length=16)
+// 当 salt 为 NULL 时，HKDF 使用 Hash_len 个零字节作为 salt（SHA-256 → 32 字节零）
 func deriveAesKey(sharedKey []byte) []byte {
-	prk := hmacSha256(sharedKey, nil)
+	// HKDF-Extract(salt=NULL, IKM=sharedKey) = HMAC-SHA256(32_bytes_zeros, sharedKey)
+	zeroSalt := make([]byte, 32) // 32 字节零（SHA-256 输出长度）
+	prk := hmacSha256(zeroSalt, sharedKey)
+	// HKDF-Expand(PRK, info, length)
 	info := []byte(aesGcmInfo)
 	return hkdfExpand(prk, info, aesGcmKeySize)
 }
@@ -474,15 +480,28 @@ func decryptAesGcm(key []byte, sequence uint32, ciphertext []byte) ([]byte, erro
 }
 
 // buildPeerInfo 构建 PeerInfo 数据
-// 格式: type(1 byte) + publicKey
+//
+// PeerInfo 结构（与 Android 实现一致）：
+//	struct PeerInfo {
+//		uint8_t type;			  // 0=ADB_RSA_PUB_KEY, 1=ADB_DEVICE_GUID
+//		uint8_t data[8191];	   // 固定大小数据缓冲区
+//	};
+//	sizeof(PeerInfo) = 8192
+//	static_assert(sizeof(PeerInfo) == kMaxPeerInfoSize)
 func buildPeerInfo(publicKeyHex string) []byte {
 	pubKeyBytes, err := hex.DecodeString(publicKeyHex)
 	if err != nil {
 		pubKeyBytes = []byte(publicKeyHex)
 	}
 
-	info := make([]byte, 1+len(pubKeyBytes))
-	info[0] = 1 // PeerInfo type = host
+	// 限制公钥数据不超过 8191 字节
+	if len(pubKeyBytes) > 8191 {
+		pubKeyBytes = pubKeyBytes[:8191]
+	}
+
+	// 构建完整的 PeerInfo（8192 字节，与 Android 实现一致）
+	info := make([]byte, 8192)
+	info[0] = 0 // PeerInfo type = ADB_RSA_PUB_KEY
 	copy(info[1:], pubKeyBytes)
 
 	return info
