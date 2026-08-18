@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Monitor, Smartphone, Usb, Wifi, RefreshCw, AlertCircle, X, CheckCircle2 } from 'lucide-react';
+import { Monitor, Smartphone, Usb, Wifi, RefreshCw, AlertCircle, X, CheckCircle2, Scan, QrCode, Radio, Network } from 'lucide-react';
 import { useUsbConnection } from '../hooks/useUsbConnection';
-import { useWifiConnection } from '../hooks/useWifiConnection';
+import { useWifiConnection, type WifiTopology, type ScannedDevice } from '../hooks/useWifiConnection';
 import { useNetworkCheck } from '../hooks/useNetworkCheck';
 import { useAdbStore } from '../hooks/useAdbStore';
 import type { RememberedDevice, DisplayMode } from '../hooks/useRememberedDevices';
@@ -18,6 +18,13 @@ interface ConnectionOverlayProps {
   onReconnect?: () => void;
   fading?: boolean;
 }
+
+/** 拓扑选项定义 */
+const TOPOLOGY_OPTIONS: { key: WifiTopology; label: string; desc: string; icon: typeof Radio }[] = [
+  { key: 'phone-hotspot', label: '手机热点', desc: '手机开热点，车机连接', icon: Radio },
+  { key: 'car-hotspot', label: '车机热点', desc: '车机开热点，手机连接（新能源车）', icon: Network },
+  { key: 'manual', label: '手动输入', desc: '已知设备 IP 地址', icon: Wifi },
+];
 
 function formatRelativeTime(timestamp: number): string {
   const diff = Date.now() - timestamp;
@@ -37,6 +44,11 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
   const [selectedDevice, setSelectedDevice] = useState<RememberedDevice | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [rememberDevice, setRememberDevice] = useState(true);
+  // 无线连接状态
+  const [showQrInput, setShowQrInput] = useState(false);
+  const [qrCodeText, setQrCodeText] = useState('');
+  const [pairingCode, setPairingCode] = useState('');
+  const [showPairingInput, setShowPairingInput] = useState(false);
 
   const usb = useUsbConnection();
   const wifi = useWifiConnection();
@@ -54,7 +66,7 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
           id: store.deviceSerial || '',
           name: store.deviceName || '未知设备',
           type,
-          address: type === 'wifi' ? wifiAddress : store.deviceSerial || '',
+          address: type === 'wifi' ? (store.wifiAddress || wifiAddress) : store.deviceSerial || '',
         },
         displayMode,
         rememberDevice,
@@ -63,7 +75,7 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
       setIsConnecting(false);
       setSelectedDevice(null);
     }
-  }, [store.connectionStatus, isConnecting, store.connectionType, store.deviceSerial, store.deviceName, wifiAddress, onConnect, displayMode, rememberDevice]);
+  }, [store.connectionStatus, isConnecting, store.connectionType, store.deviceSerial, store.deviceName, store.wifiAddress, wifiAddress, onConnect, displayMode, rememberDevice]);
 
   const handleConnectClick = async (device?: RememberedDevice) => {
     setIsConnecting(true);
@@ -86,6 +98,18 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
     } else {
       setIsConnecting(false);
     }
+  };
+
+  /** 扫码配对连接 */
+  const handleQrPairing = async () => {
+    if (!qrCodeText.trim()) return;
+    setIsConnecting(true);
+    await wifi.connectWithPairing(qrCodeText.trim());
+  };
+
+  /** 选择扫描发现的设备 */
+  const handleSelectScannedDevice = (device: ScannedDevice) => {
+    setWifiAddress(`${device.ip}:${device.port}`);
   };
 
   if (overlayState === 'auto-connecting' || overlayState === 'auto-reconnecting') {
@@ -118,7 +142,7 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
           <div className="w-12 h-12 rounded-full bg-amber-500/20 flex items-center justify-center mx-auto mb-4">
             <AlertCircle className="w-6 h-6 text-amber-400" />
           </div>
-          <p className="text-slate-200 text-lg mb-1">USB 连接已断开</p>
+          <p className="text-slate-200 text-lg mb-1">连接已断开</p>
           <p className="text-slate-400 text-sm mb-6">设备可能已被拔出或连接异常，请重新连接。</p>
           <div className="flex gap-3 justify-center">
             {onReconnect && (
@@ -167,7 +191,7 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
 
   return (
     <>
-      {/* Lever 4: 连接成功确认微交互 —— 独立于 fading 容器之外，全不透明度显示，与旧内容交叉淡入 */}
+      {/* Lever 4: 连接成功确认微交互 */}
       <div
         className={`fixed inset-0 z-50 flex items-center justify-center transition-opacity duration-200 ${
           fading ? 'opacity-100' : 'opacity-0 pointer-events-none'
@@ -190,7 +214,7 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
       </div>
 
     <div className={`fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 transition-opacity duration-300 ${fading ? 'opacity-0' : 'opacity-100'}`}>
-      {/* 分层背景：暗色基底 + 顶部强调色径向光晕 + 细噪点，营造纵深 */}
+      {/* 分层背景 */}
       <div className="absolute inset-0 bg-slate-950/50 backdrop-blur-xl" />
       <div
         className="absolute inset-0 pointer-events-none"
@@ -337,55 +361,179 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="text-slate-400 text-sm text-center">
-                  确保手机和车机在同一局域网
+                {/* 网络拓扑选择 */}
+                <div>
+                  <label className="text-slate-300 text-sm mb-2 block">连接方式</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {TOPOLOGY_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.key}
+                        onClick={() => {
+                          wifi.setTopology(opt.key);
+                          if (opt.key === 'car-hotspot') {
+                            wifi.scanDevices();
+                          }
+                          if (opt.key === 'manual') {
+                            setShowQrInput(false);
+                          }
+                        }}
+                        className={`flex flex-col items-center gap-1 p-2 rounded-lg border text-xs transition-colors ${
+                          wifi.topology === opt.key
+                            ? 'border-accent-400 bg-accent-500/10 text-accent-400'
+                            : 'border-slate-600 bg-slate-700/30 text-slate-400 hover:border-slate-500'
+                        }`}
+                      >
+                        <opt.icon className="w-5 h-5" />
+                        <span>{opt.label}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
+
+                {/* 提示信息 */}
+                <div className="text-slate-400 text-xs text-center bg-slate-700/20 rounded-lg p-2">
+                  {wifi.topology === 'phone-hotspot' && '手机开热点后，车机自动检测手机的 IP 地址'}
+                  {wifi.topology === 'car-hotspot' && '车机开热点后，扫描局域网中的设备'}
+                  {wifi.topology === 'manual' && '手动输入设备的 IP 地址'}
+                </div>
+
+                {/* 车机热点模式：自动扫描 */}
+                {wifi.topology === 'car-hotspot' && (
+                  <button
+                    onClick={wifi.scanDevices}
+                    disabled={wifi.isScanning}
+                    className="w-full py-2 text-sm text-accent-400 hover:text-accent-300 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    <Scan className="w-4 h-4" />
+                    {wifi.isScanning ? '扫描中...' : '扫描局域网设备'}
+                  </button>
+                )}
+
+                {/* 扫描发现的设备列表 */}
+                {wifi.discoveredDevices.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="text-slate-300 text-sm">发现的设备:</div>
+                    {wifi.discoveredDevices.map((device) => (
+                      <button
+                        key={`${device.ip}:${device.port}`}
+                        onClick={() => handleSelectScannedDevice(device)}
+                        className="w-full px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 text-sm text-left transition-colors flex items-center gap-2"
+                      >
+                        <Smartphone className="w-4 h-4 text-slate-400" />
+                        <span>{device.ip}:{device.port}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* IP 地址输入（手动输入模式 / 已选择扫描设备后填充） */}
                 <div className="space-y-2">
                   <label className="text-slate-300 text-sm">设备 IP 地址</label>
                   <input
                     type="text"
                     value={wifiAddress}
                     onChange={(e) => setWifiAddress(e.target.value)}
-                    placeholder="例如: 192.168.1.100"
+                    placeholder="例如: 192.168.1.100:5555"
                     className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-accent-400 transition-colors"
                   />
                 </div>
-                <button
-                  onClick={wifi.scanDevices}
-                  disabled={wifi.isScanning}
-                  className="w-full py-2 text-sm text-accent-400 hover:text-accent-300 transition-colors disabled:opacity-50"
-                >
-                  {wifi.isScanning ? '扫描中...' : '扫描局域网设备'}
-                </button>
-                {wifi.discoveredDevices.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="text-slate-300 text-sm">发现的设备:</div>
-                    {wifi.discoveredDevices.map((ip) => (
+
+                {/* 扫码配对入口 */}
+                <div className="border-t border-slate-700 pt-4">
+                  <button
+                    onClick={() => {
+                      setShowQrInput(!showQrInput);
+                      setShowPairingInput(false);
+                    }}
+                    className="w-full py-2 text-sm text-accent-400 hover:text-accent-300 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <QrCode className="w-4 h-4" />
+                    {showQrInput ? '收起扫码输入' : '首次连接？扫码配对（Android 11+ 无线调试）'}
+                  </button>
+
+                  {showQrInput && (
+                    <div className="mt-3 space-y-3 p-3 bg-slate-700/20 rounded-lg border border-slate-700">
+                      <p className="text-slate-400 text-xs">
+                        手机开启「开发者选项 → 无线调试 → 扫码配对」，扫描下方输入框旁边的二维码，或将 QR 码内容粘贴到下方：
+                      </p>
+                      <textarea
+                        value={qrCodeText}
+                        onChange={(e) => setQrCodeText(e.target.value)}
+                        placeholder="粘贴 QR 码内容或输入配对码"
+                        rows={2}
+                        className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm placeholder-slate-500 focus:outline-none focus:border-accent-400 transition-colors resize-none"
+                      />
                       <button
-                        key={ip}
-                        onClick={() => setWifiAddress(ip)}
-                        className="w-full px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 text-sm text-left transition-colors"
+                        onClick={handleQrPairing}
+                        disabled={!qrCodeText.trim() || isConnecting}
+                        className="w-full py-2 bg-accent-500 hover:bg-accent-600 disabled:bg-slate-600 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
                       >
-                        {ip}
+                        {isConnecting ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                            配对中...
+                          </>
+                        ) : (
+                          '开始配对'
+                        )}
                       </button>
-                    ))}
+                    </div>
+                  )}
+                </div>
+
+                {store.error && (
+                  <div className="flex items-center gap-2 text-red-400 text-sm">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    {store.error}
                   </div>
+                )}
+
+                {!selectedDevice && (
+                  <>
+                    <button
+                      onClick={() => handleConnectClick()}
+                      disabled={isConnecting || !wifiAddress.trim()}
+                      className="w-full mt-6 py-3 bg-accent-500 hover:bg-accent-600 disabled:bg-slate-600 disabled:cursor-not-allowed disabled:shadow-none shadow-accent-glow text-white font-medium rounded-xl transition-all duration-200 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 flex items-center justify-center gap-2"
+                    >
+                      {isConnecting ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          连接中...
+                        </>
+                      ) : (
+                        <>
+                          <Monitor className="w-4 h-4" />
+                          连接并启动
+                        </>
+                      )}
+                    </button>
+
+                    <label className="mt-4 flex items-center gap-2 text-slate-400 text-sm cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={rememberDevice}
+                        onChange={(e) => setRememberDevice(e.target.checked)}
+                        className="rounded border-slate-600 bg-slate-700 text-accent-500 focus:ring-accent-500"
+                      />
+                      记住此设备
+                    </label>
+                  </>
                 )}
               </div>
             )}
 
-            {store.error && (
+            {store.error && activeTab === 'usb' && (
               <div className="mt-4 flex items-center gap-2 text-red-400 text-sm">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 {store.error}
               </div>
             )}
 
-            {!selectedDevice && (
+            {!selectedDevice && activeTab === 'usb' && (
               <>
                 <button
                   onClick={() => handleConnectClick()}
-                  disabled={isConnecting || (activeTab === 'wifi' && !wifiAddress.trim())}
+                  disabled={isConnecting}
                   className="w-full mt-6 py-3 bg-accent-500 hover:bg-accent-600 disabled:bg-slate-600 disabled:cursor-not-allowed disabled:shadow-none shadow-accent-glow text-white font-medium rounded-xl transition-all duration-200 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 flex items-center justify-center gap-2"
                 >
                   {isConnecting ? (

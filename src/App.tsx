@@ -9,6 +9,7 @@ import { useAdbStore } from './hooks/useAdbStore';
 import { useRememberedDevices, type DisplayMode } from './hooks/useRememberedDevices';
 import { useDevicePin } from './hooks/useDevicePin';
 import { useUsbConnection } from './hooks/useUsbConnection';
+import { useWifiConnection } from './hooks/useWifiConnection';
 import { subscribeLinkState } from './lib/link-state-bus';
 import { markIntentionalClose } from '@/lib/adb-intent';
 import { forgetDeviceCache } from '@/lib/forget-device-cache';
@@ -34,6 +35,7 @@ function App() {
   const { hasPin, removePin } = useDevicePin();
   const store = useAdbStore();
   const usb = useUsbConnection();
+  const wifi = useWifiConnection();
   // StrictMode 下挂载 effect 会双调用，导致两次并发 tryAutoConnectUsb；
   // 用 ref 守卫确保自动连接在组件实例生命周期内只发起一次（见 docs/adr/0007 关联修复）。
   const autoConnectRanRef = useRef(false);
@@ -89,8 +91,12 @@ function App() {
         // success 时由下面的「连接成功」effect 接管进入 hidden
       });
     } else {
-      // WiFi 自动连接暂不支持，降级到手动
-      setOverlayState('manual');
+      // WiFi 自动连接：通过 WebSocket 桥接代理尝试连接已记忆的设备
+      wifi.connectWifi(lastDevice.address).then(() => {
+        // 成功时由下面的「连接成功」effect 接管进入 hidden
+      }).catch(() => {
+        setOverlayState('manual');
+      });
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -130,22 +136,31 @@ function App() {
   // 重连
   const handleReconnect = useCallback(() => {
     const lastDevice = getLastDevice();
-    if (!lastDevice || lastDevice.type !== 'usb') {
+    if (!lastDevice) {
       setOverlayState('manual');
       return;
     }
     setOverlayState('auto-connecting');
-    usb.tryAutoConnectUsb(lastDevice.id, (p) => {
-      if (p.retrying) setOverlayState((prev) => (prev === 'auto-connecting' ? 'auto-reconnecting' : prev));
-    }).then(({ success, cancelled }) => {
-      if (cancelled) {
+
+    if (lastDevice.type === 'usb') {
+      usb.tryAutoConnectUsb(lastDevice.id, (p) => {
+        if (p.retrying) setOverlayState((prev) => (prev === 'auto-connecting' ? 'auto-reconnecting' : prev));
+      }).then(({ success, cancelled }) => {
+        if (cancelled) {
+          setOverlayState('manual');
+        } else if (!success) {
+          setOverlayState('manual');
+        }
+        // success 时由「连接成功」effect 接管进入 hidden
+      });
+    } else {
+      wifi.connectWifi(lastDevice.address).then(() => {
+        // 成功时由「连接成功」effect 接管进入 hidden
+      }).catch(() => {
         setOverlayState('manual');
-      } else if (!success) {
-        setOverlayState('manual');
-      }
-      // success 时由「连接成功」effect 接管进入 hidden
-    });
-  }, [getLastDevice, usb]);
+      });
+    }
+  }, [getLastDevice, usb, wifi]);
 
   const handleConnect = useCallback(async (
     device: { id: string; name: string; type: 'usb' | 'wifi'; address: string },

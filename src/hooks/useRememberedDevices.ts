@@ -11,6 +11,10 @@ export interface RememberedDevice {
   address: string;
   mode: DisplayMode;
   lastConnected: number;
+  /** WiFi 设备专用：配对端口（Android 11+ 无线调试的随机端口，37000+） */
+  pairingPort?: number;
+  /** WiFi 设备专用：配对的设备名称（如 SM-G998B） */
+  deviceName?: string;
 }
 
 const STORAGE_KEY = 'carweb-devices';
