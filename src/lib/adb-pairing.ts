@@ -83,13 +83,13 @@ export interface AdbPairingResult {
  *
  * @param bridgeUrl 桥接代理 WebSocket URL（如 ws://localhost:8080）
  * @param info 配对信息（从 QR 码解析得到）
- * @param publicKeyPem 车机的 RSA 公钥（PEM 格式）
+ * @param publicKeyHex 车机的 RSA 公钥模数 n（十六进制字符串）
  * @returns 配对结果
  */
 export async function pairWithDevice(
   bridgeUrl: string,
   info: AdbPairingInfo,
-  publicKeyPem: string,
+  publicKeyHex: string,
 ): Promise<AdbPairingResult> {
   const ws = new WebSocket(`${bridgeUrl}/pair`);
   ws.binaryType = 'arraybuffer';
@@ -111,7 +111,7 @@ export async function pairWithDevice(
       host: info.host,
       port: info.pairingPort,
       code: info.pairingCode,
-      publicKey: publicKeyPem,
+      publicKey: publicKeyHex,
     });
     ws.send(request);
 

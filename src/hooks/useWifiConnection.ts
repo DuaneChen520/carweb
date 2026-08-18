@@ -325,8 +325,11 @@ async function getLocalSubnet(): Promise<string | null> {
 
 /**
  * 将 AdbPrivateKey 的公钥（n）导出为十六进制字符串。
- * 桥接代理接收原始 RSA 密钥参数，不需要 PEM 编码。
+ * 桥接代理接收 RSA 模数 n 的十六进制表示。
+ * 输出为固定长度（256 字节 = 512 十六进制字符，因为 RSA-2048）。
  */
 function exportPublicKeyHex(key: { n: bigint }): string {
-  return key.n.toString(16);
+  let hex = key.n.toString(16);
+  // 补齐到 512 字符（256 字节）
+  return hex.padStart(512, '0');
 }
