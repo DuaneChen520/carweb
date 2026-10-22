@@ -162,7 +162,7 @@ export function ConnectionOverlay({
     const message = overlayState === 'auto-reconnecting' ? '正在重新建立连接…' : '正在自动连接…';
     return (
       <div
-        className={`fixed inset-0 z-50 bg-black/40 backdrop-blur-xl flex items-center justify-center transition-opacity duration-300 ${
+        className={`fixed inset-0 z-50 bg-surface-base/80 backdrop-blur-xl flex items-center justify-center transition-opacity duration-300 ${
           fading ? 'opacity-0' : 'opacity-100'
         }`}
       >
@@ -171,11 +171,11 @@ export function ConnectionOverlay({
             <RefreshCw className="w-12 h-12 text-accent-400/30" />
             <RefreshCw className="absolute inset-0 w-12 h-12 text-accent-400 animate-spin" />
           </div>
-          <p className="text-white text-lg">{message}</p>
+          <p className="text-content-primary text-lg font-medium">{message}</p>
           {onCancelAutoConnect && (
             <button
               onClick={onCancelAutoConnect}
-              className="mt-6 text-slate-400 text-sm hover:text-slate-200 transition-colors"
+              className="mt-6 text-content-secondary text-sm hover:text-content-primary transition-colors min-h-[48px] px-4 flex items-center justify-center mx-auto"
             >
               取消
             </button>
@@ -188,7 +188,7 @@ export function ConnectionOverlay({
   if (overlayState === 'reconnecting') {
     return (
       <div
-        className={`fixed inset-0 z-50 bg-black/40 backdrop-blur-xl flex items-center justify-center transition-opacity duration-300 ${
+        className={`fixed inset-0 z-50 bg-surface-base/80 backdrop-blur-xl flex items-center justify-center transition-opacity duration-300 ${
           fading ? 'opacity-0' : 'opacity-100'
         }`}
       >
@@ -196,15 +196,15 @@ export function ConnectionOverlay({
           <div className="w-12 h-12 rounded-full bg-amber-500/20 flex items-center justify-center mx-auto mb-4">
             <AlertCircle className="w-6 h-6 text-amber-400" />
           </div>
-          <p className="text-slate-200 text-lg mb-1">连接已断开</p>
-          <p className="text-slate-400 text-sm mb-6">
+          <p className="text-content-primary text-lg font-medium mb-1">连接已断开</p>
+          <p className="text-content-secondary text-sm mb-6">
             {store.error || '设备可能已被断开或无线信号中断，请重新连接。'}
           </p>
           <div className="flex gap-3 justify-center">
             {onReconnect && (
               <button
                 onClick={onReconnect}
-                className="px-6 py-2.5 bg-accent-500 hover:bg-accent-600 shadow-accent-glow text-white font-medium rounded-xl transition-all duration-200 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 flex items-center gap-2"
+                className="px-6 py-2.5 min-h-[48px] bg-accent-500 hover:bg-accent-600 shadow-accent-glow text-white font-medium rounded-xl transition-all duration-200 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-base flex items-center gap-2"
               >
                 <RefreshCw className="w-4 h-4" />
                 重新连接
@@ -215,7 +215,7 @@ export function ConnectionOverlay({
                 usb.cancelAutoConnect();
                 window.location.reload();
               }}
-              className="px-6 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-200 font-medium rounded-lg transition-colors"
+              className="px-6 py-2.5 min-h-[48px] bg-surface-card hover:bg-surface-elevated text-content-primary font-medium rounded-xl border border-surface-card transition-colors flex items-center justify-center"
             >
               返回
             </button>
@@ -228,19 +228,19 @@ export function ConnectionOverlay({
   if (overlayState === 'auto-failed') {
     return (
       <div
-        className={`fixed inset-0 z-50 bg-black/40 backdrop-blur-xl flex items-center justify-center transition-opacity duration-300 ${
+        className={`fixed inset-0 z-50 bg-surface-base/80 backdrop-blur-xl flex items-center justify-center transition-opacity duration-300 ${
           fading ? 'opacity-0' : 'opacity-100'
         }`}
       >
         <div className="text-center max-w-sm px-6">
-          <div className="w-12 h-12 rounded-full bg-slate-700 flex items-center justify-center mx-auto mb-4">
-            <Usb className="w-6 h-6 text-slate-300" />
+          <div className="w-12 h-12 rounded-full bg-surface-card border border-surface-card flex items-center justify-center mx-auto mb-4">
+            <Usb className="w-6 h-6 text-content-secondary" />
           </div>
-          <p className="text-slate-200 text-lg mb-1">暂时无法自动连接</p>
-          <p className="text-slate-400 text-sm mb-6">设备可能正忙，可在下方手动重新连接。</p>
+          <p className="text-content-primary text-lg font-medium mb-1">暂时无法自动连接</p>
+          <p className="text-content-secondary text-sm mb-6">设备可能正忙，可在下方手动重新连接。</p>
           <button
             onClick={onCancelAutoConnect ?? (() => {})}
-            className="px-6 py-2.5 bg-accent-500 hover:bg-accent-600 shadow-accent-glow text-white font-medium rounded-xl transition-all duration-200 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+            className="px-6 py-2.5 min-h-[48px] bg-accent-500 hover:bg-accent-600 shadow-accent-glow text-white font-medium rounded-xl transition-all duration-200 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-base flex items-center justify-center mx-auto"
           >
             手动连接
           </button>
@@ -257,7 +257,7 @@ export function ConnectionOverlay({
           fading ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
-        <div className="absolute inset-0 bg-slate-950/50 backdrop-blur-xl" />
+        <div className="absolute inset-0 bg-surface-base/80 backdrop-blur-xl" />
         <div
           className="absolute inset-0 pointer-events-none"
           style={{
@@ -269,7 +269,7 @@ export function ConnectionOverlay({
           <div className="w-16 h-16 rounded-full bg-accent-500/20 flex items-center justify-center mx-auto mb-3">
             <CheckCircle2 className="w-8 h-8 text-accent-400" />
           </div>
-          <p className="text-white text-base font-medium">已连接</p>
+          <p className="text-content-primary text-base font-medium">已连接</p>
         </div>
       </div>
 
@@ -278,7 +278,7 @@ export function ConnectionOverlay({
           fading ? 'opacity-0' : 'opacity-100'
         }`}
       >
-        <div className="absolute inset-0 bg-slate-950/50 backdrop-blur-xl" />
+        <div className="absolute inset-0 bg-surface-base/80 backdrop-blur-xl" />
         <div
           className="absolute inset-0 pointer-events-none"
           style={{
@@ -294,66 +294,66 @@ export function ConnectionOverlay({
               <span className="text-5xl bg-gradient-to-b from-white to-slate-300 bg-clip-text text-transparent">
                 CARWEB
               </span>
-              <span className="text-2xl font-semibold text-slate-500 tracking-normal">.top</span>
+              <span className="text-2xl font-semibold text-content-muted tracking-normal">.top</span>
             </h1>
-            <p className="text-slate-400 text-sm">为手机拓展的座舱独立副屏</p>
+            <p className="text-content-secondary text-sm">为手机拓展的座舱独立副屏</p>
           </div>
 
           {/* 模式选择 */}
           <div className="grid grid-cols-2 gap-4 mb-6">
             <button
               onClick={() => onSelectMode('virtual')}
-              className={`flex flex-col items-center gap-2 p-5 rounded-2xl border transition-all duration-200 active:scale-[0.98] min-h-[48px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
+              className={`flex flex-col items-center gap-2 p-5 rounded-2xl border transition-all duration-200 active:scale-[0.98] min-h-[48px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-base ${
                 displayMode === 'virtual'
                   ? 'border-accent-400 bg-accent-500/10 ring-1 ring-accent-400 shadow-accent-glow'
-                  : 'border-slate-700 bg-slate-800/50 hover:bg-slate-700/40 hover:border-slate-600'
+                  : 'border-surface-card bg-surface-card hover:bg-surface-elevated hover:border-accent-400/30'
               }`}
             >
               <Monitor
                 className={`w-7 h-7 transition-colors ${
-                  displayMode === 'virtual' ? 'text-accent-400' : 'text-slate-400'
+                  displayMode === 'virtual' ? 'text-accent-400' : 'text-content-secondary'
                 }`}
               />
               <span
                 className={`text-sm font-medium ${
-                  displayMode === 'virtual' ? 'text-accent-400' : 'text-white'
+                  displayMode === 'virtual' ? 'text-accent-400' : 'text-content-primary'
                 }`}
               >
                 虚拟显示屏
               </span>
-              <span className="text-xs text-slate-500">创建独立副屏，互不干扰</span>
+              <span className="text-xs text-content-muted">创建独立副屏，互不干扰</span>
             </button>
             <button
               onClick={() => onSelectMode('mirror')}
-              className={`flex flex-col items-center gap-2 p-5 rounded-2xl border transition-all duration-200 active:scale-[0.98] min-h-[48px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
+              className={`flex flex-col items-center gap-2 p-5 rounded-2xl border transition-all duration-200 active:scale-[0.98] min-h-[48px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-base ${
                 displayMode === 'mirror'
                   ? 'border-accent-400 bg-accent-500/10 ring-1 ring-accent-400 shadow-accent-glow'
-                  : 'border-slate-700 bg-slate-800/50 hover:bg-slate-700/40 hover:border-slate-600'
+                  : 'border-surface-card bg-surface-card hover:bg-surface-elevated hover:border-accent-400/30'
               }`}
             >
               <Smartphone
                 className={`w-7 h-7 transition-colors ${
-                  displayMode === 'mirror' ? 'text-accent-400' : 'text-slate-400'
+                  displayMode === 'mirror' ? 'text-accent-400' : 'text-content-secondary'
                 }`}
               />
               <span
                 className={`text-sm font-medium ${
-                  displayMode === 'mirror' ? 'text-accent-400' : 'text-white'
+                  displayMode === 'mirror' ? 'text-accent-400' : 'text-content-primary'
                 }`}
               >
                 屏幕镜像
               </span>
-              <span className="text-xs text-slate-500">手机全屏同步镜像</span>
+              <span className="text-xs text-content-muted">手机全屏同步镜像</span>
             </button>
           </div>
 
           {/* 已记住的设备 */}
           {rememberedDevices.length > 0 && (
             <div className="mb-6">
-              <div className="text-slate-400 text-xs mb-2">已配对设备（点击直连）</div>
+              <div className="text-content-secondary text-xs mb-2">已配对设备（点击直连）</div>
               <div className="space-y-2">
                 {rememberedDevices.map((device) => (
-                  <div key={device.id} className="flex items-center gap-1">
+                  <div key={device.id} className="flex items-center gap-2">
                     <button
                       onClick={() => {
                         setSelectedDevice(device);
@@ -361,22 +361,22 @@ export function ConnectionOverlay({
                       }}
                       className={`flex-1 flex items-center justify-between p-3 rounded-xl border min-h-[48px] transition-colors ${
                         selectedDevice?.id === device.id
-                          ? 'border-accent-400 bg-slate-700/50'
-                          : 'border-slate-700 bg-slate-800/50 hover:bg-slate-700/30'
+                          ? 'border-accent-400 bg-surface-elevated'
+                          : 'border-surface-card bg-surface-card hover:bg-surface-elevated'
                       }`}
                     >
                       <div className="flex items-center gap-3">
                         {device.type === 'usb' ? (
-                          <Usb className="w-4 h-4 text-slate-400" />
+                          <Usb className="w-4 h-4 text-content-secondary" />
                         ) : (
                           <Wifi className="w-4 h-4 text-accent-400" />
                         )}
                         <div className="text-left">
-                          <div className="text-white text-sm font-medium">{device.name}</div>
-                          <div className="text-slate-500 text-xs tabular-nums">{device.address}</div>
+                          <div className="text-content-primary text-sm font-medium">{device.name}</div>
+                          <div className="text-content-muted text-xs tabular-nums">{device.address}</div>
                         </div>
                       </div>
-                      <div className="text-slate-500 text-xs">{formatRelativeTime(device.lastConnected)}</div>
+                      <div className="text-content-muted text-xs">{formatRelativeTime(device.lastConnected)}</div>
                     </button>
                     <button
                       onClick={() => {
@@ -384,7 +384,7 @@ export function ConnectionOverlay({
                         forgetDeviceCache(forgetSerial);
                         onForget(device.id);
                       }}
-                      className="p-3 min-h-[48px] min-w-[48px] flex items-center justify-center rounded-xl text-slate-500 hover:text-red-400 hover:bg-slate-800 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
+                      className="p-3 min-h-[48px] min-w-[48px] flex items-center justify-center rounded-xl text-content-muted hover:text-red-400 hover:bg-surface-elevated border border-transparent hover:border-surface-card transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
                       title="忘记此设备"
                       aria-label="忘记此设备"
                     >
@@ -397,20 +397,20 @@ export function ConnectionOverlay({
           )}
 
           <div className="flex items-center gap-3 mb-6">
-            <div className="flex-1 h-px bg-slate-700/60" />
-            <span className="text-slate-500 text-xs">连接新设备</span>
-            <div className="flex-1 h-px bg-slate-700/60" />
+            <div className="flex-1 h-px bg-surface-card" />
+            <span className="text-content-muted text-xs">连接新设备</span>
+            <div className="flex-1 h-px bg-surface-card" />
           </div>
 
           {/* 连接面板 */}
-          <div className="bg-slate-800/60 backdrop-blur-md rounded-2xl border border-slate-700/80 overflow-hidden mb-6">
-            <div className="flex border-b border-slate-700/80">
+          <div className="bg-surface-elevated/95 backdrop-blur-xl rounded-2xl border border-surface-card shadow-float overflow-hidden mb-6">
+            <div className="flex border-b border-surface-card">
               <button
                 onClick={() => setActiveTab('usb')}
                 className={`flex-1 flex items-center justify-center gap-2 py-3.5 text-sm font-medium min-h-[48px] transition-colors ${
                   activeTab === 'usb'
-                    ? 'text-accent-400 border-b-2 border-accent-400 bg-slate-700/20'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'text-accent-400 border-b-2 border-accent-400 bg-accent-500/10'
+                    : 'text-content-secondary hover:text-content-primary'
                 }`}
               >
                 <Usb className="w-4 h-4" />
@@ -423,8 +423,8 @@ export function ConnectionOverlay({
                 }}
                 className={`flex-1 flex items-center justify-center gap-2 py-3.5 text-sm font-medium min-h-[48px] transition-colors ${
                   activeTab === 'wifi'
-                    ? 'text-accent-400 border-b-2 border-accent-400 bg-slate-700/20'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'text-accent-400 border-b-2 border-accent-400 bg-accent-500/10'
+                    : 'text-content-secondary hover:text-content-primary'
                 }`}
               >
                 <Wifi className="w-4 h-4" />
@@ -435,25 +435,25 @@ export function ConnectionOverlay({
             <div className="p-5">
               {activeTab === 'usb' ? (
                 <div className="space-y-4">
-                  <div className="text-slate-400 text-xs text-center">
+                  <div className="text-content-secondary text-xs text-center">
                     使用 USB 数据线将手机连接到车机接口
                   </div>
                   <div className="flex justify-center py-2">
-                    <div className="w-16 h-16 rounded-full bg-slate-700/40 flex items-center justify-center">
-                      <Usb className="w-8 h-8 text-slate-400" />
+                    <div className="w-16 h-16 rounded-full bg-surface-card border border-surface-card flex items-center justify-center">
+                      <Usb className="w-8 h-8 text-content-secondary" />
                     </div>
                   </div>
                 </div>
               ) : (
                 <div className="space-y-4">
                   {/* 无线二级切换 */}
-                  <div className="grid grid-cols-2 p-1 bg-slate-900/60 rounded-xl border border-slate-700/60 text-xs font-medium">
+                  <div className="grid grid-cols-2 p-1 bg-surface-base rounded-xl border border-surface-card text-xs font-medium">
                     <button
                       onClick={() => setWirelessSubTab('pair')}
                       className={`py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 min-h-[48px] ${
                         wirelessSubTab === 'pair'
                           ? 'bg-accent-500 text-white shadow-sm'
-                          : 'text-slate-400 hover:text-slate-200'
+                          : 'text-content-secondary hover:text-content-primary'
                       }`}
                     >
                       <KeyRound className="w-3.5 h-3.5" />
@@ -467,7 +467,7 @@ export function ConnectionOverlay({
                       className={`py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 min-h-[48px] ${
                         wirelessSubTab === 'direct'
                           ? 'bg-accent-500 text-white shadow-sm'
-                          : 'text-slate-400 hover:text-slate-200'
+                          : 'text-content-secondary hover:text-content-primary'
                       }`}
                     >
                       <Wifi className="w-3.5 h-3.5" />
@@ -478,12 +478,12 @@ export function ConnectionOverlay({
                   {wirelessSubTab === 'pair' ? (
                     <div className="space-y-4">
                       {/* 配对操作指引 */}
-                      <div className="p-3.5 bg-slate-900/40 border border-slate-700/40 rounded-xl space-y-2 text-xs text-slate-300">
-                        <div className="font-medium text-white flex items-center gap-1.5">
+                      <div className="p-3.5 bg-surface-base border border-surface-card rounded-xl space-y-2 text-xs text-content-primary">
+                        <div className="font-medium text-content-primary flex items-center gap-1.5">
                           <span className="w-1.5 h-1.5 rounded-full bg-accent-400" />
                           Android 11+ 免线配对指南
                         </div>
-                        <ol className="list-decimal list-inside space-y-1 text-slate-400 pl-1 leading-relaxed">
+                        <ol className="list-decimal list-inside space-y-1 text-content-secondary pl-1 leading-relaxed">
                           <li>手机与车机连入同一 WiFi（或开启手机热点让车机连接）；</li>
                           <li>打开手机系统「开发者选项 → 无线调试」；</li>
                           <li>点击「使用配对码配对设备」，查看配对码与 IP 端口。</li>
@@ -492,7 +492,7 @@ export function ConnectionOverlay({
 
                       {/* 输入配对 IP:端口 */}
                       <div>
-                        <label className="text-slate-300 text-xs mb-1.5 block">
+                        <label className="text-content-secondary text-xs mb-1.5 block">
                           手机配对 IP 与端口（如 192.168.1.100:37123）
                         </label>
                         <input
@@ -500,20 +500,20 @@ export function ConnectionOverlay({
                           value={pairingAddress}
                           onChange={(e) => setPairingAddress(e.target.value)}
                           placeholder="例如: 192.168.1.100:37123"
-                          className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white text-sm placeholder-slate-500 focus:outline-none focus:border-accent-400 min-h-[48px] tabular-nums"
+                          className="w-full px-4 py-3 bg-surface-base border border-surface-card rounded-xl text-content-primary text-sm placeholder:text-content-muted focus:outline-none focus:border-accent-400 min-h-[48px] tabular-nums"
                         />
                       </div>
 
                       {/* 输入 6 位配对码 */}
                       <div>
-                        <label className="text-slate-300 text-xs mb-1.5 block">6 位配对码</label>
+                        <label className="text-content-secondary text-xs mb-1.5 block">6 位配对码</label>
                         <input
                           type="text"
                           maxLength={6}
                           value={pairingCode}
                           onChange={(e) => setPairingCode(e.target.value.replace(/\D/g, ''))}
                           placeholder="例如: 123456"
-                          className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white text-lg tracking-widest text-center placeholder-slate-600 focus:outline-none focus:border-accent-400 min-h-[48px] tabular-nums font-mono"
+                          className="w-full px-4 py-3 bg-surface-base border border-surface-card rounded-xl text-content-primary text-lg tracking-widest text-center placeholder:text-content-muted focus:outline-none focus:border-accent-400 min-h-[48px] tabular-nums font-mono"
                         />
                       </div>
 
@@ -530,19 +530,19 @@ export function ConnectionOverlay({
                         </button>
 
                         {showQrBox && (
-                          <div className="mt-2 p-3 bg-slate-900/60 rounded-xl border border-slate-700/60 space-y-2">
+                          <div className="mt-2 p-3 bg-surface-base rounded-xl border border-surface-card space-y-2">
                             <textarea
                               value={qrCodeText}
                               onChange={(e) => setQrCodeText(e.target.value)}
                               placeholder="粘贴扫码枪识别出的 WIFI:T:ADB;S:... 二维码字符串"
                               rows={2}
-                              className="w-full p-2.5 bg-slate-950 border border-slate-700 rounded-lg text-white text-xs placeholder-slate-600 focus:outline-none focus:border-accent-400 resize-none tabular-nums"
+                              className="w-full p-2.5 bg-surface-card border border-surface-card rounded-lg text-content-primary text-xs placeholder:text-content-muted focus:outline-none focus:border-accent-400 resize-none tabular-nums"
                             />
                             <button
                               type="button"
                               onClick={handleQrPairing}
                               disabled={!qrCodeText.trim() || isConnecting}
-                              className="w-full py-3 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors min-h-[48px] flex items-center justify-center gap-2"
+                              className="w-full py-3 bg-surface-card hover:bg-surface-elevated border border-surface-card disabled:opacity-50 text-content-primary text-xs font-medium rounded-lg transition-colors min-h-[48px] flex items-center justify-center gap-2"
                             >
                               解析并自动配对
                             </button>
@@ -555,7 +555,7 @@ export function ConnectionOverlay({
                       {/* 已在线的 ADB 设备列表 */}
                       {wifi.discoveredDevices.length > 0 && (
                         <div className="space-y-2">
-                          <div className="text-slate-300 text-xs flex items-center justify-between">
+                          <div className="text-content-secondary text-xs flex items-center justify-between">
                             <span>局域网已识别设备:</span>
                             <button
                               onClick={wifi.scanDevices}
@@ -570,7 +570,7 @@ export function ConnectionOverlay({
                             <button
                               key={`${device.ip}:${device.port}`}
                               onClick={() => handleSelectScannedDevice(device)}
-                              className="w-full px-3.5 py-3 bg-slate-900/60 hover:bg-slate-700/50 rounded-xl border border-slate-700/60 text-slate-200 text-xs text-left transition-colors flex items-center justify-between min-h-[48px]"
+                              className="w-full px-3.5 py-3 bg-surface-base hover:bg-surface-card rounded-xl border border-surface-card text-content-primary text-xs text-left transition-colors flex items-center justify-between min-h-[48px]"
                             >
                               <div className="flex items-center gap-2.5">
                                 <Smartphone className="w-4 h-4 text-accent-400" />
@@ -578,7 +578,7 @@ export function ConnectionOverlay({
                                   {device.ip}:{device.port}
                                 </span>
                               </div>
-                              <span className="text-slate-500 text-xs">点击填入</span>
+                              <span className="text-content-muted text-xs">点击填入</span>
                             </button>
                           ))}
                         </div>
@@ -586,7 +586,7 @@ export function ConnectionOverlay({
 
                       {/* 手动 IP:端口 输入 */}
                       <div>
-                        <label className="text-slate-300 text-xs mb-1.5 block">
+                        <label className="text-content-secondary text-xs mb-1.5 block">
                           设备 IP 地址与主端口（默认 5555）
                         </label>
                         <input
@@ -594,7 +594,7 @@ export function ConnectionOverlay({
                           value={wifiAddress}
                           onChange={(e) => setWifiAddress(e.target.value)}
                           placeholder="例如: 192.168.1.100:5555"
-                          className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-white text-sm placeholder-slate-500 focus:outline-none focus:border-accent-400 min-h-[48px] tabular-nums"
+                          className="w-full px-4 py-3 bg-surface-base border border-surface-card rounded-xl text-content-primary text-sm placeholder:text-content-muted focus:outline-none focus:border-accent-400 min-h-[48px] tabular-nums"
                         />
                       </div>
                     </div>
@@ -619,7 +619,7 @@ export function ConnectionOverlay({
                     ((wirelessSubTab === 'pair' && (!pairingAddress.trim() || !pairingCode.trim())) ||
                       (wirelessSubTab === 'direct' && !wifiAddress.trim())))
                 }
-                className="w-full mt-5 py-3.5 bg-accent-500 hover:bg-accent-600 disabled:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-accent-glow text-white font-medium rounded-xl transition-all duration-200 active:scale-[0.99] min-h-[48px] flex items-center justify-center gap-2 text-sm"
+                className="w-full mt-5 py-3.5 bg-accent-500 hover:bg-accent-600 disabled:bg-surface-card disabled:text-content-muted disabled:border-surface-card disabled:opacity-50 disabled:cursor-not-allowed shadow-accent-glow text-white font-medium rounded-xl transition-all duration-200 active:scale-[0.99] min-h-[48px] flex items-center justify-center gap-2 text-sm"
               >
                 {isConnecting ? (
                   <>
@@ -634,12 +634,12 @@ export function ConnectionOverlay({
                 )}
               </button>
 
-              <label className="mt-3.5 flex items-center justify-center gap-2 text-slate-400 text-xs cursor-pointer select-none">
+              <label className="mt-3.5 flex items-center justify-center gap-2 text-content-secondary text-xs cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={rememberDevice}
                   onChange={(e) => setRememberDevice(e.target.checked)}
-                  className="rounded border-slate-600 bg-slate-700 text-accent-500 focus:ring-accent-500"
+                  className="rounded border-surface-card bg-surface-base text-accent-500 focus:ring-accent-500"
                 />
                 记住此设备（下次上车一键免配对连接）
               </label>

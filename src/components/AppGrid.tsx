@@ -128,7 +128,7 @@ export const AppGrid = forwardRef<AppGridHandle, AppGridProps>(function AppGrid(
 
   if (deviceApps.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center text-slate-400 text-sm py-12">
+      <div className="flex-1 flex items-center justify-center text-content-secondary text-sm py-12">
         正在加载应用列表...
       </div>
     );
@@ -136,7 +136,7 @@ export const AppGrid = forwardRef<AppGridHandle, AppGridProps>(function AppGrid(
 
   if (filteredPkgs.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center text-slate-400 text-sm py-12">
+      <div className="flex-1 flex items-center justify-center text-content-secondary text-sm py-12">
         无匹配应用
       </div>
     );
@@ -182,7 +182,7 @@ export const AppGrid = forwardRef<AppGridHandle, AppGridProps>(function AppGrid(
           {pages.map((_, i) => (
             <div
               key={i}
-              className="w-1.5 h-1.5 rounded-full bg-white/20"
+              className="w-1.5 h-1.5 rounded-full bg-content-muted/30"
             />
           ))}
         </div>
