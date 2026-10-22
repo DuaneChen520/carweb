@@ -1,18 +1,10 @@
-import { useCallback, useRef, useState } from 'react';
-import { Adb, adbDaemonAuthenticate } from '@yume-chan/adb';
-import { AdbWebCryptoCredentialManager, TangoIndexedDbStorage } from '@yume-chan/adb-credential-web';
+import { useCallback, useState } from 'react';
+import type { Adb } from '@yume-chan/adb';
 import { useAdbStore, type AdbStore } from './useAdbStore';
 import { killScrcpyServer } from '@/lib/adb-commands';
 import { handleAdbDisconnected } from '@/lib/adb-disconnect';
-import { AdbDaemonWebSocketDevice } from '@/lib/websocket-device';
-import { parseAdbQrCode, pairWithDevice, isValidIpAddress } from '@/lib/adb-pairing';
-
-/** 桥接代理默认地址 */
-const BRIDGE_HOST = 'localhost';
-const BRIDGE_PORT = 8080;
-
-/** 扫描超时（毫秒） */
-const SCAN_TIMEOUT = 10000;
+import { parseAdbQrCode, isValidIpAddress } from '@/lib/adb-pairing';
+import { AdbServerManager, type IAdbWirelessService } from '@/lib/adb-server-manager';
 
 /** 网络拓扑类型 */
 export type WifiTopology = 'phone-hotspot' | 'car-hotspot' | 'manual';
@@ -23,54 +15,29 @@ export interface ScannedDevice {
   port: number;
 }
 
-/**
- * 执行一次完整的 WebSocket 连接 → 认证 → ADB 建立。
- */
-async function connectOnce(
-  store: AdbStore,
-  device: AdbDaemonWebSocketDevice,
-): Promise<void> {
-  const conn = await device.connect();
-
-  const credentialManager = new AdbWebCryptoCredentialManager(
-    new TangoIndexedDbStorage(),
-    'carweb-adb-key',
-  );
-  const transport = await adbDaemonAuthenticate({
-    serial: device.serial,
-    connection: conn,
-    credentialManager,
-  });
-  const adb = new Adb(transport);
-  await killScrcpyServer(adb, true);
-
-  store.setAdb(adb);
-  store.setDeviceInfo(device.name, device.serial);
-  store.setWifiAddress(device.targetHost);
-  store.setConnectionStatus('connected');
-
-  adb.disconnected.then(
-    () => handleAdbDisconnected(store, adb),
-    (error) => handleAdbDisconnected(store, adb, error),
-  );
+export interface UseWifiConnectionOptions {
+  /** 允许注入自定义 ADB 服务（用于单元测试与环境隔离） */
+  service?: IAdbWirelessService;
 }
 
 export interface UseWifiConnectionResult {
-  /** 连接到指定 IP 的 ADB 设备 */
+  /** 连接到指定 IP / IP:端口的 ADB 设备 */
   connectWifi: (address: string) => Promise<void>;
+  /** 通过输入配对端口和 6 位配对码进行免线配对并连接 */
+  pairAndConnect: (pairingAddress: string, code: string, connectAddress?: string) => Promise<void>;
   /** 通过扫码配对信息连接 */
   connectWithPairing: (qrCode: string) => Promise<void>;
-  /** 扫描局域网中的 ADB 设备 */
+  /** 扫描宿主或局域网中已连接/发现的无线设备 */
   scanDevices: () => Promise<void>;
   /** 断开连接 */
   disconnect: () => Promise<void>;
-  /** 设置网络拓扑类型 */
+  /** 设置网络拓扑类型（保留向后兼容） */
   setTopology: (topology: WifiTopology) => void;
   /** 当前网络拓扑类型 */
   topology: WifiTopology;
   /** 是否正在扫描 */
   isScanning: boolean;
-  /** 扫描发现的设备 */
+  /** 发现的设备列表 */
   discoveredDevices: ScannedDevice[];
   /** 是否正在连接 */
   isConnecting: boolean;
@@ -80,190 +47,173 @@ export interface UseWifiConnectionResult {
   error: string | null;
 }
 
-export function useWifiConnection(): UseWifiConnectionResult {
+/** 规范化 ADB 网络地址 */
+function normalizeAddress(address: string, defaultPort = 5555): { host: string; port: number; full: string } {
+  const trimmed = address.trim();
+  if (trimmed.includes(':')) {
+    const [h, pStr] = trimmed.split(':');
+    const p = parseInt(pStr, 10) || defaultPort;
+    return { host: h, port: p, full: `${h}:${p}` };
+  }
+  return { host: trimmed, port: defaultPort, full: `${trimmed}:${defaultPort}` };
+}
+
+/** 统一的启动会话并登记 Store 逻辑 */
+async function attachConnectedAdb(
+  store: AdbStore,
+  adb: Adb,
+  host: string,
+  fullAddress: string,
+): Promise<void> {
+  await killScrcpyServer(adb, true);
+
+  store.setAdb(adb);
+  store.setDeviceInfo(`WiFi-${host}`, fullAddress);
+  store.setWifiAddress(host);
+  store.setConnectionStatus('connected');
+
+  adb.disconnected.then(
+    () => handleAdbDisconnected(store, adb),
+    (error) => handleAdbDisconnected(store, adb, error),
+  );
+}
+
+// 全局默认管理器单例
+let defaultManager: AdbServerManager | null = null;
+function getDefaultManager(): AdbServerManager {
+  if (!defaultManager) {
+    defaultManager = new AdbServerManager();
+  }
+  return defaultManager;
+}
+
+export function useWifiConnection(options?: UseWifiConnectionOptions): UseWifiConnectionResult {
   const store = useAdbStore();
+  const service = options?.service ?? getDefaultManager();
+
   const [isScanning, setIsScanning] = useState(false);
   const [discoveredDevices, setDiscoveredDevices] = useState<ScannedDevice[]>([]);
   const [topology, setTopologyState] = useState<WifiTopology>('phone-hotspot');
-  const cancelRef = useRef(false);
 
   const setTopology = useCallback((t: WifiTopology) => {
     setTopologyState(t);
   }, []);
 
   /**
-   * 扫描局域网中的 ADB 设备。
-   *
-   * 通过 WebSocket 桥接代理的 /scan/{subnet} 端点执行扫描，
-   * 桥接代理在车机本地运行，可以直接进行 TCP 连接探测。
+   * 刷新/扫描宿主识别到的无线设备列表
    */
   const scanDevices = useCallback(async () => {
     setIsScanning(true);
-    setDiscoveredDevices([]);
-    cancelRef.current = false;
-
     try {
-      // 1. 获取本机 IP 网段（通过 WebRTC）
-      const subnet = await getLocalSubnet();
-      if (!subnet) {
-        throw new Error('无法获取本机 IP 网段');
+      const devices = await service.getDevices();
+      const scanned: ScannedDevice[] = [];
+      for (const d of devices) {
+        if (d.serial && d.serial.includes(':')) {
+          const { host, port } = normalizeAddress(d.serial);
+          scanned.push({ ip: host, port });
+        }
       }
-
-      // 2. 通过 WebSocket 连接到桥接代理的扫描端点
-      const ws = new WebSocket(`ws://${BRIDGE_HOST}:${BRIDGE_PORT}/scan/${subnet}`);
-      ws.binaryType = 'arraybuffer';
-
-      const devices: ScannedDevice[] = [];
-
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          ws.close();
-          reject(new Error('扫描超时'));
-        }, SCAN_TIMEOUT);
-
-        ws.onmessage = (event) => {
-          let data: string;
-          if (event.data instanceof ArrayBuffer) {
-            data = new TextDecoder().decode(event.data);
-          } else {
-            data = event.data as string;
-          }
-
-          try {
-            const result = JSON.parse(data);
-            if (result.done) {
-              clearTimeout(timeout);
-              resolve();
-            } else if (result.ip) {
-              devices.push({ ip: result.ip, port: 5555 });
-              setDiscoveredDevices([...devices]); // 实时更新 UI
-            }
-          } catch {
-            // 非 JSON 消息，忽略
-          }
-        };
-
-        ws.onerror = () => {
-          clearTimeout(timeout);
-          reject(new Error('扫描连接失败'));
-        };
-
-        ws.onclose = () => {
-          clearTimeout(timeout);
-          resolve();
-        };
-      });
-
-      setDiscoveredDevices(devices);
+      setDiscoveredDevices(scanned);
     } catch (error) {
-      console.error('扫描设备错误:', error);
-      // 扫描失败时不阻塞连接流程
+      console.warn('查询已知设备失败:', error);
     } finally {
       setIsScanning(false);
     }
-  }, []);
+  }, [service]);
 
   /**
-   * 连接到指定 IP 的 ADB 设备。
-   *
-   * 通过 WebSocket 桥接代理转发 ADB 流量。
-   * 假设已通过 USB 或扫码配对完成过认证。
+   * 直接连接指定 IP 的设备（该设备须已在宿主中配对授权）
    */
-  const connectWifi = useCallback(async (address: string) => {
-    // 解析地址: 支持 "192.168.1.100" 或 "192.168.1.100:5555" 格式
-    let ip = address;
-    let port = 5555;
+  const connectWifi = useCallback(
+    async (address: string) => {
+      const { host, full } = normalizeAddress(address);
+      if (!isValidIpAddress(host)) {
+        store.setError('IP 地址格式无效');
+        store.setConnectionStatus('error');
+        return;
+      }
 
-    if (address.includes(':')) {
-      const parts = address.split(':');
-      ip = parts[0];
-      port = parseInt(parts[1], 10) || 5555;
-    }
+      try {
+        store.setConnectionStatus('connecting');
+        store.setConnectionType('wifi');
+        store.setError(null);
 
-    if (!isValidIpAddress(ip)) {
-      store.setError('IP 地址格式无效');
-      store.setConnectionStatus('error');
-      return;
-    }
+        // 调用标准 adb connect
+        await service.connect(full);
 
-    try {
-      store.setConnectionStatus('connecting');
-      store.setConnectionType('wifi');
-      store.setError(null);
-
-      const device = new AdbDaemonWebSocketDevice(ip, port, BRIDGE_HOST, BRIDGE_PORT);
-      await connectOnce(store, device);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'WiFi 连接失败';
-      store.setError(message);
-      store.setConnectionStatus('error');
-      console.warn('WiFi 连接错误:', error);
-    }
-  }, [store]);
+        // 创建 Adb 实例
+        const adb = await service.createAdb({ serial: full });
+        await attachConnectedAdb(store, adb, host, full);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'WiFi 连接失败';
+        store.setError(message);
+        store.setConnectionStatus('error');
+        console.warn('WiFi 连接错误:', error);
+      }
+    },
+    [service, store],
+  );
 
   /**
-   * 通过扫码配对信息连接。
-   *
-   * 1. 解析 QR 码
-   * 2. 执行 ADB 配对（通过桥接代理）
-   * 3. 配对成功后连接 ADB 端口
+   * 免线 6 位配对码配对并连接
    */
-  const connectWithPairing = useCallback(async (qrCode: string) => {
-    const pairingInfo = parseAdbQrCode(qrCode);
-    if (!pairingInfo) {
-      store.setError('QR 码格式无效');
-      store.setConnectionStatus('error');
-      return;
-    }
-
-    try {
-      store.setConnectionStatus('connecting');
-      store.setConnectionType('wifi');
-      store.setError(null);
-
-      // 获取或生成 RSA 密钥
-      const credentialManager = new AdbWebCryptoCredentialManager(
-        new TangoIndexedDbStorage(),
-        'carweb-adb-key',
-      );
-
-      // 获取已有的密钥，如果没有则生成一个
-      let publicKeyHex = '';
-      for await (const key of credentialManager.iterateKeys()) {
-        if (key instanceof Error) continue;
-        publicKeyHex = exportPublicKeyHex(key);
-        break;
+  const pairAndConnect = useCallback(
+    async (pairingAddress: string, code: string, connectAddress?: string) => {
+      const pairing = normalizeAddress(pairingAddress, 37000);
+      if (!isValidIpAddress(pairing.host)) {
+        store.setError('手机配对 IP 地址格式无效');
+        store.setConnectionStatus('error');
+        return;
+      }
+      if (!code || code.trim().length === 0) {
+        store.setError('请输入 6 位配对码');
+        store.setConnectionStatus('error');
+        return;
       }
 
-      if (!publicKeyHex) {
-        // 生成新密钥
-        const key = await credentialManager.generateKey();
-        publicKeyHex = exportPublicKeyHex(key);
+      try {
+        store.setConnectionStatus('connecting');
+        store.setConnectionType('wifi');
+        store.setError(null);
+
+        // 1. 调用官方 ADB pair 指令
+        await service.pair(pairing.full, code.trim());
+
+        // 2. 配对成功后，连接主调试端口（默认为 5555）
+        const target = connectAddress ? normalizeAddress(connectAddress) : normalizeAddress(pairing.host, 5555);
+        await service.connect(target.full);
+
+        // 3. 创建 Adb 实例并挂载
+        const adb = await service.createAdb({ serial: target.full });
+        await attachConnectedAdb(store, adb, target.host, target.full);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '无线配对失败';
+        store.setError(message);
+        store.setConnectionStatus('error');
+        console.warn('无线配对错误:', error);
+      }
+    },
+    [service, store],
+  );
+
+  /**
+   * 扫码一键配对并连接
+   */
+  const connectWithPairing = useCallback(
+    async (qrCode: string) => {
+      const info = parseAdbQrCode(qrCode);
+      if (!info) {
+        store.setError('QR 码格式无效');
+        store.setConnectionStatus('error');
+        return;
       }
 
-      // 执行配对
-      const bridgeUrl = `ws://${BRIDGE_HOST}:${BRIDGE_PORT}`;
-      const result = await pairWithDevice(bridgeUrl, pairingInfo, publicKeyHex);
-
-      if (!result.success) {
-        throw new Error(result.error || '配对失败');
-      }
-
-      // 配对成功后，连接 ADB 端口（5555）
-      const device = new AdbDaemonWebSocketDevice(
-        pairingInfo.host,
-        5555,
-        BRIDGE_HOST,
-        BRIDGE_PORT,
-      );
-      await connectOnce(store, device);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '配对连接失败';
-      store.setError(message);
-      store.setConnectionStatus('error');
-      console.warn('配对连接错误:', error);
-    }
-  }, [store]);
+      const pairingAddress = `${info.host}:${info.pairingPort}`;
+      const connectAddress = `${info.host}:5555`;
+      await pairAndConnect(pairingAddress, info.pairingCode, connectAddress);
+    },
+    [pairAndConnect, store],
+  );
 
   const disconnect = useCallback(async () => {
     await store.disconnect();
@@ -271,6 +221,7 @@ export function useWifiConnection(): UseWifiConnectionResult {
 
   return {
     connectWifi,
+    pairAndConnect,
     connectWithPairing,
     scanDevices,
     disconnect,
@@ -282,49 +233,4 @@ export function useWifiConnection(): UseWifiConnectionResult {
     isConnected: store.connectionStatus === 'connected',
     error: store.error,
   };
-}
-
-/**
- * 通过 WebRTC 获取本机 IP 网段。
- */
-async function getLocalSubnet(): Promise<string | null> {
-  try {
-    const pc = new RTCPeerConnection({ iceServers: [] });
-    pc.createDataChannel('');
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-
-    await new Promise<void>((resolve) => setTimeout(resolve, 500));
-
-    const sdp = pc.localDescription?.sdp;
-    pc.close();
-
-    if (sdp) {
-      const ipMatches = sdp.match(/(\d+\.\d+\.\d+)\.\d+/g);
-      if (ipMatches && ipMatches.length > 0) {
-        // 排除 127.x.x.x
-        for (const match of ipMatches) {
-          if (!match.startsWith('127.')) {
-            // 提取前三个段作为子网
-            return match.split('.').slice(0, 3).join('.');
-          }
-        }
-      }
-    }
-
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 将 AdbPrivateKey 的公钥（n）导出为十六进制字符串。
- * 桥接代理接收 RSA 模数 n 的十六进制表示。
- * 输出为固定长度（256 字节 = 512 十六进制字符，因为 RSA-2048）。
- */
-function exportPublicKeyHex(key: { n: bigint }): string {
-  const hex = key.n.toString(16);
-  // 补齐到 512 字符（256 字节）
-  return hex.padStart(512, '0');
 }
