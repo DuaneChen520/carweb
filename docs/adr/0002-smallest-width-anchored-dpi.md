@@ -54,6 +54,6 @@ dpi = min(width, height) × 160 / sw_target
 
 ## 关联
 
-- `CONTEXT.md` — 术语定义，新增 sw、DPI/Resolution 的解耦描述
+- `GLOSSARY.md` — 术语定义，新增 sw、DPI/Resolution 的解耦描述
 - `src/components/VirtualScreen.tsx` — `displayConfig` DPI 计算逻辑
 - `src/hooks/scrcpy/useScrcpySession.ts` — RESOLUTION_PRESETS 定义

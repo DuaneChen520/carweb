@@ -4,7 +4,7 @@
  * 端到端链路健康与重连的单一深模块，框架无关、可脱离 React 单测。
  * 演进自 ADR-0005：ControllerHealth 从「仅 control-socket」扩为「整条链路」。
  *
- * 设计约束（详见 CONTEXT.md「链路监督（LinkSupervisor）」）：
+ * 设计约束（详见 GLOSSARY.md「链路监督（LinkSupervisor）」）：
  * - 管「连接建立之后」的链路健康与重连；初始 USB 建连仍归 useUsbConnection。
  * - 五态 LinkState：connected / degraded / reconnecting / disconnected / failed。
  * - ADB-down 优先：ADB 传输断开立即进入 disconnected，且不消耗 scrcpy 重连次数

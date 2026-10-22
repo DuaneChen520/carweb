@@ -1,7 +1,8 @@
-# CarWeb 项目术语表
+# CarWeb 领域术语表
 
-> **事实源声明**：本文件以 `src/` 下**当前代码**为唯一事实源编写，不依赖早期 ADR 或旧设计文档。
+> **事实源声明**：本文件（`GLOSSARY.md`）是项目领域词汇的单一事实源，以 `src/` 下**当前代码**为准编写，不依赖早期 ADR 或旧设计文档。
 > 若本文件与代码冲突，以代码为准。如某术语涉及「已决定但未落地」的决策，会显式标注。
+> 每个术语用 `_Avoid_` 列出本项目不采用的同义词；新术语按此格式追加。
 
 ## 架构总览
 
@@ -32,6 +33,8 @@ CarWeb 是基于 **WebADB + Scrcpy** 的车机投屏 Web 应用：通过浏览�
 端到端链路健康与重连的单一深模块（`src/lib/link-supervisor.ts`，纯 TS 类、框架无关、可单测）。
 由架构评审候选 2 深化引入，演进 ADR-0005（ControllerHealth 从「仅 control-socket」扩为「整条链路」）。
 
+_Avoid_: 健康检查、重连管理器、断线监控。
+
 - **范围**：管「连接建立之后」的链路健康与重连；初始 USB 建连（`useUsbConnection` 的 `retryConnectUsb`）仍归连接层。
 - **状态模型**：五态 `LinkState` = `connected / degraded / reconnecting / disconnected / failed`。
 - **组合规则**：ADB 子监视器 down → 立即 `disconnected`（**不消耗** scrcpy 重连次数，因传输已失，重连无意义）；
@@ -54,6 +57,8 @@ CarWeb 是基于 **WebADB + Scrcpy** 的车机投屏 Web 应用：通过浏览�
 使用 Scrcpy `newDisplay` 参数在手机上创建一个**全新的虚拟显示屏**（非物理屏镜像），初始尺寸由车机浏览器窗口尺寸决定；
 并通过 **`flex_display=true`**（scrcpy 4.0 协议标志）将其声明为**可运行时 resize 的 flex 显示**。
 
+_Avoid_: 虚拟屏幕、投屏窗口、虚拟显示器。
+
 - 创建原语仍是 `new ScrcpyNewDisplay(width, height, dpi)`（`scrcpy-session.ts` 中 `ScrcpySession.start()`
   构造 `newDisplay` 选项处），提供初始几何尺寸。
 - `flex_display=true` 由 `AdbScrcpyOptions4_0.serialize()` 追加（`src/lib/scrcpy4/options.ts` 的
@@ -67,6 +72,8 @@ CarWeb 是基于 **WebADB + Scrcpy** 的车机投屏 Web 应用：通过浏览�
 代码：`scrcpy-session.ts` 非虚拟屏时传 `{ displayId: 0 }`。当前 `VirtualScreen` 组件同时承载两种模式
 （`mode` 由 `App.tsx` 传入，`mirror` 走 `displayId:0`，`virtual` 走分屏桌面 `DesktopScreen`）。
 
+_Avoid_: 同屏、屏幕复制、原屏投屏。
+
 ### 分屏桌面（Split Desktop）
 虚拟屏模式下的实际 UI，由 `SessionManager` 管理：
 - **Pane**：`paneLeft` / `paneRight` 各持有一个 streaming session。
@@ -78,6 +85,8 @@ CarWeb 是基于 **WebADB + Scrcpy** 的车机投屏 Web 应用：通过浏览�
 - **并发上限**：最多 3 个 streaming session（左 + 右 + 1 全屏）+ N 个 background session
   （仅占设备虚拟屏，不占浏览器解码资源）。
 
+_Avoid_: 多窗口、双屏模式。
+
 ## 方向锁定（captureOrientation）—— `LockedInitial`，ADR-0001 决策已落地
 
 `ScrcpySession.start()` 当前对虚拟屏使用
@@ -87,6 +96,8 @@ CarWeb 是基于 **WebADB + Scrcpy** 的车机投屏 Web 应用：通过浏览�
 **决策状态（已收口）**：ADR-0001 决定锁定到初始方向（`LockedInitial`）。该决策曾长期未落地
 （旧代码为 `Unlocked`，构成 open gap），现已实现于 `ScrcpySession`：锁定的是「虚拟屏创建时的初始方向」，
 而初始方向由窗口宽高比（`displayConfig`）决定；运行时改分辨率由 flex display resize 承担，灵活性不受影响。
+
+_Avoid_: 自动旋转、方向固定。
 
 ## 应用启动流程（App Launch Flow）——历史「多次跳转/慢启动」嫌疑步骤均已收口
 
@@ -115,6 +126,8 @@ CarWeb 是基于 **WebADB + Scrcpy** 的车机投屏 Web 应用：通过浏览�
 - 高清（hd）: 0.5x
 - 流畅（smooth）: 0.25x
 
+_Avoid_: 清晰度、画质档位。
+
 ## Smallest Width（sw）
 Android 概念：`sw(dp) = min(width_px, height_px) × 160 / dpi`。标准大屏阈值 `sw ≥ 600dp`
 （超过即被视为平板/可折叠大屏，触发响应式布局）。
@@ -140,6 +153,8 @@ Android 概念：`sw(dp) = min(width_px, height_px) × 160 / dpi`。标准大屏
 - 旧方案（浏览器端用 `app-info-parser` 的 `ApkParser` 下载并解析 APK）对应的遗留模块为 `src/lib/apk-parser.ts`；
   当前主路径走设备端解析。
 
+_Avoid_: APK 解析（指旧的浏览器端路径）、应用列表解析。
+
 ## 会话健壮性要点（供诊断参考）
 - **启动临界区串行化**：`withLaunchMutex` 防止多会话 `reverse.remove` 误拆彼此的反向隧道
   （表现为 `AdbScrcpyExitedError: scrcpy server exited prematurely`）。
@@ -154,6 +169,8 @@ Android 概念：`sw(dp) = min(width_px, height_px) × 160 / dpi`。标准大屏
 且 `App.tsx` 中「`connectionStatus === 'disconnected' && overlayState === 'hidden'`」的 effect
 在 `overlay=hidden` 时**无条件**将 `disconnected` 解读为「使用中真掉线」并弹
 “USB 连接已断开” overlay。这是「已绑定设备连接时误弹断线」的根因。
+
+_Avoid_: 掉线、断线（二者混用会掩盖 intentional disconnect 与 real drop 的区别）。
 
 - **有意断开（intentional disconnect）**：由代码主动发起的关闭——`tryAutoConnectUsb` 开头的前置
   `store.disconnect()`（`useUsbConnection.ts`）、`handleStop`（`App.tsx`）、

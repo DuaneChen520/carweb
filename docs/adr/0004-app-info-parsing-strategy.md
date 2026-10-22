@@ -53,6 +53,6 @@ ADB sync 是文件级操作，无法按 ZIP 条目偏移量读取，因此必须
 
 ## 关联
 
-- `CONTEXT.md` — 应用信息解析术语定义
+- `GLOSSARY.md` — 应用信息解析术语定义
 - `app-info-parser` npm 包
 - `src/lib/adb-commands.ts` — ADB sync 读取 APK

@@ -47,6 +47,6 @@ captureOrientation: new ScrcpyCaptureOrientation(
 
 ## 关联
 
-- `CONTEXT.md` — 术语定义（「方向锁定（captureOrientation）」一节）
+- `GLOSSARY.md` — 术语定义（「方向锁定（captureOrientation）」一节）
 - `src/lib/scrcpy-session.ts` — 实现代码（`ScrcpySession.start()` 的 `captureOrientation` 选项）
 - ADR-0011 — 虚拟屏启动过渡（本决策随其实施落地）

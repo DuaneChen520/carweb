@@ -91,7 +91,7 @@ restartCount++ → 触发 startScrcpy()
 
 ## 关联
 
-- `CONTEXT.md` — 术语定义（虚拟屏、镜像模式）
+- `GLOSSARY.md` — 术语定义（虚拟屏、镜像模式）
 - `src/components/VirtualScreen.tsx` — 窗口 resize 监听与重启逻辑
 - `src/hooks/scrcpy/useScrcpySession.ts` — scrcpy 启动/停止
 - `src/lib/adb-commands.ts` — ADB 命令封装

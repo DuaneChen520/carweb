@@ -1,4 +1,4 @@
-# PRD: 无线 ADB 连接（WiFi 投屏）
+# Spec: 无线 ADB 连接（WiFi 投屏）
 
 > 状态：**ready-for-agent**
 > 标签：`ready-for-agent`
