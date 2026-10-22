@@ -1347,7 +1347,7 @@ git commit -m "feat(scrcpy4): VirtualScreen 删除销毁重建，接入 flex res
 **Files:**
 - Modify: `src/hooks/scrcpy/useScrcpySession.ts`（移除废弃的 `resizeDisplay` shell 路径）
 - Modify: `src/lib/adb-commands.ts`（若 `resizeDisplay` 不再被任何代码调用，移除）
-- Create: `docs/adr/0004-scrcpy4-flex-display.md`
+- Create: `docs/adr/0017-scrcpy4-flex-display.md`
 - Modify: `README.md`
 
 - [ ] **Step 1: 移除废弃的 resizeDisplay shell 路径**
@@ -1361,7 +1361,7 @@ Run: `npm run check` 确认无引用残留。
 - [ ] **Step 2: 创建 ADR**
 
 ```markdown
-<!-- docs/adr/0004-scrcpy4-flex-display.md -->
+<!-- docs/adr/0017-scrcpy4-flex-display.md -->
 # ADR-0004: 迁移至 scrcpy 4.0 flex display
 
 - 日期：2026-07-01

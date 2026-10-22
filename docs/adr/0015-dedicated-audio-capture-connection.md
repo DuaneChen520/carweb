@@ -1,7 +1,7 @@
 # ADR-0015: 分屏桌面浏览器端无声的真因与修复（专用音频采集连接）
 
 - 状态：已落地，待真机复核（2026-07-14）
-- 相关：ADR-0013（**已被本 ADR 推翻并取代**）、ADR-0016（专用连接启动崩溃·车机定制 server 私有编解码器标签）、ADR-0001（虚拟屏方向锁）、ADR-0004（scrcpy 4.0 flex display 迁移）
+- 相关：ADR-0013（**已被本 ADR 推翻并取代**）、ADR-0016（专用连接启动崩溃·音频流元数据容错解析）、ADR-0001（虚拟屏方向锁）、ADR-0017（scrcpy 4.0 flex display 迁移）
 
 ---
 
@@ -100,7 +100,10 @@ export interface StartOptions {
 
 ## 追加（2026-07-14 真机实测暴露的二次根因）
 
-ADR-0015 落地后，真机实测显示专用音频连接自身启动崩溃：`Error: Unknown audio codec metadata value: 842215476`（`0x32333034`），位于 `parseAudioStreamMetadata`。根因：设备端运行的是项目自带**定制版 `scrcpy-server.jar`**（车机 OEM 修改），其音频编解码器标签 `0x32333034` 不属于标准 scrcpy 4 种（`OPUS/AAC/FLAC/RAW`，已在 scrcpy 4.0 `AudioCodec.java` 核实），而 `AdbScrcpyOptions4_0` 只重写了视频元数据解析、未重写音频，沿用了 @yume-chan 2.0 解析器遇私有标签即抛错。
+ADR-0015 落地后，真机实测显示专用音频连接自身启动崩溃：`Error: Unknown audio codec metadata value: 842215476`（`0x32333034`），位于 `parseAudioStreamMetadata`。原判断：设备端运行的是项目自带**定制版 `scrcpy-server.jar`**（车机 OEM 修改），其音频编解码器标签 `0x32333034` 不属于标准 scrcpy 4 种（`OPUS/AAC/FLAC/RAW`，已在 scrcpy 4.0 `AudioCodec.java` 核实），而 `AdbScrcpyOptions4_0` 只重写了视频元数据解析、未重写音频，沿用了 @yume-chan 2.0 解析器遇私有标签即抛错。
+
+> ⚠️ **上段根因表述已被推翻**（2026-10-22 更正，见 ADR-0016 附录）：jar 经 SHA256 核对是**官方 scrcpy v4.0 原版**，不存在 OEM 定制；
+> `0x32333034` 实为 `sendDeviceMeta` 写入的 **64 字节设备名**的前 4 字节（`video:false` 时写进音频 socket，解析器未跳过），已由 `sendDeviceMeta: !audioOnly` 修复。
 
 修复（详见 **ADR-0016**）：重写 `AdbScrcpyOptions4_0.parseAudioStreamMetadata` 对未知标签容错回退到协商的 `audioCodec`（单一旋钮 `AUDIO_CODEC_FALLBACK`，默认 `opus`），并加测试锁定。这与本 ADR 的「并发 `audio:true` 争抢 `disabled`」是**两个独立问题**——虚拟屏 pane 无音频（server 返回 `disabled`）由本 ADR 的 `audio:false` 解决；专用连接崩溃由 ADR-0016 解决。两者叠加解释了「该设备浏览器端音频从未工作」。
 

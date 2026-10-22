@@ -1,7 +1,12 @@
-# ADR-0016: 专用音频连接启动崩溃的修复（车机定制 scrcpy server 私有音频编解码器标签）
+# ADR-0016: 专用音频连接启动崩溃的修复（音频流元数据容错解析）
 
 - 状态：已落地，待真机复核（2026-07-14）
-- 相关：ADR-0015（专用音频采集连接架构）、ADR-0004（scrcpy 4.0 flex display 迁移）
+- 相关：ADR-0015（专用音频采集连接架构）、ADR-0017（scrcpy 4.0 flex display 迁移）
+
+> ⚠️ **正文根因表述已被推翻**，以文末「附录：事实更正（2026-10-22）」为准：
+> `public/scrcpy-server.jar` 是**官方 scrcpy v4.0 原版**（sha256 逐字节核对），不存在「车机 OEM 定制 server」；
+> `0x32333034` 不是私有 codec 标签，而是 **`sendDeviceMeta` 写入音频 socket 的 64 字节设备名的前 4 字节**。
+> 正文保留原判断过程以存档。
 
 ---
 
@@ -104,3 +109,51 @@ scrcpy-session.ts:654 [ScrcpySession:...] 启动失败: Error: Unknown audio cod
   - `session-manager-launch-gate.test.ts` 5；
   - `audio-capture-self-heal.test.ts` 2（opus→aac 自愈 + 不无限重试）。
 - 真机预期：专用音频连接成功启动（Console 见「未知音频编解码器标签 0x32333034，回退到协商 audioCodec=opus」警告），用户手势后浏览器播放设备整机声音；**若设备实际编码为 aac，会自动重试并出声，无需手动改常量**。若两次尝试后仍无声，检查 Console 的回退标签值，必要时把 `AUDIO_CODEC_FALLBACK` 设为对应编码。
+
+---
+
+## 附录：事实更正（2026-10-22）
+
+### 更正一：本仓库的 `public/scrcpy-server.jar` 并非「车机 OEM 定制版」，而是 Genymobile/scrcpy 官方 v4.0 产物
+
+以 SHA-256 核验（`sha256sum public/scrcpy-server.jar`）：
+
+```
+84924bd564a1eb6089c872c7521f968058977f91f5ff02514a8c74aff3210f3a  public/scrcpy-server.jar
+```
+
+该值与 Genymobile/scrcpy **v4.0** 官方发布包 `server/scrcpy-server.jar` 的 `SHA256SUMS.txt` 一致（官方校验和已逐字节比对确认）。
+
+**影响**：本 ADR 正文（以及 ADR-0015、GLOSSARY.md）原先把 `0x32333034` 的来源归因为「车机 OEM 修改的 scrcpy server 上报私有标签」——**该归因不成立**。既然设备端运行的就是官方 v4.0 server，而官方 `AudioCodec.java` 只定义 `OPUS/AAC/FLAC/RAW` 四种标签且写回的必然是它真正编码的 codec，官方 server **不可能**上报 `0x32333034`。
+
+### 更正二：`0x32333034` 不是 codec 标签，而是**设备名**的前 4 字节（真因已定位并已修复）
+
+真实链路（2026-07-14 下午定位）：
+
+```
+hex:   32 33 30 34 46 50 4e 36 44 43 00 00 00 00 00 00 ...
+ascii: "2304FPN6DC......................"
+```
+
+- scrcpy server 在**第一个 socket** 上写入 **64 字节设备名**（官方 `sendDeviceMeta` 选项，默认 `true`）。
+- `video:true` 时设备名写入**视频** socket——`parseVideoStreamMetadata` 正确跳过这 64 字节。
+- `video:false`（即 `audioOnly` 专用音频连接）时，设备名改写入**音频** socket——而 `parseAudioStreamMetadata` **没有跳过这 64 字节**，直接把设备名的前 4 字节当成了 codec 标签。
+
+故 `0x32333034` = 设备名 `"2304FPN6DC…"` 的前缀，与 codec 无关；官方 server 不可能上报它。
+
+**已落地的修复**（代码现仍在位）：
+- `ScrcpySession.start` 构建 options 时显式设置 `sendDeviceMeta: !audioOnly`（`src/lib/scrcpy-session.ts`），`audioOnly` 连接关闭设备名写入，从源头杜绝污染；
+- `SessionManager._ensureAudioCapture` 传 `audioOnly:true`；
+- 期间尝试过的 `drainVideo` workaround（`video:true` + 排空视频流）已**撤销**（浪费 CPU 编码视频）。
+
+### 更正三：决策本身仍然成立，保留
+
+- **D1（未知标签容错回退）**：保留，但定性为**防御性兜底**——防止真机环境下出现非预期音频标签时整条音频连接崩溃；官方 server 的四种标准标签已能正常解析。
+- **D2（`AUDIO_CODEC_FALLBACK` 单一旋钮）**：保留。
+- **D4（opus→aac 自动自愈）**：保留，且与官方 `doc/audio.md` 的回退指引一致。
+
+### 遗留待办
+
+1. 真机复核：确认 `sendDeviceMeta:false` 生效后，专用音频连接能读到**标准** codec 标签（`0x6f707573` / `0x00616163`），且整机声音可闻。
+2. 若仍读不到标准标签，采集音频 socket 首包（hex + ASCII 双视图）定位偏移。
+3. 观察 `AUDIO_CODEC_FALLBACK` 容错告警在真机上是否还会出现——若长期不再出现，可评估是否收敛该兜底逻辑（但建议保留）。

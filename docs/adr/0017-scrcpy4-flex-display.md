@@ -1,7 +1,8 @@
-# ADR-0004: 迁移至 scrcpy 4.0 flex display
+# ADR-0017: 迁移至 scrcpy 4.0 flex display
 
 - 日期：2026-07-01
 - 状态：已采纳
+- 重编号说明：本文件原为 `0004-scrcpy4-flex-display.md`，与 `0004-app-info-parsing-strategy.md`（2026-06-13）编号冲突；2026-10-22 重编号为 **ADR-0017**，编号连续性让位给更早采纳的 ADR-0004。
 
 ## 背景
 
@@ -42,7 +43,7 @@ src/lib/scrcpy4/
   index.ts                    # 公共导出
   __tests__/                  # 28 个单测
 public/scrcpy-server.jar      # v4.0（715KB）
-docs/adr/0004-scrcpy4-flex-display.md   # 本文件
+docs/adr/0017-scrcpy4-flex-display.md   # 本文件
 ```
 
 ### 修改文件
@@ -76,4 +77,4 @@ docs/adr/0004-scrcpy4-flex-display.md   # 本文件
 
 - 设计文档：`docs/superpowers/specs/2026-07-01-scrcpy4-flex-display-design.md`
 - 实现计划：`docs/superpowers/plans/2026-07-01-scrcpy4-flex-display.md`
-- 替代：ARR-0003（虚拟屏自动 resize 的销毁重建方案）
+- 替代：ADR-0003（虚拟屏自动 resize 的销毁重建方案）
