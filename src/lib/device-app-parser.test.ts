@@ -78,7 +78,7 @@ describe('DeviceAppParser', () => {
     const { adb, mockWrite } = makeMockAdb();
     const result = await parser.pushDexToDevice(adb, '/data/local/tmp/test.dex');
     expect(result).toBe(true);
-    expect(mockWrite).toHaveBeenCalled();
+    expect(mockWrite).toHaveBeenCalledWith(expect.objectContaining({ path: '/data/local/tmp/test.dex', readable: expect.any(Object) }));
   });
 
   it('should reject invalid target paths', async () => {
@@ -189,7 +189,7 @@ describe('DeviceAppParser', () => {
       const { adb, mockWrite } = makeMockAdb();
       const result = await parser.pushQuickDexToDevice(adb, '/data/local/tmp/test-quick.dex');
       expect(result).toBe(true);
-      expect(mockWrite).toHaveBeenCalled();
+      expect(mockWrite).toHaveBeenCalledWith(expect.objectContaining({ path: '/data/local/tmp/test-quick.dex', readable: expect.any(Object) }));
     });
 
     it('should reject invalid quick dex target paths', async () => {

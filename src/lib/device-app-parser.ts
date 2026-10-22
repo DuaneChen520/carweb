@@ -101,8 +101,8 @@ export class DeviceAppParser {
     // v3：adb.sync 从方法变为属性（AdbSync.Service 实例），不再 await
     const sync = adb.sync;
     await sync.write({
-      filename: targetPath,
-      file: new ReadableStream({
+      path: targetPath,
+      readable: new ReadableStream({
         start(controller) {
           controller.enqueue(new Uint8Array(arrayBuffer));
           controller.close();
@@ -122,8 +122,8 @@ export class DeviceAppParser {
     console.log(`[DeviceAppParser] 推送 Quick DEX 到设备: ${targetPath}`);
     const sync = adb.sync;
     await sync.write({
-      filename: targetPath,
-      file: new ReadableStream({
+      path: targetPath,
+      readable: new ReadableStream({
         start(controller) {
           controller.enqueue(new Uint8Array(arrayBuffer));
           controller.close();
@@ -197,8 +197,8 @@ echo "APP_PROCESS EXIT CODE: $?" >&2
     console.log(`[DeviceAppParser] 推送脚本到设备: ${scriptPath}`);
     const sync = adb.sync;
     await sync.write({
-      filename: scriptPath,
-      file: new ReadableStream({
+      path: scriptPath,
+      readable: new ReadableStream({
         start(controller) {
           controller.enqueue(scriptBytes);
           controller.close();
