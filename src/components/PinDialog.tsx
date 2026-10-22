@@ -16,16 +16,16 @@ const PIN_LENGTH = 6;
 
 function DigitHoles({ digits, error }: { digits: string[]; error: boolean }) {
   return (
-    <div className={`flex gap-3 justify-center my-6 ${error ? 'animate-shake' : ''}`}>
+    <div className={`flex gap-2.5 justify-center my-6 ${error ? 'animate-shake' : ''}`}>
       {Array.from({ length: PIN_LENGTH }, (_, i) => (
         <div
           key={i}
-          className={`w-10 h-12 rounded-lg border-2 flex items-center justify-center text-lg font-mono transition-colors ${
+          className={`w-10 h-12 rounded-xl border-2 flex items-center justify-center text-lg font-mono transition-colors ${
             digits[i]
               ? 'border-accent-500 bg-accent-500/20 text-accent-400'
               : error
                 ? 'border-red-500 bg-red-500/20'
-                : 'border-slate-600 bg-slate-800/50 text-transparent'
+                : 'border-surface-card bg-surface-base/60 text-transparent'
           }`}
         >
           {digits[i] ? '●' : ''}
@@ -43,31 +43,31 @@ function NumberPad({ onDigit, onBackspace }: { onDigit: (n: string) => void; onB
   ];
 
   return (
-    <div className="flex flex-col items-center gap-3 mt-4">
+    <div className="flex flex-col items-center gap-2.5 mt-4">
       {keys.map((row) => (
-        <div key={row[0]} className="flex gap-3">
+        <div key={row[0]} className="flex gap-2.5">
           {row.map((n) => (
             <button
               key={n}
               onClick={() => onDigit(n)}
-              className="w-16 h-12 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-lg font-medium transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400"
+              className="w-18 sm:w-20 h-12 rounded-xl bg-surface-card hover:bg-surface-elevated active:bg-surface-base text-content-primary border border-surface-card text-lg font-medium transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400"
             >
               {n}
             </button>
           ))}
         </div>
       ))}
-      <div className="flex gap-3">
-        <div className="w-16 h-12" />
+      <div className="flex gap-2.5">
+        <div className="w-18 sm:w-20 h-12" />
         <button
           onClick={() => onDigit('0')}
-          className="w-16 h-12 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-lg font-medium transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400"
+          className="w-18 sm:w-20 h-12 rounded-xl bg-surface-card hover:bg-surface-elevated active:bg-surface-base text-content-primary border border-surface-card text-lg font-medium transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400"
         >
           0
         </button>
         <button
           onClick={onBackspace}
-          className="w-16 h-12 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-lg transition-all active:scale-95 flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400"
+          className="w-18 sm:w-20 h-12 rounded-xl bg-surface-card hover:bg-surface-elevated active:bg-surface-base text-content-primary border border-surface-card text-sm font-medium transition-all active:scale-95 flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400"
         >
           删除
         </button>
@@ -194,16 +194,16 @@ export function PinDialog({ mode, deviceId, deviceName, hasExistingPin, onSucces
   const subtitle = mode === 'verify' ? deviceName : deviceName;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-slate-900/90 border border-slate-700 rounded-2xl p-8 w-80 shadow-2xl">
-        <div className="flex items-center justify-center mb-2">
-          <Lock className="w-5 h-5 text-accent-400" />
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-surface-base/80 backdrop-blur-xl animate-fade-in p-4">
+      <div className="bg-surface-elevated/95 border border-surface-card rounded-2xl p-7 w-88 max-w-[92vw] shadow-float animate-scale-in">
+        <div className="w-12 h-12 rounded-full bg-accent-500/15 flex items-center justify-center mx-auto mb-3">
+          <Lock className="w-6 h-6 text-accent-400" />
         </div>
-        <h2 className="text-white text-lg font-semibold text-center">{title}</h2>
-        <p className="text-slate-400 text-sm text-center mt-1">{subtitle}</p>
+        <h2 className="text-content-primary text-lg font-semibold text-center">{title}</h2>
+        <p className="text-content-secondary text-sm text-center mt-1">{subtitle}</p>
 
         {mode === 'setup' && step === 'confirm' && (
-          <p className="text-slate-500 text-xs text-center mt-2">请再次输入 PIN 以确认</p>
+          <p className="text-content-muted text-xs text-center mt-2">请再次输入 PIN 以确认</p>
         )}
 
         <DigitHoles digits={digits} error={shake} />
@@ -218,7 +218,7 @@ export function PinDialog({ mode, deviceId, deviceName, hasExistingPin, onSucces
               removePin(deviceId);
               onForgot();
             }}
-            className="w-full mt-4 text-sm text-slate-500 hover:text-slate-300 transition-colors"
+            className="w-full mt-4 min-h-[48px] flex items-center justify-center text-sm font-medium text-content-secondary hover:text-content-primary transition-colors rounded-xl hover:bg-surface-card"
           >
             忘记 PIN？
           </button>
@@ -236,7 +236,7 @@ export function PinDialog({ mode, deviceId, deviceName, hasExistingPin, onSucces
                 onCancel?.();
               }
             }}
-            className="w-full mt-3 text-sm text-slate-500 hover:text-slate-300 transition-colors"
+            className="w-full mt-2 min-h-[48px] flex items-center justify-center text-sm font-medium text-content-secondary hover:text-content-primary transition-colors rounded-xl hover:bg-surface-card"
           >
             {mode === 'setup' && step === 'confirm' ? '返回' : '取消'}
           </button>

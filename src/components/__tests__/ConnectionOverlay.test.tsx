@@ -68,8 +68,47 @@ describe('ConnectionOverlay', () => {
     expect(screen.getByText('虚拟显示屏')).toBeDefined();
     expect(screen.getByText('屏幕镜像')).toBeDefined();
 
+    const mirrorBtn = screen.getByText('屏幕镜像').closest('button');
+    expect(mirrorBtn?.className).toContain('min-h-[48px]');
+
     fireEvent.click(screen.getByText('屏幕镜像'));
     expect(onSelectMode).toHaveBeenCalledWith('mirror');
+  });
+
+  it('符合座舱语义 Token 与触控靶区规范', () => {
+    render(
+      <ConnectionOverlay
+        overlayState="manual"
+        displayMode="virtual"
+        rememberedDevices={[
+          {
+            id: 'dev1',
+            serial: 'dev1',
+            name: '我的手机',
+            type: 'wifi',
+            address: '192.168.1.100:5555',
+            mode: 'virtual',
+            lastConnected: Date.now(),
+          },
+        ]}
+        onSelectMode={vi.fn()}
+        onConnect={vi.fn()}
+        onForget={vi.fn()}
+      />,
+    );
+
+    // 验证已记住设备项与忘记按钮触控靶区
+    const forgetBtn = screen.getByLabelText('忘记此设备');
+    expect(forgetBtn.className).toContain('min-h-[48px]');
+    expect(forgetBtn.className).toContain('min-w-[48px]');
+
+    // 验证有线与无线 Tab 靶区
+    const usbTab = screen.getByRole('button', { name: /有线连接/i });
+    expect(usbTab.className).toContain('min-h-[48px]');
+
+    // 验证主 CTA 按钮
+    const ctaBtn = screen.getByRole('button', { name: /连接并启动副屏/i });
+    expect(ctaBtn.className).toContain('min-h-[48px]');
   });
 
   it('切换到无线连接 Tab 并支持免线 6 位配对码配对建连', async () => {
@@ -94,6 +133,9 @@ describe('ConnectionOverlay', () => {
     // 填入配对地址与 6 位配对码
     const addressInput = screen.getByPlaceholderText('例如: 192.168.1.100:37123');
     const codeInput = screen.getByPlaceholderText('例如: 123456');
+
+    expect(addressInput.className).toContain('min-h-[48px]');
+    expect(codeInput.className).toContain('min-h-[48px]');
 
     fireEvent.change(addressInput, { target: { value: '192.168.1.50:38999' } });
     fireEvent.change(codeInput, { target: { value: '654321' } });

@@ -154,7 +154,7 @@ export function AppPicker({ config, onClose }: AppPickerProps) {
   return (
     <div
       ref={panelRef}
-      className="fixed z-40 bg-slate-800/95 backdrop-blur-xl rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-scale-in"
+      className="fixed z-40 bg-surface-elevated/95 backdrop-blur-xl rounded-2xl border border-surface-card shadow-float flex flex-col overflow-hidden animate-scale-in"
       style={{
         top: rect.top,
         left: rect.left,
@@ -163,46 +163,58 @@ export function AppPicker({ config, onClose }: AppPickerProps) {
       }}
     >
       {/* 头部 */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700 shrink-0">
-        <h2 className="text-sm font-medium text-slate-100">
-          {title}
-          {count > 0 && <span className="ml-1.5 text-slate-400">({count})</span>}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-surface-card shrink-0 gap-2">
+        <h2 className="text-sm font-medium text-content-primary flex items-center min-w-0">
+          <span className="truncate">{title}</span>
+          {count > 0 && <span className="ml-1.5 text-content-muted text-xs shrink-0">({count})</span>}
         </h2>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
           {/* 搜索框 */}
-          <div className="relative mr-1">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-content-secondary pointer-events-none" />
             <input
               type="text"
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               placeholder="搜索应用..."
-              className="w-40 pl-8 pr-2 py-1 text-xs bg-slate-700 rounded-lg border border-slate-600 text-slate-100 placeholder-slate-400 outline-none focus:border-accent-400 focus:ring-2 focus:ring-accent-400/30 transition-colors"
+              className="w-36 sm:w-44 pl-9 pr-3 py-2 text-xs bg-surface-base rounded-xl border border-surface-card text-content-primary placeholder:text-content-muted outline-none focus:border-accent-400 focus:ring-1 focus:ring-accent-400 min-h-[44px] transition-colors"
             />
           </div>
           {/* 置顶模式 */}
           <button
             onClick={() => setPinMode((v) => !v)}
-            className={`p-1 rounded-lg transition-colors ${pinMode ? 'text-accent-400 bg-accent-500/20' : 'text-slate-400 hover:text-slate-200 hover:bg-white/10'}`}
+            className={`w-12 h-12 flex items-center justify-center rounded-xl transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 ${
+              pinMode
+                ? 'text-accent-400 bg-accent-500/20 border border-accent-400/40'
+                : 'text-content-secondary hover:text-content-primary hover:bg-surface-card border border-transparent'
+            }`}
             title={pinMode ? '退出置顶模式' : '置顶模式'}
+            aria-label={pinMode ? '退出置顶模式' : '置顶模式'}
           >
-            <Pin className="w-4 h-4" />
+            <Pin className="w-5 h-5" />
           </button>
           {/* 刷新 */}
           <button
             onClick={handleRefresh}
             disabled={loading}
-            className={`p-1 rounded-lg transition-colors ${loading ? 'text-slate-500' : 'text-slate-400 hover:text-slate-200 hover:bg-white/10'}`}
+            className={`w-12 h-12 flex items-center justify-center rounded-xl transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 border border-transparent hover:border-surface-card ${
+              loading
+                ? 'text-content-muted opacity-50 cursor-not-allowed'
+                : 'text-content-secondary hover:text-content-primary hover:bg-surface-card'
+            }`}
             title="更新应用列表"
+            aria-label="更新应用列表"
           >
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+            <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
           </button>
           {/* 关闭 */}
           <button
             onClick={onClose}
-            className="p-1 rounded-lg hover:bg-white/10 transition-colors text-slate-400"
+            className="w-12 h-12 flex items-center justify-center rounded-xl transition-all active:scale-95 text-content-secondary hover:text-content-primary hover:bg-surface-card border border-transparent hover:border-surface-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400"
+            title="关闭面板"
+            aria-label="关闭面板"
           >
-            <X size={16} />
+            <X className="w-5 h-5" />
           </button>
         </div>
       </div>
