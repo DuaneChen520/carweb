@@ -133,7 +133,8 @@ carweb/
 │   └── agents/                 # Agent 使用约定
 ├── .scratch/                   # 本地 issue tracker（spec + 一票一文件）
 ├── GLOSSARY.md                 # 领域术语表（事实源）
-├── DESIGN.md                   # 设计系统（UI 唯一事实源）
+├── CODING_STANDARDS.md         # 编码与人机工效工程标准（审查依据）
+├── DESIGN.md                   # 设计系统（UI 视觉事实源）
 └── package.json
 ```
 

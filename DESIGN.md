@@ -63,20 +63,23 @@
 - ❌ 过饱和强调（饱和度 > 80%）。
 - ❌ 暖灰与冷灰并存；❌ 渐变文字标题。
 
-### 2.5 实现现状（与本规范的差异）
+### 2.5 实现现状与 Design Tokens 落地（ADR-0018 / ADR-0019）
 
-> 本节是**事实声明**：2.1–2.4 的 Hex 是**设计目标**，当前代码**并未逐值落地**。改代码或改规范前先读本节。
+> 本节是**事实声明**：依据 ADR-0018（座舱视觉设计系统）与 ADR-0019（触控工效整行化与材质分层），全系统已全量落地语义 Design Tokens，消灭硬编码裸色与散落的 Slate 阶。
 
-| 角色 | 本规范目标 | 代码实际取值 | 出处 |
+| 语义角色 | Design Token 类名 | 实际映射值 / 效果 | 落地组件范围 |
 |---|---|---|---|
-| 强调色 Accent | `#5B8DBF` | `#2f6ae6`（accent-500）、`#1f52c4`（accent-600 / `--accent-strong`） | `src/index.css` 的 `:root`、`tailwind.config.js` 的 `colors.accent`（50–900 全套） |
-| 画布底 | `#0B0D10` | `bg-slate-950` / `bg-slate-900` 等 Tailwind slate 阶 | 组件类名，如 `ControlSidebar.tsx` |
-| 面板底 | `#14171C` | `bg-slate-800` / `bg-slate-800/95` | 浮窗、面板类名 |
-| 结构描边 | `rgba(255,255,255,0.08)` | `border-white/5`、`border-slate-700` | 组件类名 |
+| 画布底层 | `bg-surface-base` | `#0b0d10` (暗色座舱基底) | `App.tsx`、`ControlSidebar`、`DesktopShell`、`SplitPane`、`VirtualScreen` |
+| 卡片与控件底 | `bg-surface-card` | `#14171c` (卡片表面) | 进程项、已配对设备项、数字键盘按键、弹窗列表项 |
+| 浮层与模态底 | `bg-surface-elevated` | `#1c2026` + `backdrop-blur-xl` + `shadow-float` | `AppPicker`、`PaneSelector`、`ActivityManagerPanel`、`CacheSettingsDialog`、`ConnectionOverlay` |
+| 主文本 | `text-content-primary` | `#e7eaee` (非纯白高对比) | 全局标题、关键文本、输入框主内容 |
+| 次文本 | `text-content-secondary` | `#8a9099` (冷调中灰) | 副标题、引导文案、未激活标签 |
+| 弱化文本 | `text-content-muted` | `#5a6068` (低对比元数据) | 占位符、辅助时间戳、关闭图标 |
+| 品牌强调色 | `accent-*` | `#2f6ae6` (深邃 Azure) | 主 CTA 按钮、激活指示环、焦点环 |
 
-- **唯一强调色的原则仍成立**：代码里 accent 是一套连续色阶（同一蓝色的 50–900），不是多个色相；语义状态色另走 slate / 绿 / 琥珀 / 红。
-- 代码强调色饱和度显著高于本规范的 44% 目标（约 66%）。二者冲突时**以代码为准**；若要收敛到本规范，需同时改 `src/index.css` 与 `tailwind.config.js`，属独立任务。
-- 本规范 2.1–2.3 节的命名（Cockpit Black / Signal Blue / Link OK 等）在代码中**没有对应 token**，属文档层概念名。
+- **材质分层隔离**：硬件控制台（侧栏、PIN 拨号盘）保留 `NeumorphicButton` 拟态微触感；分屏流媒体、顶栏与悬浮浮窗统一采用 **座舱冷调微毛玻璃（Translucent Cockpit Glass）**，以防厚重阴影干扰视频内容。
+- **整行触控 (List Row Touch Target)**：设置与弹窗交互元素全量提升至整行 $\ge 48\text{px}$ 物理触控区；小图标通过 `w-12 h-12` 透明外壳扩展靶区，相邻元素强制保持 $\ge 8\text{px}$ 间距。
+
 
 ---
 
@@ -172,7 +175,7 @@
 - **无重叠**：每个元素独占清晰空间区，禁止绝对定位的内容堆叠、禁止文字压图。
 - **非对称留白**：方差 > 4，禁止居中 Hero；用左对齐 / 分屏 / 偏移留白。
 - **禁止三等分卡片行**：不用「3 个等宽卡片横排」的功能展示行；改用 2 栏 Zig-Zag、非对称网格或横向滚动。
-- **响应式坍缩（< 768px）**：多列布局一律坍缩为单列；禁止移动端横向滚动；触摸目标最小 `44px`。
+- **响应式坍缩（< 768px）**：多列布局一律坍缩为单列；禁止移动端横向滚动；车机可交互元素物理触控靶区绝对下限强制为 **$\ge 48\times 48\text{px}$**，相邻间距强制 **$\ge 8\text{px}$**（AAOS / ISO 15008）。
 
 ---
 

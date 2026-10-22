@@ -283,7 +283,7 @@ _Avoid_: 掉线、断线（二者混用会掩盖 intentional disconnect 与 real
   的正常 resolve 与异常 reject 两个分支——有意关闭时仅清理引用并置 `idle`（**不写 `disconnected`、不写 error**），
   真实掉线时置 `disconnected`（异常分支额外写 error）。有意标记由 `src/lib/adb-intent.ts` 的
   `consumeIntentionalClose` 消费，单次有效。行为由 `src/lib/__tests__/adb-disconnect.test.ts` 覆盖。
-- **`reconnecting` overlay**：`ConnectionOverlay.tsx` 中「USB 连接已断开」文案分支的提示，
+- **`reconnecting` overlay**：`ConnectionOverlay.tsx` 中「连接已断开」文案分支的提示，
   唯一由上述 `App.tsx` 的 `disconnected + overlay=hidden` effect 触发；mirror 路径另由 `LinkSupervisor`
   的 `disconnected/failed` 经 `subscribeLinkState` 订阅 effect 承接（`App.tsx`）。
 
