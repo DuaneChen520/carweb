@@ -29,6 +29,24 @@ export default {
           800: "#193b83",
           900: "#19336c",
         },
+        // 语义化设计变量 (Design Tokens) - 遵循 DTCG 与座舱人机工效规范
+        surface: {
+          base: "#0f172a",      // 主背景：深邃 Slate-900，杜绝夜间纯黑眩光
+          card: "#1e293b",      // 卡片/容器层：Slate-800，承载主要内容
+          elevated: "#334155",  // 浮层/模态框：Slate-700，高层级对比
+          hover: "#283548",     // 悬浮/激活交互表面
+        },
+        content: {
+          primary: "#f8fafc",   // 主文本/重要图标：Slate-50，高对比度但非刺眼纯白
+          secondary: "#94a3b8", // 次要说明/辅助标签：Slate-400，清晰克制
+          muted: "#64748b",     // 占位符/微弱边框：Slate-500
+        },
+        feedback: {
+          success: "#10b981",   // 稳定绿色
+          warning: "#f59e0b",   // 琥珀警告
+          danger: "#ef4444",    // 警示/断开
+          info: "#0ea5e9",      // 辅助提示
+        },
       },
       borderRadius: {
         // 分层圆角尺度：内层紧、容器松。
