@@ -203,7 +203,7 @@ function App() {
   return (
     <ScrcpyProvider>
       <AppPickerProvider>
-        <div className="w-full h-dvh bg-slate-900">
+        <div className="w-full h-dvh bg-surface-base text-content-primary antialiased select-none">
         {displayMode === 'mirror' ? (
           // mirror 模式仍使用 VirtualScreen（向后兼容）
           <VirtualScreen

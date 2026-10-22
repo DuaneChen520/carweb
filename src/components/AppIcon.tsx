@@ -20,6 +20,10 @@ export function AppIcon({ pkg, name, getAppIcon, onLaunch, compact, pinMode, isP
   useEffect(() => {
     const el = btnRef.current;
     if (!el) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      setIsVisible(true);
+      return;
+    }
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
@@ -50,29 +54,37 @@ export function AppIcon({ pkg, name, getAppIcon, onLaunch, compact, pinMode, isP
   return (
     <button
       ref={btnRef}
+      type="button"
+      aria-label={name}
       onClick={() => onLaunch(pkg)}
-      className="flex flex-col items-center gap-1 p-1.5 rounded-lg hover:bg-white/10 transition-colors group relative"
+      className={
+        compact
+          ? 'w-12 h-12 flex items-center justify-center rounded-xl p-1.5 hover:bg-surface-hover/80 active:scale-95 transition-all group relative cursor-pointer'
+          : 'flex flex-col items-center gap-1.5 p-2 rounded-xl hover:bg-surface-hover/80 active:scale-95 transition-all group relative cursor-pointer min-w-[56px]'
+      }
       title={name}
     >
       {iconUrl ? (
-        <img src={iconUrl} alt={name} className="w-9 h-9 rounded-lg object-cover" />
+        <img src={iconUrl} alt={name} className="w-9 h-9 rounded-xl object-cover shadow-sm" />
       ) : (
         <div
-          className="w-9 h-9 rounded-lg flex items-center justify-center text-white font-medium text-sm"
+          className="w-9 h-9 rounded-xl flex items-center justify-center text-content-primary font-medium text-sm shadow-sm"
           style={{ backgroundColor: `hsl(${hue}, 45%, 35%)` }}
         >
           {firstLetter}
         </div>
       )}
       {pinMode && (
-        <div className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${
-          isPinned ? 'bg-accent-500' : 'bg-white/20'
-        }`}>
-          <Pin className={`w-2.5 h-2.5 ${isPinned ? 'text-white fill-white' : 'text-white/60'}`} />
+        <div
+          className={`absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center shadow-sm ${
+            isPinned ? 'bg-accent-500 text-content-primary' : 'bg-surface-elevated text-content-secondary'
+          }`}
+        >
+          <Pin className={`w-3 h-3 ${isPinned ? 'fill-current' : ''}`} />
         </div>
       )}
       {!compact && (
-        <span className="text-[10px] text-white/40 truncate w-full text-center group-hover:text-white/70 transition-colors">
+        <span className="text-xs text-content-muted truncate max-w-[72px] text-center group-hover:text-content-secondary transition-colors font-medium">
           {displayName}
         </span>
       )}

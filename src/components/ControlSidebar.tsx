@@ -174,7 +174,7 @@ export function ControlSidebar({
 
   return (
     <>
-      <div className="w-16 h-full flex flex-col items-center py-2 gap-1 bg-slate-950 border-r border-white/5">
+      <div className="w-16 h-full flex flex-col items-center py-2 gap-2 bg-surface-base border-r border-surface-card select-none">
         <span data-sidebar-trigger="true">
         <NeumorphicButton
           variant="dark"
@@ -194,9 +194,9 @@ export function ControlSidebar({
         </NeumorphicButton>
         </span>
 
-        <div className="w-8 h-px bg-white/10 my-1" />
+        <div className="w-8 h-px bg-surface-elevated/60 my-1" />
 
-        <div className="flex flex-col items-center gap-1 overflow-y-auto max-h-[calc(100vh-280px)] scrollbar-none">
+        <div className="flex flex-col items-center gap-2 overflow-y-auto max-h-[calc(100vh-280px)] scrollbar-none">
           {pinnedApps.map((pkg) => (
             <AppIcon
               key={`pinned-${pkg}`}
@@ -209,7 +209,7 @@ export function ControlSidebar({
             />
           ))}
           {pinnedApps.length > 0 && sidebarApps.length > pinnedApps.length && (
-            <div className="w-6 h-px bg-black/10 my-0.5" />
+            <div className="w-6 h-px bg-surface-elevated/60 my-1" />
           )}
           {sidebarApps
             .filter(pkg => !pinnedApps.includes(pkg))
@@ -260,7 +260,7 @@ export function ControlSidebar({
             <AppWindow size={ICON_SIZE} />
             {activityCount && activityCount > 0 ? (
               <span
-                className="absolute -top-0.5 -right-0.5 bg-accent-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center"
+                className="absolute -top-1 -right-1 bg-accent-500 text-content-primary text-xs rounded-full min-w-5 h-5 px-1 flex items-center justify-center font-medium shadow-accent-glow"
                 style={{ position: 'absolute' }}
               >
                 {activityCount > 9 ? '9+' : activityCount}
@@ -306,10 +306,11 @@ export function ControlSidebar({
           </NeumorphicButton>
         )}
 
-        <div className="w-8 h-px bg-white/10 my-1" />
+        <div className="w-8 h-px bg-surface-elevated/60 my-1" />
 
         <div className="relative">
           <NeumorphicButton variant="dark"
+            ariaLabel="侧栏设置"
             onClick={async () => {
               if (!showSettings) {
                 const info = await getCacheInfo();
@@ -324,98 +325,129 @@ export function ControlSidebar({
 
           {showSettings && (
             <div
-              className="absolute bottom-full left-full mb-1 ml-1 bg-slate-800/95 backdrop-blur-xl border border-slate-700 rounded-xl overflow-hidden z-50 min-w-[168px] shadow-float animate-scale-in"
+              className="absolute bottom-full left-full mb-1 ml-1 w-64 bg-surface-elevated/95 backdrop-blur-xl border border-surface-card rounded-2xl overflow-hidden z-50 shadow-float animate-scale-in p-1.5 space-y-1"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="px-3 py-2.5 text-xs text-slate-400 space-y-2">
-                <div className="flex items-center justify-between gap-3">
-                  <span>缓存大小</span>
-                  <span className="text-slate-100 font-mono tabular-nums">{formatCacheSize(cacheInfo?.size ?? 0)}</span>
+              <div className="text-content-secondary space-y-1">
+                {/* 缓存大小展示行 */}
+                <div className="flex items-center justify-between min-h-[48px] px-3 py-2 rounded-xl bg-surface-card/40 text-sm">
+                  <span className="font-medium text-content-primary">缓存大小</span>
+                  <span className="text-content-secondary font-mono text-xs tabular-nums bg-surface-base/50 px-2 py-1 rounded-md">
+                    {formatCacheSize(cacheInfo?.size ?? 0)}
+                  </span>
                 </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span>键盘模式</span>
-                  <button
-                    onClick={() => {
-                      if (!setKeyboardMode) return;
-                      const next = keyboardMode === 'phone' ? 'browser' : 'phone';
-                      setKeyboardMode(next);
-                      localStorage.setItem('carweb-keyboard-mode', next);
-                    }}
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] transition-colors ${
-                      keyboardMode === 'browser' ? 'bg-accent-500/20 text-accent-400' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                    }`}
-                  >
+
+                {/* 键盘模式切换行 (整行触控) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!setKeyboardMode) return;
+                    const next = keyboardMode === 'phone' ? 'browser' : 'phone';
+                    setKeyboardMode(next);
+                    localStorage.setItem('carweb-keyboard-mode', next);
+                  }}
+                  className="w-full flex items-center justify-between min-h-[48px] px-3 py-2 rounded-xl text-sm text-left hover:bg-surface-hover/80 active:scale-[0.98] transition-all cursor-pointer"
+                >
+                  <span className="font-medium text-content-primary">键盘模式</span>
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                    keyboardMode === 'browser'
+                      ? 'bg-accent-500/20 text-accent-400 border border-accent-500/30'
+                      : 'bg-surface-base text-content-secondary border border-surface-card'
+                  }`}>
                     {keyboardMode === 'phone'
-                      ? <><Smartphone className="w-3 h-3" /> 手机</>
-                      : <><Keyboard className="w-3 h-3" /> 浏览器</>}
-                  </button>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span>启动 PIN</span>
-                  <button
-                    onClick={() => {
-                      if (!adbStore.deviceSerial) return;
-                      setShowSettings(false);
-                      setShowPinSetup(true);
-                    }}
-                    className={`px-2 py-0.5 rounded-md text-[10px] transition-colors ${
-                      adbStore.deviceSerial && hasPin(adbStore.deviceSerial)
-                        ? 'bg-accent-500/20 text-accent-400'
-                        : adbStore.deviceSerial
-                          ? 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                          : 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                    }`}
-                  >
+                      ? <><Smartphone className="w-3.5 h-3.5" /> 手机</>
+                      : <><Keyboard className="w-3.5 h-3.5" /> 浏览器</>}
+                  </span>
+                </button>
+
+                {/* 启动 PIN (整行触控) */}
+                <button
+                  type="button"
+                  disabled={!adbStore.deviceSerial}
+                  onClick={() => {
+                    if (!adbStore.deviceSerial) return;
+                    setShowSettings(false);
+                    setShowPinSetup(true);
+                  }}
+                  className={`w-full flex items-center justify-between min-h-[48px] px-3 py-2 rounded-xl text-sm text-left transition-all ${
+                    adbStore.deviceSerial
+                      ? 'hover:bg-surface-hover/80 active:scale-[0.98] cursor-pointer'
+                      : 'opacity-50 cursor-not-allowed'
+                  }`}
+                >
+                  <span className="font-medium text-content-primary">启动 PIN</span>
+                  <span className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                    adbStore.deviceSerial && hasPin(adbStore.deviceSerial)
+                      ? 'bg-accent-500/20 text-accent-400 border border-accent-500/30'
+                      : adbStore.deviceSerial
+                        ? 'bg-surface-base text-content-secondary border border-surface-card'
+                        : 'bg-surface-base/50 text-content-muted'
+                  }`}>
                     {!adbStore.deviceSerial
                       ? '需连接设备'
                       : hasPin(adbStore.deviceSerial)
                         ? '已启用 · 更改'
                         : '设置'}
-                  </button>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span>音频输出</span>
-                  <button
-                    onClick={() => setAudioRoute(audioRoute === 'browser' ? 'phone' : 'browser')}
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] transition-colors ${
-                      audioRoute === 'browser' ? 'bg-accent-500/20 text-accent-400' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                    }`}
-                  >
-                    {audioRoute === 'browser'
-                      ? <><Volume2 className="w-3 h-3" /> 浏览器</>
-                      : <><Smartphone className="w-3 h-3" /> 手机</>}
-                  </button>
-                </div>
-                {isRunning && toggleDisplayMode && (
-                  <div className="flex items-center justify-between gap-3">
-                    <span>显示模式</span>
-                    <button
-                      onClick={toggleDisplayMode}
-                      className={`px-2 py-0.5 rounded-md text-[10px] transition-colors ${
-                        useMirrorMode ? 'bg-accent-500/20 text-accent-400' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                      }`}
-                    >
-                      {useMirrorMode ? '镜像' : '虚拟屏'}
-                    </button>
-                  </div>
-                )}
-                {isRunning && currentPreset && changeResolutionPreset && (
-                  <div className="flex items-center justify-between gap-3">
-                    <span>画质</span>
-                    <div className="relative">
-                      <select
-                        value={resolutionPreset}
-                        onChange={(e) => changeResolutionPreset(e.target.value as ResolutionPresetKey)}
-                        className="px-2 py-0.5 rounded-md text-[10px] bg-slate-700 text-slate-300 border-none outline-none cursor-pointer focus-visible:ring-2 focus-visible:ring-accent-400"
-                      >
-                        {RESOLUTION_PRESETS.map(p => (
-                          <option key={p.key} value={p.key}>{p.label}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                )}
+                  </span>
+                </button>
+
+                {/* 音频输出 (整行触控) */}
                 <button
+                  type="button"
+                  onClick={() => setAudioRoute(audioRoute === 'browser' ? 'phone' : 'browser')}
+                  className="w-full flex items-center justify-between min-h-[48px] px-3 py-2 rounded-xl text-sm text-left hover:bg-surface-hover/80 active:scale-[0.98] transition-all cursor-pointer"
+                >
+                  <span className="font-medium text-content-primary">音频输出</span>
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                    audioRoute === 'browser'
+                      ? 'bg-accent-500/20 text-accent-400 border border-accent-500/30'
+                      : 'bg-surface-base text-content-secondary border border-surface-card'
+                  }`}>
+                    {audioRoute === 'browser'
+                      ? <><Volume2 className="w-3.5 h-3.5" /> 浏览器</>
+                      : <><Smartphone className="w-3.5 h-3.5" /> 手机</>}
+                  </span>
+                </button>
+
+                {/* 显示模式 (整行触控) */}
+                {isRunning && toggleDisplayMode && (
+                  <button
+                    type="button"
+                    onClick={toggleDisplayMode}
+                    className="w-full flex items-center justify-between min-h-[48px] px-3 py-2 rounded-xl text-sm text-left hover:bg-surface-hover/80 active:scale-[0.98] transition-all cursor-pointer"
+                  >
+                    <span className="font-medium text-content-primary">显示模式</span>
+                    <span className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                      useMirrorMode
+                        ? 'bg-accent-500/20 text-accent-400 border border-accent-500/30'
+                        : 'bg-surface-base text-content-secondary border border-surface-card'
+                    }`}>
+                      {useMirrorMode ? '镜像' : '虚拟屏'}
+                    </span>
+                  </button>
+                )}
+
+                {/* 画质预设 (整行触控) */}
+                {isRunning && currentPreset && changeResolutionPreset && (
+                  <div className="flex items-center justify-between min-h-[48px] px-3 py-2 rounded-xl text-sm bg-surface-card/40">
+                    <span className="font-medium text-content-primary">画质</span>
+                    <select
+                      value={resolutionPreset}
+                      onChange={(e) => changeResolutionPreset(e.target.value as ResolutionPresetKey)}
+                      className="px-2.5 py-1 rounded-lg text-xs font-medium bg-surface-base text-content-primary border border-surface-card outline-none cursor-pointer focus-visible:ring-2 focus-visible:ring-accent-400"
+                    >
+                      {RESOLUTION_PRESETS.map((p) => (
+                        <option key={p.key} value={p.key} className="bg-surface-elevated text-content-primary">
+                          {p.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* 缓存设置 */}
+                <button
+                  type="button"
                   onClick={async () => {
                     setShowSettings(false);
                     try {
@@ -434,14 +466,13 @@ export function ControlSidebar({
                     }
                     setShowCacheSettings(true);
                   }}
-                  className="flex items-center gap-1.5 pt-1 border-t border-slate-700 mt-1 text-slate-500 hover:text-slate-100 transition-colors w-full"
+                  className="w-full flex items-center gap-2 min-h-[48px] px-3 py-2 rounded-xl text-sm font-medium text-content-muted hover:text-content-primary hover:bg-surface-hover/80 transition-all border-t border-surface-card/60 mt-1 cursor-pointer"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
+                  <Trash2 className="w-4 h-4" />
                   <span>缓存设置</span>
                 </button>
               </div>
-            </div>
-          )}
+            </div>          )}
         </div>
 
         {showPinSetup && adbStore.deviceSerial && (

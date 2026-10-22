@@ -125,6 +125,12 @@ _Avoid_: 多窗口、双屏模式。
 - **pin（置顶）模式**：`AppPicker` 头部开关；开启后点击应用 = `togglePin(pkg)`（切换侧栏 dock 置顶状态），而非启动。`togglePin` 全仓库唯一管理应用置顶的入口。
 - **计数角标**：`AppPicker` 标题后的 `(N)`，N = 已装应用总数（`getAllDeviceApps().length`），随 `appListVersion` 刷新。
 - **appListVersion**：`useAdbStore` 中的计数器；设备应用数据变更时 bump，驱动 `AppGrid` / dock 重读列表（见 ADR-0009 反馈环修复）。
+- **整行触控（List Row Touch Target）**：设置列表与弹窗中的车机交互单元。整行作为单一交互靶区（高度 $\ge 48\text{px}$），取代易引发颠簸误触的微型独立药丸按钮。
+  _Avoid_: 药丸按钮、微型控件。
+- **座舱冷调微毛玻璃（Translucent Cockpit Glass）**：用于分屏顶栏、全部应用抽屉及悬浮弹窗的轻量半透明材质（`surface.elevated` 配合 `backdrop-blur-md`），弱化对底层视频流画面的遮挡。
+  _Avoid_: 全局拟态、厚重实体材质（用于浮窗时）。
+- **物理靶区透明外壳（Transparent Hitbox Extender）**：当图标视觉规格为 20px~24px 时，通过外层包裹至少 $48\times 48\text{px}$ 的透明容器（`w-12 h-12 flex items-center justify-center`）补足物理点击区。
+  _Avoid_: 裸图标小按钮、缩水触控靶区。
 
 ### 启动落点模式（AppPickerMode）
 
