@@ -26,9 +26,9 @@ export function TopBarHandle({ icon: Icon, label, expanded, onClick }: TopBarHan
       aria-expanded={expanded}
       title={label}
       className="pointer-events-auto relative flex items-center justify-center w-12 h-12 rounded-full shrink-0
-                 text-white transition-transform touch-manipulation
+                 text-content-primary transition-all touch-manipulation cursor-pointer
                  drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)] drop-shadow-[0_0_8px_rgba(0,0,0,0.45)]
-                 active:scale-95 active:text-white/85"
+                 active:scale-95 active:text-content-secondary"
     >
       <Icon size={28} aria-hidden />
     </button>

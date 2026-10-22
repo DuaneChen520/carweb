@@ -314,7 +314,7 @@ currentPresetRef.current = currentPreset;
   const separator = displayConfig?.width ? `${displayConfig.width}x${displayConfig.height}` : '';
 
   return (
-    <div ref={outerRef} className="flex w-full h-dvh bg-black">
+    <div ref={outerRef} className="flex w-full h-dvh bg-surface-base text-content-primary overflow-hidden select-none">
       <ControlSidebar
         isVirtualDisplay={isVirtualDisplay}
         isRunning={isRunning}
@@ -338,13 +338,13 @@ currentPresetRef.current = currentPreset;
       >
         <div className="flex-1 flex items-center justify-center overflow-hidden">
           {isStarting && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-20">
+            <div className="absolute inset-0 flex items-center justify-center bg-surface-base/80 backdrop-blur-md z-20">
               <div className="text-center">
-                <RotateCcw className="w-8 h-8 text-white animate-spin mx-auto mb-4" />
-                <div className="text-white text-lg">
+                <RotateCcw className="w-8 h-8 text-accent-400 animate-spin mx-auto mb-4" />
+                <div className="text-content-primary text-lg font-medium">
                   {useMirrorMode ? '正在启动屏幕镜像...' : '正在创建虚拟显示屏...'}
                 </div>
-                <div className="text-white/60 text-sm mt-2">
+                <div className="text-content-muted text-sm mt-2">
                   {!useMirrorMode && containerSize.width > 0 && containerSize.height > 0
                     ? `目标 ${separator} @ ${displayConfig?.dpi ?? 320}dpi（${currentPreset.label}）`
                     : '请稍候'}
@@ -354,14 +354,14 @@ currentPresetRef.current = currentPreset;
           )}
 
           {error && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-20">
+            <div className="absolute inset-0 flex items-center justify-center bg-surface-base/80 backdrop-blur-md z-20">
               <div className="text-center max-w-md px-6">
-                <div className="text-red-400 text-lg mb-2">启动失败</div>
-                <div className="text-white/60 text-sm mb-4">{error}</div>
+                <div className="text-red-400 text-lg font-semibold mb-2">启动失败</div>
+                <div className="text-content-secondary text-sm mb-4">{error}</div>
                 {!useMirrorMode && (
                   <button
                     onClick={toggleDisplayMode}
-                    className="px-4 py-2 bg-accent-500/80 hover:bg-accent-500 rounded-lg text-white text-sm transition-colors"
+                    className="min-h-[48px] px-6 py-2.5 bg-accent-500 hover:bg-accent-600 shadow-accent-glow rounded-xl text-content-primary text-sm font-medium transition-all active:scale-95 cursor-pointer"
                   >
                     尝试切换到镜像模式
                   </button>
@@ -372,10 +372,10 @@ currentPresetRef.current = currentPreset;
 
           {!active && !isStarting && !error && (
             <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center text-slate-400">
+              <div className="text-center text-content-muted">
                 <Monitor className="w-16 h-16 mx-auto mb-4 opacity-30" />
-                <p className="text-lg font-medium">车机虚拟屏</p>
-                <p className="text-sm mt-1">连接设备后启动</p>
+                <p className="text-lg font-medium text-content-secondary">车机虚拟屏</p>
+                <p className="text-sm mt-1 text-content-muted">连接设备后启动</p>
               </div>
             </div>
           )}

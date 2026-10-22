@@ -3,7 +3,7 @@
  *
  * 三组件布局（第五轮反馈 2026-08-04）：
  *   左半区(flex-1, 内容右对齐贴②) | ②上下拉(居中) | 右半区(flex-1, 内容左对齐贴②)
- *   → ② 严格钉在屏幕中心，①应用名 / ③按钮组紧贴②两侧（不贴边缘），间距 gap-3 一致。
+ *   → ② 严格钉在屏幕中心，①应用名 / ③按钮组紧贴②两侧（不贴边缘），间距 gap-2 一致。
  * 折叠态 = 仅②（同一结构，仍居中，无遮挡）。
  * - 「分屏」弹 PaneSelector 子菜单（屏幕正下方居中）；「关闭」= force-stop + 销毁 session + 销毁虚拟屏。
  *
@@ -67,12 +67,12 @@ export function FullscreenDropdown({
         折叠态仅② → 仍居中。
       */}
       {/* justify-center：折叠态仅②时居中；展开态左右半区 flex-1 撑满，②仍居中 */}
-      <div className="flex items-center justify-center gap-3">
-        {/* ① 左半区：应用名，内容右对齐贴②（仅展开态）；与上下拉同款：无底色 + 阴影保可见 */}
+      <div className="flex items-center justify-center gap-2">
+        {/* ① 左半区：应用名，内容右对齐贴②（仅展开态） */}
         {!collapsed && (
           <div className="flex-1 min-w-0 flex justify-end pointer-events-none animate-fade-in">
             <span
-              className="min-w-0 max-w-[min(32vw,240px)] truncate text-white/90 text-sm drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]"
+              className="min-w-0 max-w-[min(32vw,240px)] truncate text-content-primary text-sm font-medium px-2.5 py-1 rounded-full bg-surface-base/60 backdrop-blur-md border border-surface-card/40 shadow-sm"
               title={displayName}
             >
               {displayName}
@@ -113,7 +113,7 @@ export function FullscreenDropdown({
 
       {/* 分屏子菜单：从 ② 正下方居中展开（外层 pointer-events-none，必须显式 auto） */}
       {!collapsed && showSplitMenu && (
-        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-40 bg-white rounded-lg shadow-lg border border-slate-200 pointer-events-auto">
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-40 bg-surface-elevated/95 backdrop-blur-xl rounded-2xl shadow-float border border-surface-card pointer-events-auto animate-scale-in overflow-hidden">
           <PaneSelector
             sourcePane={app.sourcePane}
             leftApp={leftApp}

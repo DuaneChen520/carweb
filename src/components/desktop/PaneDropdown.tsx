@@ -3,7 +3,7 @@
  *
  * 三组件布局（第五轮反馈 2026-08-04，与 FullscreenDropdown 一致）：
  *   左半区(flex-1, 应用名+切换右对齐贴②) | ②上下拉(居中) | 右半区(flex-1, 全屏+关闭左对齐贴②)
- *   → ② 严格钉在屏幕中心，①③ 紧贴②两侧（不贴边缘），间距 gap-3 一致。
+ *   → ② 严格钉在屏幕中心，①③ 紧贴②两侧（不贴边缘），间距 gap-2 一致。
  * 折叠态 = 仅②（同一结构，仍居中，无遮挡）。
  * - 行为统一（C-2）：任何改变布局/会话状态的动作前先收起。
  */
@@ -46,12 +46,12 @@ export function PaneDropdown({
         折叠态仅② → 仍居中。
       */}
       {/* justify-center：折叠态仅②时居中；展开态左右半区 flex-1 撑满，②仍居中 */}
-      <div className="flex items-center justify-center gap-3">
-        {/* ① 左半区：应用名 + 切换，内容右对齐贴②（仅展开态）；与上下拉同款：无底色 + 阴影保可见 */}
+      <div className="flex items-center justify-center gap-2">
+        {/* ① 左半区：应用名 + 切换，内容右对齐贴②（仅展开态） */}
         {!collapsed && (
           <div className="flex-1 min-w-0 flex justify-end items-center gap-2 pointer-events-auto animate-fade-in">
             <span
-              className="min-w-0 max-w-[min(24vw,180px)] truncate text-white/90 text-sm drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]"
+              className="min-w-0 max-w-[min(24vw,180px)] truncate text-content-primary text-sm font-medium px-2.5 py-1 rounded-full bg-surface-base/60 backdrop-blur-md border border-surface-card/40 shadow-sm"
               title={displayName}
             >
               {displayName}

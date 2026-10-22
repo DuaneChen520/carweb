@@ -87,7 +87,7 @@ export function DesktopShell({
   }, [leftApp, rightApp, onSwitchPaneApp, paneToFullscreen, closePane]);
 
   return (
-    <div className="w-full h-dvh flex bg-slate-950 overflow-hidden">
+    <div className="w-full h-dvh flex bg-surface-base overflow-hidden select-none">
       {/* 侧边栏：常驻，固定宽度 w-16（S3-P0-1 触控加宽） */}
       {sidebar && (
         <div className="flex-shrink-0">
@@ -98,7 +98,7 @@ export function DesktopShell({
       {/* DesktopArea：侧边栏右侧剩余区域 */}
       <div className="flex-1 flex relative overflow-hidden" data-desktop-area>
         {/* 分屏桌面布局：左 pane | 间隔 | 右 pane */}
-        <div className="flex-1 flex gap-1 p-1">
+        <div className="flex-1 flex gap-2 p-2">
           <SplitPane
             pane="left"
             app={leftApp}

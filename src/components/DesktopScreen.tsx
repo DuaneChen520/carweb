@@ -264,7 +264,7 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
   const activityCount = apps.length;
 
   return (
-    <div ref={fullscreenRef} className="flex w-full h-dvh bg-slate-900">
+    <div ref={fullscreenRef} className="flex w-full h-dvh bg-surface-base text-content-primary overflow-hidden select-none">
       <DesktopShell
         sidebar={
           <ControlSidebar

@@ -67,14 +67,14 @@ export function AppTransitionPlaceholder({ pkg, show }: AppTransitionPlaceholder
           <img src={iconUrl} alt={displayName} className="w-full h-full object-cover" />
         ) : (
           <div
-            className="w-full h-full flex items-center justify-center text-slate-300 text-3xl font-medium"
+            className="w-full h-full flex items-center justify-center text-content-primary text-3xl font-medium"
             style={{ backgroundColor: `hsl(${hue}, 25%, 18%)` }}
           >
             {displayName.charAt(0).toUpperCase()}
           </div>
         )}
       </div>
-      <div className="text-slate-400 text-sm font-medium mt-3">{displayName}</div>
+      <div className="text-content-secondary text-sm font-medium mt-3">{displayName}</div>
     </div>
   );
 }
