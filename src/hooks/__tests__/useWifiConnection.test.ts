@@ -111,6 +111,24 @@ describe('useWifiConnection', () => {
     expect(store.wifiAddress).toBe('192.168.1.100');
   });
 
+  it('pairAndConnect 支持 mDNS 动态端口自动发现挂载', async () => {
+    // 模拟配对后宿主 mDNS 自动发现了动态端口设备 192.168.1.100:43219
+    vi.mocked(mockService.getDevices).mockResolvedValue([
+      { serial: '192.168.1.100:43219', state: 'device', authenticating: false, transportId: 3n },
+    ]);
+
+    const { result } = renderHook(() => useWifiConnection({ service: mockService }));
+
+    await act(async () => {
+      await result.current.pairAndConnect('192.168.1.100:37123', '123456');
+    });
+
+    expect(mockService.pair).toHaveBeenCalledWith('192.168.1.100:37123', '123456');
+    // 直接创建 Adb，无需再次强制 connect 5555
+    expect(mockService.createAdb).toHaveBeenCalledWith({ serial: '192.168.1.100:43219' });
+    expect(useAdbStore.getState().connectionStatus).toBe('connected');
+  });
+
   it('connectWithPairing 解析合法 QR 码并完成全链路配对建连', async () => {
     const { result } = renderHook(() => useWifiConnection({ service: mockService }));
     const qr = 'WIFI:T:ADB;S:Pixel7;P:654321;H:192.168.1.88;D:41234;;';

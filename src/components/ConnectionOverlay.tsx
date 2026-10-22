@@ -197,7 +197,9 @@ export function ConnectionOverlay({
             <AlertCircle className="w-6 h-6 text-amber-400" />
           </div>
           <p className="text-slate-200 text-lg mb-1">连接已断开</p>
-          <p className="text-slate-400 text-sm mb-6">设备可能已被断开或无线信号中断，请重新连接。</p>
+          <p className="text-slate-400 text-sm mb-6">
+            {store.error || '设备可能已被断开或无线信号中断，请重新连接。'}
+          </p>
           <div className="flex gap-3 justify-center">
             {onReconnect && (
               <button
@@ -448,7 +450,7 @@ export function ConnectionOverlay({
                   <div className="grid grid-cols-2 p-1 bg-slate-900/60 rounded-xl border border-slate-700/60 text-xs font-medium">
                     <button
                       onClick={() => setWirelessSubTab('pair')}
-                      className={`py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 min-h-[36px] ${
+                      className={`py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 min-h-[48px] ${
                         wirelessSubTab === 'pair'
                           ? 'bg-accent-500 text-white shadow-sm'
                           : 'text-slate-400 hover:text-slate-200'
@@ -462,7 +464,7 @@ export function ConnectionOverlay({
                         setWirelessSubTab('direct');
                         wifi.scanDevices();
                       }}
-                      className={`py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 min-h-[36px] ${
+                      className={`py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5 min-h-[48px] ${
                         wirelessSubTab === 'direct'
                           ? 'bg-accent-500 text-white shadow-sm'
                           : 'text-slate-400 hover:text-slate-200'
@@ -520,7 +522,7 @@ export function ConnectionOverlay({
                         <button
                           type="button"
                           onClick={() => setShowQrBox(!showQrBox)}
-                          className="w-full text-xs text-accent-400 hover:text-accent-300 flex items-center justify-center gap-1.5 py-2"
+                          className="w-full text-xs text-accent-400 hover:text-accent-300 flex items-center justify-center gap-1.5 py-3 min-h-[48px]"
                         >
                           <QrCode className="w-3.5 h-3.5" />
                           {showQrBox ? '收起二维码文本解析' : '或通过二维码信息配对'}
@@ -540,7 +542,7 @@ export function ConnectionOverlay({
                               type="button"
                               onClick={handleQrPairing}
                               disabled={!qrCodeText.trim() || isConnecting}
-                              className="w-full py-2.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors min-h-[40px] flex items-center justify-center gap-2"
+                              className="w-full py-3 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors min-h-[48px] flex items-center justify-center gap-2"
                             >
                               解析并自动配对
                             </button>
@@ -558,9 +560,9 @@ export function ConnectionOverlay({
                             <button
                               onClick={wifi.scanDevices}
                               disabled={wifi.isScanning}
-                              className="text-accent-400 text-xs flex items-center gap-1 hover:underline"
+                              className="text-accent-400 text-xs flex items-center gap-1 hover:underline min-h-[48px] px-2"
                             >
-                              <Scan className="w-3 h-3" />
+                              <Scan className="w-3.5 h-3.5" />
                               {wifi.isScanning ? '刷新中...' : '刷新'}
                             </button>
                           </div>

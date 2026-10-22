@@ -17,8 +17,6 @@ vi.mock('@/hooks/useWifiConnection', () => ({
     connectWithPairing: mockConnectWithPairing,
     scanDevices: mockScanDevices,
     disconnect: vi.fn(),
-    setTopology: vi.fn(),
-    topology: 'phone-hotspot',
     isScanning: false,
     discoveredDevices: [{ ip: '192.168.1.55', port: 5555 }],
     isConnecting: false,

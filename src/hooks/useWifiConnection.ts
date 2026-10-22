@@ -6,9 +6,6 @@ import { handleAdbDisconnected } from '@/lib/adb-disconnect';
 import { parseAdbQrCode, isValidIpAddress } from '@/lib/adb-pairing';
 import { AdbServerManager, type IAdbWirelessService } from '@/lib/adb-server-manager';
 
-/** 网络拓扑类型 */
-export type WifiTopology = 'phone-hotspot' | 'car-hotspot' | 'manual';
-
 /** 扫描结果中的设备信息 */
 export interface ScannedDevice {
   ip: string;
@@ -44,10 +41,6 @@ export interface UseWifiConnectionResult {
   scanDevices: () => Promise<void>;
   /** 断开连接 */
   disconnect: () => Promise<void>;
-  /** 设置网络拓扑类型（保留向后兼容） */
-  setTopology: (topology: WifiTopology) => void;
-  /** 当前网络拓扑类型 */
-  topology: WifiTopology;
   /** 是否正在扫描 */
   isScanning: boolean;
   /** 发现的设备列表 */
@@ -91,6 +84,18 @@ async function attachConnectedAdb(
   );
 }
 
+/** 连接并挂载设备（消除重复调用） */
+async function connectAndAttach(
+  service: IAdbWirelessService,
+  store: AdbStore,
+  targetFull: string,
+  targetHost: string,
+): Promise<void> {
+  await service.connect(targetFull);
+  const adb = await service.createAdb({ serial: targetFull });
+  await attachConnectedAdb(store, adb, targetHost, targetFull);
+}
+
 // 全局默认管理器单例
 let defaultManager: AdbServerManager | null = null;
 function getDefaultManager(): AdbServerManager {
@@ -107,14 +112,9 @@ export function useWifiConnection(options?: UseWifiConnectionOptions): UseWifiCo
 
   const [isScanning, setIsScanning] = useState(false);
   const [discoveredDevices, setDiscoveredDevices] = useState<ScannedDevice[]>([]);
-  const [topology, setTopologyState] = useState<WifiTopology>('phone-hotspot');
 
   const cancelAutoConnect = useCallback(() => {
     cancelRef.current = true;
-  }, []);
-
-  const setTopology = useCallback((t: WifiTopology) => {
-    setTopologyState(t);
   }, []);
 
   /**
@@ -156,12 +156,7 @@ export function useWifiConnection(options?: UseWifiConnectionOptions): UseWifiCo
         store.setConnectionType('wifi');
         store.setError(null);
 
-        // 调用标准 adb connect
-        await service.connect(full);
-
-        // 创建 Adb 实例
-        const adb = await service.createAdb({ serial: full });
-        await attachConnectedAdb(store, adb, host, full);
+        await connectAndAttach(service, store, full, host);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'WiFi 连接失败';
         store.setError(message);
@@ -197,13 +192,21 @@ export function useWifiConnection(options?: UseWifiConnectionOptions): UseWifiCo
         // 1. 调用官方 ADB pair 指令
         await service.pair(pairing.full, code.trim());
 
-        // 2. 配对成功后，连接主调试端口（默认为 5555）
-        const target = connectAddress ? normalizeAddress(connectAddress) : normalizeAddress(pairing.host, 5555);
-        await service.connect(target.full);
+        // 2. 检查宿主是否已经通过 mDNS 自动发现了该设备的连接端口
+        const devices = await service.getDevices().catch(() => []);
+        const matched = devices.find(
+          (d) => d.serial.startsWith(`${pairing.host}:`) && d.state === 'device',
+        );
 
-        // 3. 创建 Adb 实例并挂载
-        const adb = await service.createAdb({ serial: target.full });
-        await attachConnectedAdb(store, adb, target.host, target.full);
+        if (matched) {
+          const adb = await service.createAdb({ serial: matched.serial });
+          await attachConnectedAdb(store, adb, pairing.host, matched.serial);
+          return;
+        }
+
+        // 3. 配对成功后，连接主调试端口（支持显式指定或默认 5555）
+        const target = connectAddress ? normalizeAddress(connectAddress) : normalizeAddress(pairing.host, 5555);
+        await connectAndAttach(service, store, target.full, target.host);
       } catch (error) {
         const message = error instanceof Error ? error.message : '无线配对失败';
         store.setError(message);
@@ -266,9 +269,7 @@ export function useWifiConnection(options?: UseWifiConnectionOptions): UseWifiCo
         onProgress?.({ attempt, maxAttempts, retrying: attempt > 1 });
 
         try {
-          await service.connect(full);
-          const adb = await service.createAdb({ serial: full });
-          await attachConnectedAdb(store, adb, host, full);
+          await connectAndAttach(service, store, full, host);
           return { success: true, cancelled: false };
         } catch {
           if (attempt < maxAttempts) {
@@ -296,8 +297,6 @@ export function useWifiConnection(options?: UseWifiConnectionOptions): UseWifiCo
     connectWithPairing,
     scanDevices,
     disconnect,
-    setTopology,
-    topology,
     isScanning,
     discoveredDevices,
     isConnecting: store.connectionStatus === 'connecting',
