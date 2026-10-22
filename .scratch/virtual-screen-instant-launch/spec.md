@@ -1,10 +1,15 @@
-# Tickets: 虚拟屏应用启动「瞬间打开、无多次跳转」
+# Spec: 虚拟屏应用启动「瞬间打开、无多次跳转」
+
+> 状态：**ready-for-human**（代码侧全部完成，剩余真机验收项见 `issues/`）
+> 标签：`ready-for-human`
+
+---
+
+## Problem Statement
 
 修复虚拟屏中启动/恢复应用时出现的「多次跳转启动动画」。根因（详见诊断对话）：每次启动都重建虚拟屏 + 事后强杀 Launcher（H1，必现）；ROM 忽略 `am --display` 时走「主屏启动→move-to-display」搬运（H2）；`launchFullscreen` 用全局 `pkill` 误杀常驻分屏（路径3 缺陷）；`resumeBackground` 重建屏而非复用（路径4 缺陷）；全局 `pkill -f scrcpy` 造成黑屏停顿与分屏误杀（H3）。
 
 官方 scrcpy 4.0 已原生支持 `--start-app`（等价 `controller.startApp`）与 `--no-vd-system-decorations`（禁用虚拟屏 Launcher），@yume-chan 层均已具备对应能力。本组工单即用官方机制替换 carweb 当前绕路的 `am` + `forceStopPackage` 方案。
-
-Triage 标签：**ready-for-agent**（每条均可由 agent 独立领取）。
 
 ---
 
@@ -23,9 +28,8 @@ Triage 标签：**ready-for-agent**（每条均可由 agent 独立领取）。
 
 **状态：已完成（代码 + 单测）** — 提交于 `master`。两条真机验收因沙箱无真实设备，待实机验证（机制已由单测证明 `vd_system_decorations=false` 正确序列化）。
 
-- [x] 选项层 `AdbScrcpyOptions4_0` 虚拟屏分支注入 `vdSystemDecorations:false`（scrcpy-session.ts:291-304 的 `useVirtualDisplay` 分支；物理屏分支 `{displayId:0}` 不受影响）
-- [ ] 真实设备确认：新建虚拟屏后视频流首帧不是 Launcher 桌面（待实机）
-- [ ] 真实设备确认：空屏（未启动 app）时不渲染 home 帧（仅黑/空）（待实机）
+- [x] 选项层 `AdbScrcpyOptions4_0` 虚拟屏分支注入 `vdSystemDecorations:false`（`scrcpy-session.ts` 的 `useVirtualDisplay` 分支；物理屏分支 `{displayId:0}` 不受影响）
+- [ ] → 真机验收见 `issues/01-*.md`、`issues/02-*.md`
 
 **交付物：**
 - `src/lib/scrcpy-session.ts`：虚拟屏 options 注入 `vdSystemDecorations: false`
@@ -44,7 +48,7 @@ Triage 标签：**ready-for-agent**（每条均可由 agent 独立领取）。
 - [x] 移除 `ScrcpySession` 中 `ensureDisplayId` 死代码（轮询 + 500ms×5 sleep）
 - [x] 单测：断言 `startAppOnDisplay` 调用原生 `controller.startApp`，不再走 adb-commands 的 am 分支
 - [x] 类型修复：`scrcpy4-options.test.ts` 的 `videoCodec: 'h264' as const`（T1 遗留）
-- [ ] 真实设备验证：新屏无 home 闪、目标 app 直接显示、不再发送 `am task move-to-display`（待实机）
+- [ ] → 真机验收见 `issues/03-*.md`
 
 **范围说明（落地偏差，已确认）：** 验收「移除 adb-commands 中 am 分支 + 三个 sleep」**只在主路径成立**。
 `adb-commands.startAppOnDisplay`（am + 策略2 回退 + 三个 sleep）**未删除**，因为 legacy `useScrcpySession` hook（经 `ScrcpyContext` 仍接线）仍引用它。
@@ -59,7 +63,7 @@ Triage 标签：**ready-for-agent**（每条均可由 agent 独立领取）。
 
 **Blocked by:** T1, T2
 
-- [x] 删除会话 `start()`（scrcpy-session.ts）与 legacy hook（useScrcpySession.ts）中的 `forceStopPackage(homePkg)` 调用（Launcher 强杀）
+- [x] 删除会话 `start()`（`scrcpy-session.ts`）与 legacy hook（`useScrcpySession.ts`）中的 `forceStopPackage(homePkg)` 调用（Launcher 强杀）
 - [x] 删除 `adb-commands.startAppOnDisplay` 的 am 分支（含 `am start --display` 直投、策略2「主屏启动 + `am task move-to-display` 搬运」回退、三个 `sleep` 2000/2500/1500ms）+ 其辅助函数（isPackageRunning / getAppDisplayLocations / resolveLauncherComponent / getAppTaskId）+ 局部 `sleep` 辅助
 - [x] 下线 legacy `useScrcpySession` hook 对 am 分支的引用（连同 `startAppOnDisplayFn` 与 `ScrcpyContext.startAppOnDisplay` 字段一并移除；该接口无 UI 消费者，属「接线保留但未调用」的兼容壳）
 - [x] 移除 `scrcpy-session.ts` / `useScrcpySession.ts` 中已无用的 `getDefaultHomePackage` / `forceStopPackage` import（注意：`forceStopPackage` 函数本身保留——`session-manager.ts` 仍用它强杀目标 app）
@@ -89,15 +93,11 @@ Triage 标签：**ready-for-agent**（每条均可由 agent 独立领取）。
    诊断中发现：@yume-chan 的 3_3_3/4_0 options 路径**未暴露 scid**，所有会话默认共用设备端 `localabstract:scrcpy` 隧道；后启动的会话在 `AdbScrcpyReverseConnection.initialize()` 中会 `reverse.remove(localabstract:scrcpy)`，**拆掉先启动会话已建立的隧道** → 先启动者 `AdbScrcpyExitedError`。这正是旧代码不得不用 `killScrcpyServer(pkill)` 先杀光其它会话的根因。
    因此「全屏作为第 3 路并发、常驻分屏不杀」在真机上**物理上不可行**，除非先解决隧道隔离。实现方案：每个 `ScrcpySession.start()` 生成独立 8 位十六进制 `scid`（`generateScid()`），传入 `AdbScrcpyOptions4_0`，使各会话走各自的 `localabstract:scrcpy_<scid>`（连接层 `getSocketName` 已支持 scid，base `serialize()` 自动产出 `scid=<value>`，无需手动 push）。该改为**横切**（launchOnPane/resumeBackground 等所有路径均受益），blast radius 超出 launchFullscreen，但属 T4 验收项「左/右分屏仍正常流」的前提，故在此一并落地。scid 是否被正确接受由单测证明（`scrcpy4-options.test.ts` 断言 `scid=` 序列化、且不重复）；**真机验收待实机**（确认 scrcpy-server.jar 接受 `scid=` 参数，scrcpy 4.0 原生支持）。
 
-2. **「覆盖确认」在 launchFullscreen 路径为 N/A，非缺失。** fullscreen 是叠加在第 3 层的覆盖层，**不是分屏替换**；并发上限（§2.3 = 左+右+全屏）由启动顺序隐式保证（先 `backgroundify` 上一全屏释放 1 名额，再起新全屏，总数恒 ≤ 3），故 launchFullscreen **永远不会覆盖/替换某个分屏**，无需在该路径触发覆盖确认。覆盖确认仍由路径2（fullscreenToPane）的 `PaneSelector` 提示承担，未受影响。
+2. **「覆盖确认」在 launchFullscreen 路径为 N/A，非缺失。** fullscreen 是叠加在第 3 层的覆盖层，**不是分屏替换**；并发上限（左+右+全屏）由启动顺序隐式保证（先 `backgroundify` 上一全屏释放 1 名额，再起新全屏，总数恒 ≤ 3），故 launchFullscreen **永远不会覆盖/替换某个分屏**，无需在该路径触发覆盖确认。覆盖确认仍由路径2（fullscreenToPane）的 `PaneSelector` 提示承担，未受影响。
 
 3. **修正 `fullscreenToDesktop` 情况3 的测试/注释旧假设。** 原测试依赖「launchFullscreen 会 backgroundify 两分屏」的旧行为来构造「两 pane 都占」场景；T4 下该前置不再成立。已改为用 `launchOnPane`×2 + `launchFullscreen` 直接构造「两 pane 都占 + 全屏无 sourcePane」的真实可达场景，并确认情况3 代码（已为 `_backgroundify(fullscreenSessionId)`）与该语义一致。
 
-**待办（真机验收）：**
-- [ ] 真机确认：全屏启动新 app 后左/右分屏画面继续流、不黑屏、不被杀
-- [ ] 真机确认：仅上一全屏被 backgroundify（画面退回常驻虚拟屏、不停流）
-- [ ] 真机确认：scrcpy-server.jar 接受 `scid=` 参数（隧道隔离生效，无 AdbScrcpyExitedError）
-
+- [ ] → 真机验收见 `issues/04-*.md`、`issues/05-*.md`、`issues/06-*.md`
 
 ---
 
@@ -116,7 +116,7 @@ Triage 标签：**ready-for-agent**（每条均可由 agent 独立领取）。
 
 **落地说明（与去重 bug 合并，见 T5.1）：**
 - `ScrcpySession.start(adb, displayConfig?, attachDisplayId?)` 新增可选 `attachDisplayId`：提供时 options 用 `{ displayId: attachDisplayId }` 接管已有虚拟屏，`this.displayId` 直接取该值、不再 `newDisplay`/`getVirtualDisplayId`；PID 追踪与旋转锁定沿用 `useVirtualDisplay`（含 attach 模式）。
-- `resumeBackground` 新增 `target?: 'pane' | 'fullscreen'`：默认 `'pane'`（保留原 §7.4 落点规则）；`'fullscreen'` 强制落全屏覆盖层、复用原 displayId、不抢占 pane。供 `launchFullscreen` 去重路由调用。
+- `resumeBackground` 新增 `target?: 'pane' | 'fullscreen'`：默认 `'pane'`（保留原落点规则）；`'fullscreen'` 强制落全屏覆盖层、复用原 displayId、不抢占 pane。供 `launchFullscreen` 去重路由调用。
 
 ---
 
@@ -147,10 +147,10 @@ Triage 标签：**ready-for-agent**（每条均可由 agent 独立领取）。
 - [x] 移除 `killScrcpyServer` 的全局 `pkill` 实现，或仅保留为兜底
 - [x] 验收：无全局 `pkill -f scrcpy`；单会话销毁不影响其它 streaming 会话
 
-**已落地（提交见 T6 完成 SHA）：**
+**已落地：**
 - `session-manager.ts` `launchOnPane` 移除启动期 `killScrcpyServer(adb)` 全局 pkill（根因：启动右分屏会 `pkill` 掉左分屏 server，即 T6 要消除的「分屏误杀 / H3 黑屏」）。理由：T4 的 scid 隧道隔离已使各会话走独立 `localabstract:scrcpy_<scid>`，旧 server 不再阻塞新会话 socket；孤儿清理由 `useUsbConnection` 在 USB 连接引导时统一执行。
 - `useScrcpySession.ts`（mirror 模式旧单会话路径）`stopScrcpy` 精确化：新增 `serverPidRef`，`startScrcpy` 经 `getScrcpyServerPids` 记录本次 PID；`stopScrcpy` 优先 `killScrcpyByPid(adb, pid)`，`serverPidRef===null` 时降级 `killScrcpyServer(adb, true)` 兜底。复用 T4 PID 追踪样板。
-- `killScrcpyServer` 仅保留为兜底：现仅 3 处调用——`scrcpy-session.ts:747`（null-pid 兜底）、`useScrcpySession.ts`（null-pid 兜底）、`useUsbConnection.ts:24`（连接引导孤儿清理）。正常销毁路径均走 PID 精确 kill。
+- `killScrcpyServer` 仅保留为兜底：现仅 3 处调用——`scrcpy-session.ts`（null-pid 兜底）、`useScrcpySession.ts`（null-pid 兜底）、`useUsbConnection.ts`（连接引导孤儿清理）。正常销毁路径均走 PID 精确 kill。
 
 **偏差 / 备注：**
 - 范围略扩：spec 字面写「统一 `launchOnPane` 等其余路径」，本期同时精确化了 legacy `useScrcpySession.stopScrcpy`（mirror 模式，与 split 互斥）。该路径本就在「销毁路径的全局 pkill」之列，精确化符合 T6「任何会话销毁只杀自身 PID」意图，属合理扩展。
@@ -159,13 +159,13 @@ Triage 标签：**ready-for-agent**（每条均可由 agent 独立领取）。
 
 ---
 
-##  frontier 推进顺序
+## 推进顺序
 
 1. T1（无阻塞，起始）— 已完成 `29b6acf`
 2. T2（依赖 T1）— 已完成 `b4c43a8`
 3. T3（依赖 T1、T2）— 已完成 `c7c94ae`
 4. T4（依赖 T2、T3）— 已完成 `69eb3c5`
-5. T5 + T5.1（依赖 T2、T3）— 已完成（本次提交）
-6. T6（依赖 T4、T5）— 已完成（本次提交）
+5. T5 + T5.1（依赖 T2、T3）— 已完成
+6. T6（依赖 T4、T5）— 已完成
 
-每条工单用 `/implement` 单独领取，工单间清空上下文。
+代码侧全部完成。剩余 6 条**真机验收项**已拆为独立 issue 文件（见 `issues/`），状态均为 `ready-for-human`——需在真实 Android 设备 + 车机浏览器上人工验证。
