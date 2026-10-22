@@ -1,7 +1,7 @@
 # Spec: 工业级纯无线连接（官方 ADB 宿主守护与免物理线配对）
 
-> 状态：**ready-for-agent**  
-> 标签：`ready-for-agent`
+> 状态：**resolved**  
+> 标签：`resolved`
 
 ---
 
