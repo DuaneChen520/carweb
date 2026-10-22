@@ -1,9 +1,12 @@
 # 桥接代理 Go 依赖不可解析，`bridge/` 当前无法构建
 
-Status: ready-for-human
+Status: resolved
 Type: task
 Spec: ../spec.md
 Blocked by: none
+
+> **已废弃并解决**：在架构评审后，确认废除自研 SPAKE2 代理路线，转向官方 ADB 宿主守护进程方案。
+> 后续实现见 `01-adopt-official-adb-host-daemon.md`。
 
 ---
 
