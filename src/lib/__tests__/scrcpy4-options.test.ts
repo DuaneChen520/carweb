@@ -100,3 +100,65 @@ describe('AdbScrcpyOptions4_0 — T4 每会话 scid', () => {
     expect(serialized.some((s) => s.startsWith('scid='))).toBe(false);
   });
 });
+
+/**
+ * 验证 upstream scrcpy 4.0/5.0 特性参数：
+ * 1. audioDup: 'all' 或 自定义 usages 列表（如 'game,voice-communication'）序列化为 audio_dup=<usages> 且带 audio_source=playback
+ * 2. keepActive: true 序列化为 keep_active=true
+ * 3. minSizeAlignment: 8 序列化为 min_size_alignment=8
+ */
+describe('AdbScrcpyOptions4_0 — upstream scrcpy 4.0/5.0 features', () => {
+  it('audioDup="all" 序列化产出 audio_dup=all 与 audio_source=playback', () => {
+    const opts = new AdbScrcpyOptions4_0({
+      ...baseOptions(),
+      audioDup: 'all',
+    });
+    const serialized = opts.serialize();
+    expect(serialized).toContain('audio_dup=all');
+    expect(serialized).toContain('audio_source=playback');
+  });
+
+  it('audioDup 支持自定义逗号分隔 usages（如 game,voice-communication）', () => {
+    const opts = new AdbScrcpyOptions4_0({
+      ...baseOptions(),
+      audioDup: 'game,voice-communication',
+    });
+    const serialized = opts.serialize();
+    expect(serialized).toContain('audio_dup=game,voice-communication');
+    expect(serialized).toContain('audio_source=playback');
+  });
+
+  it('audioDup=false 时不产出 audio_dup 与 audio_source', () => {
+    const opts = new AdbScrcpyOptions4_0({
+      ...baseOptions(),
+      audioDup: false,
+    });
+    const serialized = opts.serialize();
+    expect(serialized.some((s) => s.startsWith('audio_dup'))).toBe(false);
+    expect(serialized.some((s) => s.startsWith('audio_source'))).toBe(false);
+  });
+
+  it('keepActive=true 时序列化包含 keep_active=true', () => {
+    const opts = new AdbScrcpyOptions4_0({
+      ...baseOptions(),
+      keepActive: true,
+    });
+    expect(opts.serialize()).toContain('keep_active=true');
+  });
+
+  it('keepActive=false 时不产出 keep_active', () => {
+    const opts = new AdbScrcpyOptions4_0({
+      ...baseOptions(),
+      keepActive: false,
+    });
+    expect(opts.serialize().some((s) => s.startsWith('keep_active'))).toBe(false);
+  });
+
+  it('minSizeAlignment=8 时序列化包含 min_size_alignment=8', () => {
+    const opts = new AdbScrcpyOptions4_0({
+      ...baseOptions(),
+      minSizeAlignment: 8,
+    });
+    expect(opts.serialize()).toContain('min_size_alignment=8');
+  });
+});

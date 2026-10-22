@@ -193,6 +193,19 @@ export interface StartOptions {
    * 由 SessionManager 改用 "aac" 重试，走本覆盖通道，不改全局默认值。
    */
   audioCodecOverride?: typeof AUDIO_CODEC_FALLBACK;
+  /**
+   * 是否启用 audio-dup 及捕获的 usages 列表（scrcpy 5.0+ 特性）。
+   * - true: 等同于 'all'（抓取包括游戏在内的所有音频 usages，避免静音）；
+   * - false: 不启用 audio-dup；
+   * - string: 自定义 usages 列表，例如 'all'、'game' 或 'game,voice-communication'；
+   * - undefined: 默认不启用（false）。
+   */
+  audioDup?: boolean | string;
+  /**
+   * 是否保持设备处于活跃状态（scrcpy 4.0+ --keep-active 特性）。
+   * 通过定期模拟 userActivity 信号防止手机休眠，不修改设备全局持久休眠设置。
+   */
+  keepActive?: boolean;
 }
 
 export interface SessionState {
@@ -564,20 +577,27 @@ export class ScrcpySession {
                   captureOrientation: new ScrcpyCaptureOrientation(ScrcpyLockOrientation.Unlocked, ScrcpyOrientation.Orient0),
                   displayImePolicy: 'local' as const,
                   flexDisplay: true,
-                  // keepActive: false（2026-08-04 查证后修正，S2-P0-9）：
-                  // - scrcpy 官方无 "client 断开后保留虚拟屏" 选项（keep-display 不存在），
-                  //   虚拟屏随 server 进程退出必然被系统回收——attach 恢复（T5）不可行；
-                  // - 官方 keepActive 仅表示"保持设备唤醒"（userActivity），且 v3 @yume-chan
-                  //   4_0 的 keepActive 字段无序列化逻辑（从未传给 server），设 true 无意义；
-                  // - 显式置 false + attach 失败降级 newDisplay（见 retry 循环），
-                  //   resume 走重建屏路径，稳定可靠（分屏 pane 常驻不受影响）。
-                  keepActive: false,
+                  // keepActive（防休眠）：由 opts.keepActive 控制（默认 false）。
+                  // 官方 4.0+ 支持 --keep-active，周期性发送 userActivity 信号保持设备唤醒，
+                  // 避免修改 Android 系统级休眠设置，断开即自动恢复。
+                  keepActive: opts?.keepActive ?? false,
                   // T1: 禁用虚拟屏系统装饰（状态栏/导航栏/Launcher）。
                   // 关闭后虚拟屏只渲染 app，空屏不出 home 帧，从根上消除
                   // 「新屏首帧是 Launcher 桌面」这一跳（scrcpy --no-vd-system-decorations）。
                   vdSystemDecorations: false,
                 }
-              : { displayId: 0 };
+              : {
+                  displayId: 0,
+                  keepActive: opts?.keepActive ?? false,
+                };
+
+          // audioDup 选项处理：
+          // - opts.audioDup 为 true 时，默认使用 'all'（覆盖所有 usages，如游戏等非媒体应用）
+          // - opts.audioDup 为 string 时直接透传（如 'all'、'game' 等）
+          // - 仅在 audioEnabled 时生效
+          const audioDupValue = audioEnabled
+            ? (opts?.audioDup === true ? 'all' : (opts?.audioDup || false))
+            : false;
 
           return new AdbScrcpyOptions4_0({
             video,
@@ -593,6 +613,7 @@ export class ScrcpySession {
             // parseAudioStreamMetadata 对未知标签回退到同一值。默认 opus。
             // negotiatedAudioCodec 允许专用音频连接在解码失败时改用 aac 重试（ADR-0016 自愈）。
             audioCodec: negotiatedAudioCodec,
+            ...(audioDupValue !== false ? { audioDup: audioDupValue } : {}),
             control,
             // 2026-08-04（S2-P0-10）：移除 stayAwake:true——那是手机场景遗留（防投屏时
             // 手机熄屏）；车机通电常亮不需要。注：曾尝试 cleanup:false 让 server 不删

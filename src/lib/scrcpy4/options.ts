@@ -41,6 +41,15 @@ import { BufferedReadableStream, PushReadableStream } from '@yume-chan/stream-ex
 export const AUDIO_CODEC_FALLBACK: 'opus' | 'aac' | 'flac' | 'raw' = 'opus';
 
 /**
+ * 扩展后的 Options Init 类型：
+ * 在官方 AdbScrcpyOptions4_0.Init 基础上，允许 audioDup 传入 boolean 或 string
+ * （如 'all' 或 'game,voice-communication' 等自定义 usages）。
+ */
+export type Scrcpy4Init = Omit<AdbScrcpyOptions4_0.Init, 'audioDup'> & {
+  audioDup?: boolean | string | undefined;
+};
+
+/**
  * 车机容错版 AdbScrcpyOptions4_0。
  *
  * 继承 v3 官方 AdbScrcpyOptions4_0（原生支持 scrcpy 4.0/4.1），
@@ -52,10 +61,10 @@ export const AUDIO_CODEC_FALLBACK: 'opus' | 'aac' | 'flac' | 'raw' = 'opus';
  * 并把前 4 字节回推到流（它们是真实音频数据）。
  */
 export class AdbScrcpyOptions4_0Tolerant<
-  TInit extends AdbScrcpyOptions4_0.Init = AdbScrcpyOptions4_0.Init,
-> extends AdbScrcpyOptions4_0<TInit> {
+  TInit extends Scrcpy4Init = Scrcpy4Init,
+> extends AdbScrcpyOptions4_0<AdbScrcpyOptions4_0.Init> {
   constructor(init: TInit, clientOptions?: AdbScrcpyClientOptions) {
-    super(init, clientOptions);
+    super(init as unknown as AdbScrcpyOptions4_0.Init, clientOptions);
   }
 
   override async parseAudioStreamMetadata(
