@@ -15,11 +15,11 @@ import { markIntentionalClose } from '@/lib/adb-intent';
 import { forgetDeviceCache } from '@/lib/forget-device-cache';
 
 type OverlayState =
-  | 'auto-connecting'      // 首次尝试中
-  | 'auto-reconnecting'    // 进入重试阶段
-  | 'auto-failed'          // 重试用尽，温和降级
+  | 'auto-connecting' // 首次尝试中
+  | 'auto-reconnecting' // 进入重试阶段
+  | 'auto-failed' // 重试用尽，温和降级
   | 'manual'
-  | 'reconnecting'         // 使用中断开，提示重连
+  | 'reconnecting' // 使用中断开，提示重连
   | 'hidden';
 
 type PinGuardState =
@@ -76,27 +76,32 @@ function App() {
     setDisplayMode(lastDevice.mode);
 
     if (lastDevice.type === 'usb') {
-      usb.tryAutoConnectUsb(
-        lastDevice.id,
-        (p) => {
+      usb
+        .tryAutoConnectUsb(lastDevice.id, (p) => {
           // 进入第二次及以后尝试 → 切到「重试中」态
           if (p.retrying) setOverlayState((prev) => (prev === 'auto-connecting' ? 'auto-reconnecting' : prev));
-        },
-      ).then(({ success, cancelled }) => {
-        if (cancelled) {
-          setOverlayState('manual');
-        } else if (!success) {
-          setOverlayState('auto-failed');
-        }
-        // success 时由下面的「连接成功」effect 接管进入 hidden
-      });
+        })
+        .then(({ success, cancelled }) => {
+          if (cancelled) {
+            setOverlayState('manual');
+          } else if (!success) {
+            setOverlayState('auto-failed');
+          }
+          // success 时由下面的「连接成功」effect 接管进入 hidden
+        });
     } else {
-      // WiFi 自动连接：通过 WebSocket 桥接代理尝试连接已记忆的设备
-      wifi.connectWifi(lastDevice.address).then(() => {
-        // 成功时由下面的「连接成功」effect 接管进入 hidden
-      }).catch(() => {
-        setOverlayState('manual');
-      });
+      // WiFi 自动连接：通过退避重试连接已记忆的设备
+      wifi
+        .tryAutoConnectWifi(lastDevice.address, (p) => {
+          if (p.retrying) setOverlayState((prev) => (prev === 'auto-connecting' ? 'auto-reconnecting' : prev));
+        })
+        .then(({ success, cancelled }) => {
+          if (cancelled) {
+            setOverlayState('manual');
+          } else if (!success) {
+            setOverlayState('auto-failed');
+          }
+        });
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -113,7 +118,7 @@ function App() {
     }
   }, [store.connectionStatus, store.deviceSerial, store.deviceName, overlayState, hasPin, finishConnect]);
 
-  // USB 异常断开（ADB 传输层）：从桌面切到重连提示。
+  // 传输层异常断开（ADB 传输层）：从桌面切到重连提示。
   // 这是路径无关的 ADB-down 信号，覆盖 virtual（DesktopScreen）与 mirror 两条路径。
   useEffect(() => {
     if (store.connectionStatus === 'disconnected' && overlayState === 'hidden') {
@@ -143,51 +148,61 @@ function App() {
     setOverlayState('auto-connecting');
 
     if (lastDevice.type === 'usb') {
-      usb.tryAutoConnectUsb(lastDevice.id, (p) => {
-        if (p.retrying) setOverlayState((prev) => (prev === 'auto-connecting' ? 'auto-reconnecting' : prev));
-      }).then(({ success, cancelled }) => {
-        if (cancelled) {
-          setOverlayState('manual');
-        } else if (!success) {
-          setOverlayState('manual');
-        }
-        // success 时由「连接成功」effect 接管进入 hidden
-      });
+      usb
+        .tryAutoConnectUsb(lastDevice.id, (p) => {
+          if (p.retrying) setOverlayState((prev) => (prev === 'auto-connecting' ? 'auto-reconnecting' : prev));
+        })
+        .then(({ success, cancelled }) => {
+          if (cancelled) {
+            setOverlayState('manual');
+          } else if (!success) {
+            setOverlayState('manual');
+          }
+        });
     } else {
-      wifi.connectWifi(lastDevice.address).then(() => {
-        // 成功时由「连接成功」effect 接管进入 hidden
-      }).catch(() => {
-        setOverlayState('manual');
-      });
+      wifi
+        .tryAutoConnectWifi(lastDevice.address, (p) => {
+          if (p.retrying) setOverlayState((prev) => (prev === 'auto-connecting' ? 'auto-reconnecting' : prev));
+        })
+        .then(({ success, cancelled }) => {
+          if (cancelled) {
+            setOverlayState('manual');
+          } else if (!success) {
+            setOverlayState('manual');
+          }
+        });
     }
   }, [getLastDevice, usb, wifi]);
 
-  const handleConnect = useCallback(async (
-    device: { id: string; name: string; type: 'usb' | 'wifi'; address: string },
-    mode: DisplayMode,
-    shouldRemember: boolean
-  ) => {
-    setDisplayMode(mode);
+  const handleConnect = useCallback(
+    async (
+      device: { id: string; name: string; type: 'usb' | 'wifi'; address: string },
+      mode: DisplayMode,
+      shouldRemember: boolean,
+    ) => {
+      setDisplayMode(mode);
 
-    if (shouldRemember) {
-      remember({
-        id: device.id,
-        serial: device.id,
-        name: device.name,
-        type: device.type,
-        address: device.address,
-        mode,
-        lastConnected: Date.now(),
-      });
-    }
+      if (shouldRemember) {
+        remember({
+          id: device.id,
+          serial: device.id,
+          name: device.name,
+          type: device.type,
+          address: device.address,
+          mode,
+          lastConnected: Date.now(),
+        });
+      }
 
-    if (hasPin(device.id)) {
-      setPinGuard({ type: 'required', deviceId: device.id, deviceName: device.name });
-      return;
-    }
+      if (hasPin(device.id)) {
+        setPinGuard({ type: 'required', deviceId: device.id, deviceName: device.name });
+        return;
+      }
 
-    finishConnect();
-  }, [remember, hasPin, finishConnect]);
+      finishConnect();
+    },
+    [remember, hasPin, finishConnect],
+  );
 
   const handleStop = useCallback(() => {
     setPinGuard({ type: 'none' });
@@ -197,65 +212,69 @@ function App() {
 
   const handleCancelAutoConnect = useCallback(() => {
     usb.cancelAutoConnect();
+    wifi.cancelAutoConnect();
     setOverlayState('manual');
-  }, [usb]);
+  }, [usb, wifi]);
 
   return (
     <ScrcpyProvider>
       <AppPickerProvider>
         <div className="w-full h-dvh bg-surface-base text-content-primary antialiased select-none">
-        {displayMode === 'mirror' ? (
-          // mirror 模式仍使用 VirtualScreen（向后兼容）
-          <VirtualScreen
-            active={overlayState === 'hidden'}
-            displayMode={displayMode}
-            onStop={handleStop}
-          />
-        ) : (
-          // virtual 模式使用分屏桌面（Task 10 集成）
-          overlayState === 'hidden' && (
-            <DesktopScreen onStop={handleStop} />
-          )
-        )}
-        {(overlayState !== 'hidden' || isFading) && (
-          <ConnectionOverlay
-            overlayState={
-              overlayState === 'hidden'
-                ? 'manual'
-                : (overlayState as 'auto-connecting' | 'auto-reconnecting' | 'auto-failed' | 'manual' | 'reconnecting')
-            }
-            displayMode={displayMode}
-            rememberedDevices={devices}
-            onSelectMode={setDisplayMode}
-            onConnect={handleConnect}
-            onForget={forget}
-            onCancelAutoConnect={handleCancelAutoConnect}
-            onReconnect={handleReconnect}
-            fading={isFading}
-          />
-        )}
+          {displayMode === 'mirror' ? (
+            // mirror 模式仍使用 VirtualScreen（向后兼容）
+            <VirtualScreen
+              active={overlayState === 'hidden'}
+              displayMode={displayMode}
+              onStop={handleStop}
+            />
+          ) : (
+            // virtual 模式使用分屏桌面（Task 10 集成）
+            overlayState === 'hidden' && <DesktopScreen onStop={handleStop} />
+          )}
+          {(overlayState !== 'hidden' || isFading) && (
+            <ConnectionOverlay
+              overlayState={
+                overlayState === 'hidden'
+                  ? 'manual'
+                  : (overlayState as
+                      | 'auto-connecting'
+                      | 'auto-reconnecting'
+                      | 'auto-failed'
+                      | 'manual'
+                      | 'reconnecting')
+              }
+              displayMode={displayMode}
+              rememberedDevices={devices}
+              onSelectMode={setDisplayMode}
+              onConnect={handleConnect}
+              onForget={forget}
+              onCancelAutoConnect={handleCancelAutoConnect}
+              onReconnect={handleReconnect}
+              fading={isFading}
+            />
+          )}
 
-        {pinGuard.type === 'required' && (
-          <PinDialog
-            mode="verify"
-            deviceId={pinGuard.deviceId}
-            deviceName={pinGuard.deviceName}
-            hasExistingPin={true}
-            onSuccess={() => {
-              setPinGuard({ type: 'none' });
-              finishConnect();
-            }}
-            onForgot={() => {
-              console.log(`[App] 用户忘记设备（PIN 找回）：deviceId=${pinGuard.deviceId}`);
-              removePin(pinGuard.deviceId);
-              forgetDeviceCache(pinGuard.deviceId);
-              forget(pinGuard.deviceId);
-              store.disconnect();
-              setPinGuard({ type: 'none' });
-            }}
-          />
-        )}
-      </div>
+          {pinGuard.type === 'required' && (
+            <PinDialog
+              mode="verify"
+              deviceId={pinGuard.deviceId}
+              deviceName={pinGuard.deviceName}
+              hasExistingPin={true}
+              onSuccess={() => {
+                setPinGuard({ type: 'none' });
+                finishConnect();
+              }}
+              onForgot={() => {
+                console.log(`[App] 用户忘记设备（PIN 找回）：deviceId=${pinGuard.deviceId}`);
+                removePin(pinGuard.deviceId);
+                forgetDeviceCache(pinGuard.deviceId);
+                forget(pinGuard.deviceId);
+                store.disconnect();
+                setPinGuard({ type: 'none' });
+              }}
+            />
+          )}
+        </div>
       </AppPickerProvider>
     </ScrcpyProvider>
   );

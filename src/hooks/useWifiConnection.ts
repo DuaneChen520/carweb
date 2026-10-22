@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useRef } from 'react';
 import type { Adb } from '@yume-chan/adb';
 import { useAdbStore, type AdbStore } from './useAdbStore';
 import { killScrcpyServer } from '@/lib/adb-commands';
@@ -15,6 +15,12 @@ export interface ScannedDevice {
   port: number;
 }
 
+export interface WifiRetryProgress {
+  attempt: number;
+  maxAttempts: number;
+  retrying: boolean;
+}
+
 export interface UseWifiConnectionOptions {
   /** 允许注入自定义 ADB 服务（用于单元测试与环境隔离） */
   service?: IAdbWirelessService;
@@ -23,6 +29,13 @@ export interface UseWifiConnectionOptions {
 export interface UseWifiConnectionResult {
   /** 连接到指定 IP / IP:端口的 ADB 设备 */
   connectWifi: (address: string) => Promise<void>;
+  /** 自动重试连接已知无线设备（支持退避重试与取消） */
+  tryAutoConnectWifi: (
+    address: string,
+    onProgress?: (p: WifiRetryProgress) => void,
+  ) => Promise<{ success: boolean; cancelled: boolean }>;
+  /** 取消自动重连 */
+  cancelAutoConnect: () => void;
   /** 通过输入配对端口和 6 位配对码进行免线配对并连接 */
   pairAndConnect: (pairingAddress: string, code: string, connectAddress?: string) => Promise<void>;
   /** 通过扫码配对信息连接 */
@@ -90,10 +103,15 @@ function getDefaultManager(): AdbServerManager {
 export function useWifiConnection(options?: UseWifiConnectionOptions): UseWifiConnectionResult {
   const store = useAdbStore();
   const service = options?.service ?? getDefaultManager();
+  const cancelRef = useRef(false);
 
   const [isScanning, setIsScanning] = useState(false);
   const [discoveredDevices, setDiscoveredDevices] = useState<ScannedDevice[]>([]);
   const [topology, setTopologyState] = useState<WifiTopology>('phone-hotspot');
+
+  const cancelAutoConnect = useCallback(() => {
+    cancelRef.current = true;
+  }, []);
 
   const setTopology = useCallback((t: WifiTopology) => {
     setTopologyState(t);
@@ -215,12 +233,65 @@ export function useWifiConnection(options?: UseWifiConnectionOptions): UseWifiCo
     [pairAndConnect, store],
   );
 
+  /**
+   * 尝试自动重试连接无线设备（指数退避并支持取消）
+   */
+  const tryAutoConnectWifi = useCallback(
+    async (
+      address: string,
+      onProgress?: (p: WifiRetryProgress) => void,
+    ): Promise<{ success: boolean; cancelled: boolean }> => {
+      cancelRef.current = false;
+      await store.disconnect();
+
+      store.setConnectionType('wifi');
+      store.setError(null);
+      store.setConnectionStatus('connecting');
+
+      const { host, full } = normalizeAddress(address);
+      if (!isValidIpAddress(host)) {
+        store.setConnectionStatus('idle');
+        return { success: false, cancelled: false };
+      }
+
+      const maxAttempts = 3;
+      const backoffBase = 500;
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        if (cancelRef.current) {
+          store.setConnectionStatus('idle');
+          return { success: false, cancelled: true };
+        }
+
+        onProgress?.({ attempt, maxAttempts, retrying: attempt > 1 });
+
+        try {
+          await service.connect(full);
+          const adb = await service.createAdb({ serial: full });
+          await attachConnectedAdb(store, adb, host, full);
+          return { success: true, cancelled: false };
+        } catch {
+          if (attempt < maxAttempts) {
+            const delay = backoffBase * Math.pow(2, attempt - 1);
+            await new Promise((r) => setTimeout(r, delay));
+          }
+        }
+      }
+
+      store.setConnectionStatus('idle');
+      return { success: false, cancelled: false };
+    },
+    [service, store],
+  );
+
   const disconnect = useCallback(async () => {
     await store.disconnect();
   }, [store]);
 
   return {
     connectWifi,
+    tryAutoConnectWifi,
+    cancelAutoConnect,
     pairAndConnect,
     connectWithPairing,
     scanDevices,

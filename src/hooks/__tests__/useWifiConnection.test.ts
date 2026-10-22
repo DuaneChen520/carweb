@@ -140,4 +140,72 @@ describe('useWifiConnection', () => {
       { ip: '192.168.1.100', port: 5555 },
     ]);
   });
+
+  it('tryAutoConnectWifi 首次即成功直接返回', async () => {
+    const { result } = renderHook(() => useWifiConnection({ service: mockService }));
+    const onProgress = vi.fn();
+
+    let res!: { success: boolean; cancelled: boolean };
+    await act(async () => {
+      res = await result.current.tryAutoConnectWifi('192.168.1.100:5555', onProgress);
+    });
+
+    expect(res).toEqual({ success: true, cancelled: false });
+    expect(mockService.connect).toHaveBeenCalledTimes(1);
+    expect(useAdbStore.getState().connectionStatus).toBe('connected');
+    expect(onProgress).toHaveBeenCalledWith({ attempt: 1, maxAttempts: 3, retrying: false });
+  });
+
+  it('tryAutoConnectWifi 首次失败、第二次重试成功', async () => {
+    vi.mocked(mockService.connect)
+      .mockRejectedValueOnce(new Error('temporarily unreachable'))
+      .mockResolvedValueOnce(undefined);
+
+    const { result } = renderHook(() => useWifiConnection({ service: mockService }));
+    const onProgress = vi.fn();
+
+    let res!: { success: boolean; cancelled: boolean };
+    await act(async () => {
+      res = await result.current.tryAutoConnectWifi('192.168.1.100:5555', onProgress);
+    });
+
+    expect(res).toEqual({ success: true, cancelled: false });
+    expect(mockService.connect).toHaveBeenCalledTimes(2);
+    expect(onProgress).toHaveBeenCalledWith({ attempt: 2, maxAttempts: 3, retrying: true });
+    expect(useAdbStore.getState().connectionStatus).toBe('connected');
+  });
+
+  it('tryAutoConnectWifi 连续失败三次用尽重试温和降级至 idle', async () => {
+    vi.mocked(mockService.connect).mockRejectedValue(new Error('host down'));
+
+    const { result } = renderHook(() => useWifiConnection({ service: mockService }));
+
+    let res!: { success: boolean; cancelled: boolean };
+    await act(async () => {
+      res = await result.current.tryAutoConnectWifi('192.168.1.100:5555');
+    });
+
+    expect(res).toEqual({ success: false, cancelled: false });
+    expect(mockService.connect).toHaveBeenCalledTimes(3);
+    expect(useAdbStore.getState().connectionStatus).toBe('idle');
+  });
+
+  it('tryAutoConnectWifi 中途取消时中止重试', async () => {
+    vi.mocked(mockService.connect).mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+      throw new Error('fail');
+    });
+
+    const { result } = renderHook(() => useWifiConnection({ service: mockService }));
+
+    let promise!: Promise<{ success: boolean; cancelled: boolean }>;
+    act(() => {
+      promise = result.current.tryAutoConnectWifi('192.168.1.100:5555');
+      result.current.cancelAutoConnect();
+    });
+
+    const res = await promise;
+    expect(res).toEqual({ success: false, cancelled: true });
+    expect(useAdbStore.getState().connectionStatus).toBe('idle');
+  });
 });

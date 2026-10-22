@@ -75,4 +75,36 @@ describe('handleAdbDisconnected (docs/adr/0007)', () => {
     expect(useAdbStore.getState().connectionStatus).toBe('disconnected');
     expect(useAdbStore.getState().error).toBe('USB 连接异常断开');
   });
+
+  it('无线连接真实掉线（异常分支） → disconnected + 友好 WiFi 错误文案', () => {
+    const adb = makeFakeAdb();
+    useAdbStore.setState({
+      connectionStatus: 'connected',
+      connectionType: 'wifi',
+      adb,
+      error: null,
+    });
+
+    handleAdbDisconnected(useAdbStore.getState(), adb, new Error('Connection reset by peer'));
+
+    const s = useAdbStore.getState();
+    expect(s.connectionStatus).toBe('disconnected');
+    expect(s.error).toBe('WiFi 信号较弱或网络暂时中断');
+  });
+
+  it('无线连接授权失效 → disconnected + 提示授权已失效或关闭', () => {
+    const adb = makeFakeAdb();
+    useAdbStore.setState({
+      connectionStatus: 'connected',
+      connectionType: 'wifi',
+      adb,
+      error: null,
+    });
+
+    handleAdbDisconnected(useAdbStore.getState(), adb, new Error('device unauthorized'));
+
+    const s = useAdbStore.getState();
+    expect(s.connectionStatus).toBe('disconnected');
+    expect(s.error).toBe('手机端无线调试授权已失效或关闭');
+  });
 });

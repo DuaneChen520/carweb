@@ -16,6 +16,8 @@ import { consumeIntentionalClose } from './adb-intent';
  */
 export function handleAdbDisconnected(store: AdbStore, adb: Adb, error?: unknown): void {
   const intentional = consumeIntentionalClose(adb);
+  const isWifi = store.connectionType === 'wifi';
+  const tag = isWifi ? '[WiFi]' : '[USB]';
 
   // 先清空 adb/设备引用，再置 status：避免「adb 仍非空但连接已死」的窗口，
   // 防止上层在死连接上启动 scrcpy（AdbScrcpyExitedError）。见 2026-07-09 诊断。
@@ -29,13 +31,20 @@ export function handleAdbDisconnected(store: AdbStore, adb: Adb, error?: unknown
   }
 
   if (error !== undefined) {
-    console.warn(
-      '[USB] adb.disconnected rejected — 异常断开:',
-      (error as Error)?.message || error,
-    );
-    store.setError('USB 连接异常断开');
+    const errMsg = (error as Error)?.message || String(error);
+    console.warn(`${tag} adb.disconnected rejected — 异常断开:`, errMsg);
+
+    if (isWifi) {
+      if (/unauthorized|auth|permission/i.test(errMsg)) {
+        store.setError('手机端无线调试授权已失效或关闭');
+      } else {
+        store.setError('WiFi 信号较弱或网络暂时中断');
+      }
+    } else {
+      store.setError('USB 连接异常断开');
+    }
   } else {
-    console.log('[USB] adb.disconnected resolved — 正常断开');
+    console.log(`${tag} adb.disconnected resolved — 正常断开`);
   }
 
   store.setConnectionStatus('disconnected');
