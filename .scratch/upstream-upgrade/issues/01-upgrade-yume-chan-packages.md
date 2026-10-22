@@ -5,9 +5,9 @@ Upstream `@yume-chan/ya-webadb` has released `v3.0.0-beta.4`, containing officia
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** closed
 
-- [ ] Update `@yume-chan/*` dependencies in `package.json` to `3.0.0-beta.4`
-- [ ] Remove `patches/@yume-chan+adb-credential-web+3.0.0-beta.1.patch` and verify clean postinstall
-- [ ] Verify `patches/@yume-chan+adb-daemon-webusb+3.0.0-beta.1.patch` against upstream behavior
-- [ ] Run `npm run test`, `npm run check`, and `npm run lint` with 100% pass rate
+- [x] Update `@yume-chan/*` dependencies in `package.json` to `3.0.0-beta.4`
+- [x] Remove `patches/@yume-chan+adb-credential-web+3.0.0-beta.1.patch` and verify clean postinstall
+- [x] Verify `patches/@yume-chan+adb-daemon-webusb+3.0.0-beta.1.patch` against upstream behavior
+- [x] Run `npm run test`, `npm run check`, and `npm run lint` with 100% pass rate
