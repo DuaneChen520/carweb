@@ -27,7 +27,7 @@ export function NowPlayingCard({ media, estimatedPosition, onControl, onLaunchAp
       if (!cancelled) setIconUrl(url);
     });
     return () => { cancelled = true; };
-  }, [media?.packageName, getAppIcon]);
+  }, [media, getAppIcon]);
 
   // 空状态：未在播放
   if (!media) {

@@ -56,7 +56,7 @@ export function useAppLabels(packages: string[]): Map<string, string> {
       alive = false;
     };
     // key 随包名集合变化重新解析；getCachedAppLabels 来自 context，通常稳定
-  }, [key, getCachedAppLabels]);
+  }, [key, packages, getCachedAppLabels]);
 
   return labels;
 }

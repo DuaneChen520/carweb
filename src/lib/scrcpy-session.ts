@@ -17,8 +17,8 @@ import type { AdbScrcpyClient } from '@yume-chan/adb-scrcpy';
 import { AdbScrcpyExitedError } from '@yume-chan/adb-scrcpy';
 import type { ScrcpyControlMessageWriter, ScrcpyVideoStreamPacket } from '@yume-chan/scrcpy';
 import { ScrcpyNewDisplay, ScrcpyCaptureOrientation, ScrcpyLockOrientation, ScrcpyOrientation, AndroidKeyCode, AndroidKeyEventAction } from '@yume-chan/scrcpy';
-import { FlexDisplayClient, ControllerHealth, AUDIO_CODEC_FALLBACK } from '@/lib/scrcpy4';
-import type { AdbScrcpyOptions4_0 as AdbScrcpyOptions4_0Type } from '@/lib/scrcpy4';
+import { FlexDisplayClient, ControllerHealth, AUDIO_CODEC_FALLBACK, AdbScrcpyOptions4_0 } from '@/lib/scrcpy4';
+type AdbScrcpyOptions4_0Type = AdbScrcpyOptions4_0;
 import type { ControllerHealthState } from '@/lib/scrcpy4';
 import type { Adb } from '@yume-chan/adb';
 import type { WebCodecsVideoDecoder } from '@yume-chan/scrcpy-decoder-webcodecs';
@@ -490,7 +490,7 @@ export class ScrcpySession {
       this.updateState({ isStarting: true, error: null, videoWidth: 0, videoHeight: 0 });
 
       const { AdbScrcpyClient } = await import('@yume-chan/adb-scrcpy');
-      const { AdbScrcpyOptions4_0 } = await import('@/lib/scrcpy4');
+      // AdbScrcpyOptions4_0 is statically imported
       const { ReadableStream } = await import('@yume-chan/stream-extra');
 
       const serverPath = '/data/local/tmp/scrcpy-server.jar';

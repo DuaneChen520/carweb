@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
+  verify-and-build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +27,17 @@ jobs:
 
       - run: npm ci
 
-      - run: npm run build
+      - name: ESLint check
+        run: npm run lint
+
+      - name: TypeScript type check
+        run: npm run check
+
+      - name: Run Vitest tests
+        run: npm run test
+
+      - name: Build production bundle
+        run: npm run build
 
       - run: touch dist/.nojekyll
 
@@ -37,7 +47,7 @@ jobs:
 
   deploy:
     runs-on: ubuntu-latest
-    needs: build
+    needs: verify-and-build
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

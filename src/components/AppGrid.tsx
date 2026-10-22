@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { AppIcon } from './AppIcon';
 import { useScrcpyActions } from '@/contexts/ScrcpyContext';
 import { useAdbStore } from '@/hooks/useAdbStore';
@@ -55,27 +55,41 @@ export const AppGrid = forwardRef<AppGridHandle, AppGridProps>(function AppGrid(
     refresh();
   }, [refresh, appListVersion]);
 
-  // 用 sortApps 做三段排序（置顶>常用>其他）
-  const allPkgs = deviceApps.map((a) => a.packageName);
-  const pinned = new Map<string, number>();
-  const counts = new Map<string, { localCount: number; dexBaseline: number }>();
-  for (const a of deviceApps) {
-    if (a.pinned) pinned.set(a.packageName, a.pinOrder);
-    counts.set(a.packageName, { localCount: a.localCount, dexBaseline: a.launchCount });
-  }
-  const sortedPkgs = sortApps(allPkgs, pinned, counts);
-  const pinnedMap = new Map<string, boolean>();
-  for (const a of deviceApps) pinnedMap.set(a.packageName, a.pinned);
+  // 搜索关键字防抖（150ms），避免键盘连续敲击高频重算过滤
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery((searchText ?? '').toLowerCase().trim());
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [searchText]);
 
-  // 搜索过滤（包名或已缓存标签），可选
-  const query = (searchText ?? '').toLowerCase().trim();
-  const filteredPkgs = query
-    ? sortedPkgs.filter((pkg) => {
-        if (pkg.toLowerCase().includes(query)) return true;
-        const label = labels.get(pkg) || '';
-        return label.toLowerCase().includes(query);
-      })
-    : sortedPkgs;
+  // 用 sortApps 做三段排序（置顶>常用>其他），使用 useMemo 缓存避免无关渲染重计算
+  const { sortedPkgs, pinnedMap } = useMemo(() => {
+    const allPkgs = deviceApps.map((a) => a.packageName);
+    const pinned = new Map<string, number>();
+    const counts = new Map<string, { localCount: number; dexBaseline: number }>();
+    const pMap = new Map<string, boolean>();
+    for (const a of deviceApps) {
+      if (a.pinned) pinned.set(a.packageName, a.pinOrder);
+      counts.set(a.packageName, { localCount: a.localCount, dexBaseline: a.launchCount });
+      pMap.set(a.packageName, a.pinned);
+    }
+    return {
+      sortedPkgs: sortApps(allPkgs, pinned, counts),
+      pinnedMap: pMap,
+    };
+  }, [deviceApps]);
+
+  // 搜索过滤（包名或已缓存标签），使用防抖后的 query 与 useMemo 隔离
+  const filteredPkgs = useMemo(() => {
+    if (!debouncedQuery) return sortedPkgs;
+    return sortedPkgs.filter((pkg) => {
+      if (pkg.toLowerCase().includes(debouncedQuery)) return true;
+      const label = labels.get(pkg) || '';
+      return label.toLowerCase().includes(debouncedQuery);
+    });
+  }, [sortedPkgs, debouncedQuery, labels]);
 
   // 计算每页容量（4 列 × 行数）
   const [perPage, setPerPage] = useState(12);

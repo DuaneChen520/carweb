@@ -276,6 +276,11 @@ export function useScrcpySession() {
     setAudioState((prev) => ({ ...prev, muted }));
   }, []);
 
+  const startScrcpyRef = useRef(startScrcpy);
+  startScrcpyRef.current = startScrcpy;
+  const stopScrcpyRef = useRef(stopScrcpy);
+  stopScrcpyRef.current = stopScrcpy;
+
   // 链路监督（LinkSupervisor）：统一 control-socket 健康、ADB 链路存活与会话级重连。
   // 取代原先散落的 reconnectAttemptRef / MAX_RECONNECT_ATTEMPTS / DEAD→reconnect effect。
   useEffect(() => {
@@ -284,9 +289,9 @@ export function useScrcpySession() {
         const adb = adbRef.current;
         const canvas = canvasRef.current;
         if (!adb || !canvas) throw new Error('reconnect: adb/canvas 不可用');
-        await stopScrcpy();
+        await stopScrcpyRef.current();
         // 复用初始 displayConfig，避免虚拟屏会话重连后退回镜像模式
-        await startScrcpy(adb, canvas, displayConfigRef.current);
+        await startScrcpyRef.current(adb, canvas, displayConfigRef.current);
       },
       maxReconnectAttempts: 3,
       backoffBaseMs: 500,

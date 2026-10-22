@@ -62,7 +62,7 @@ export function VirtualScreen({ active = false, displayMode = 'virtual', onStop 
 
     resizeObserver.observe(container);
     return () => resizeObserver.disconnect();
-  }, [useMirrorMode]);
+  }, [useMirrorMode, flexClientRef]);
 
 const currentPreset = RESOLUTION_PRESETS.find(p => p.key === resolutionPreset)!;
 const dpr = window.devicePixelRatio || 1;
