@@ -32,7 +32,6 @@ import { SplitPane } from './SplitPane';
 import { FullscreenOverlay } from './FullscreenOverlay';
 import { PaneDropdown } from './PaneDropdown';
 import { useSessionManager } from '@/lib/session-manager';
-import type { DisplayConfig } from '@/lib/scrcpy-session';
 
 interface DesktopShellProps {
   /** 侧边栏内容（ControlSidebar，Task 8 改造后注入） */
@@ -43,8 +42,6 @@ interface DesktopShellProps {
   onOpenAppPicker?: (pane: 'left' | 'right') => void;
   /** 切换 pane 应用回调（弹应用选择器 pane 模式） */
   onSwitchPaneApp?: (pane: 'left' | 'right') => void;
-  /** 显示配置（由 App.tsx 传入，用于 paneToFullscreen 等） */
-  displayConfig: DisplayConfig;
 }
 
 export function DesktopShell({
@@ -52,7 +49,6 @@ export function DesktopShell({
   activityManagerPanel,
   onOpenAppPicker,
   onSwitchPaneApp,
-  displayConfig,
 }: DesktopShellProps) {
   const paneLeft = useSessionManager((s) => s.paneLeft);
   const paneRight = useSessionManager((s) => s.paneRight);
@@ -121,7 +117,7 @@ export function DesktopShell({
 
         {/* 全屏覆盖层：覆盖 DesktopArea，不遮侧边栏（Task 6）
             FullscreenOverlay 内置 Canvas Reparenting，自动管理 canvas 移动 */}
-        <FullscreenOverlay displayConfig={displayConfig} />
+        <FullscreenOverlay />
 
         {/* 活动管理浮窗（fixed 定位，可覆盖整个区域，Task 7） */}
         {activityManagerPanel}

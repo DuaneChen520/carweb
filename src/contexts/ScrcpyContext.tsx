@@ -9,7 +9,7 @@ import type { FlexDisplayClient } from '@/lib/scrcpy4';
 // Context 1: 稳定回调（Actions）—— 引用永不变，消费者零重渲染成本
 // ──────────────────────────────────────────────
 interface ScrcpyActionsValue {
-  startScrcpy: (adb: Adb, canvas: HTMLCanvasElement, displayConfig?: DisplayConfig, setCanvasSize?: (w: number, h: number) => void) => Promise<void>;
+  startScrcpy: (adb: Adb, canvas: HTMLCanvasElement, displayConfig?: DisplayConfig) => Promise<void>;
   stopScrcpy: () => Promise<void>;
   injectTouch: (message: {
     action: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;

@@ -24,16 +24,13 @@ import { useSessionManager } from '@/lib/session-manager';
 import { FullscreenDropdown } from './FullscreenDropdown';
 import { useCanvasPointerInput } from '@/hooks/scrcpy/useCanvasPointerInput';
 import { AppTransitionPlaceholder } from './AppTransitionPlaceholder';
-import type { DisplayConfig } from '@/lib/scrcpy-session';
 
 interface FullscreenOverlayProps {
-  /** 显示配置（保留接口，当前由 ResizeObserver 动态调整） */
-  displayConfig?: DisplayConfig;
   /** 分辨率缩放系数，默认 1.0 */
   resizeScale?: number;
 }
 
-export function FullscreenOverlay({ displayConfig, resizeScale = 1.0 }: FullscreenOverlayProps) {
+export function FullscreenOverlay({ resizeScale = 1.0 }: FullscreenOverlayProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const flexClientRef = useRef<import('@/lib/scrcpy4').FlexDisplayClient | null>(null);
   const lastSizeRef = useRef({ width: 0, height: 0 });

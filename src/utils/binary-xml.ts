@@ -2,9 +2,7 @@ const ANDROID_NAMESPACE_URI = 'http://schemas.android.com/apk/res/android';
 
 const CHUNK_STRING_POOL = 0x0001;
 const CHUNK_XML_START_NAMESPACE = 0x0100;
-const CHUNK_XML_END_NAMESPACE = 0x0101;
 const CHUNK_XML_START_TAG = 0x0102;
-const CHUNK_XML_END_TAG = 0x0103;
 
 const TYPE_REFERENCE = 0x01;
 const TYPE_STRING = 0x03;
@@ -15,12 +13,9 @@ interface StringPool {
 }
 
 function readStringPool(data: DataView, offset: number): StringPool {
-  const chunkSize = data.getUint32(offset + 4, true);
   const stringCount = data.getUint32(offset + 8, true);
-  const styleCount = data.getUint32(offset + 12, true);
   const flags = data.getUint32(offset + 16, true);
   const stringsStart = data.getUint32(offset + 20, true);
-  const stylesStart = data.getUint32(offset + 24, true);
   const isUtf8 = (flags & 0x0100) !== 0;
 
   const stringOffsets: number[] = [];
@@ -59,15 +54,7 @@ function readStringPool(data: DataView, offset: number): StringPool {
       strings.push(new TextDecoder('utf-8').decode(raw));
     } else {
       const lenByte = data.getUint16(pos, true);
-      let strLen: number;
-      let dataOffset: number;
-      if ((lenByte & 0x8000) !== 0) {
-        strLen = ((lenByte & 0x7fff) << 16) | data.getUint16(pos + 2, true);
-        dataOffset = 4;
-      } else {
-        strLen = lenByte;
-        dataOffset = 2;
-      }
+      const dataOffset = (lenByte & 0x8000) !== 0 ? 4 : 2;
       const nullTermPos = pos + dataOffset;
       let end = nullTermPos;
       while (end + 1 < data.byteLength && (data.getUint16(end, true) !== 0)) end += 2;
@@ -78,29 +65,6 @@ function readStringPool(data: DataView, offset: number): StringPool {
 
   return { strings, isUtf8 };
 }
-
-interface AXMLAttribute {
-  namespace: string | null;
-  name: string;
-  valueString: string | null;
-  valueType: number;
-  valueData: number;
-}
-
-interface AXMLStartTag {
-  type: 'start';
-  namespace: string | null;
-  name: string;
-  attributes: AXMLAttribute[];
-}
-
-interface AXMLStartNamespace {
-  type: 'namespace';
-  prefix: string;
-  uri: string;
-}
-
-type AXMLNode = AXMLStartNamespace | AXMLStartTag;
 
 export interface ParsedManifest {
   label: { isString: true; value: string } | { isString: false; value: number } | null;
@@ -139,11 +103,9 @@ export function parseAndroidManifest(buffer: ArrayBuffer): ParsedManifest {
         namespaceMap.set(uriIdx, stringPool.strings[uriIdx]!);
       }
     } else if (chunkType === CHUNK_XML_START_TAG && stringPool) {
-      const nsIdx = data.getInt32(offset + 12, true);
       const nameIdx = data.getInt32(offset + 16, true);
       const attrCount = data.getUint16(offset + 20, true);
 
-      const tagNamespace = nsIdx >= 0 && nsIdx < stringPool.strings.length ? stringPool.strings[nsIdx] : null;
       const tagName = nameIdx >= 0 && nameIdx < stringPool.strings.length ? stringPool.strings[nameIdx] : '';
 
       if (tagName === 'application') {

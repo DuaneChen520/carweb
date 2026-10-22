@@ -59,7 +59,7 @@ export function PaneSelector({ sourcePane, leftApp, rightApp, onSelect, onCancel
     }
   };
 
-  const renderPaneOption = (pane: PaneSlot, app: AppInstance | null) => {
+  const renderPaneOption = (pane: PaneSlot) => {
     const isSource = pane === sourcePane;
     const displayName = pane === 'left' ? leftName : rightName;
 
@@ -122,8 +122,8 @@ export function PaneSelector({ sourcePane, leftApp, rightApp, onSelect, onCancel
   return (
     <div className="p-2 min-w-[200px]">
       <div className="text-xs text-slate-400 px-3 py-1 mb-1">选择分屏位置</div>
-      {renderPaneOption('left', leftApp)}
-      {renderPaneOption('right', rightApp)}
+      {renderPaneOption('left')}
+      {renderPaneOption('right')}
       <div className="mt-1 pt-1 border-t border-slate-100">
         <button
           onClick={onCancel}

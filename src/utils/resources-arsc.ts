@@ -9,7 +9,6 @@ const VALUE_TYPE_REFERENCE = 0x01;
 
 function readArscStringPool(data: DataView, offset: number): string[] {
   const stringCount = data.getUint32(offset + 8, true);
-  const styleCount = data.getUint32(offset + 12, true);
   const flags = data.getUint32(offset + 16, true);
   const stringsStart = data.getUint32(offset + 20, true);
   const isUtf8 = (flags & 0x0100) !== 0;

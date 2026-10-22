@@ -105,7 +105,7 @@ export function createAdbDaemonConnectionFromWebSocket(
         ws.close();
       }
     },
-    abort: (_reason) => {
+    abort: () => {
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close();
       }

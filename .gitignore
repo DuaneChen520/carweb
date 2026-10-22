@@ -31,3 +31,9 @@ dist-ssr
 
 # WorkBuddy agent workspace memory (local only, never commit)
 .workbuddy/
+
+# Superpowers agent workspace artifacts (local only, never commit)
+.superpowers/
+
+# Qoder harness artifacts (local only, never commit)
+.qoder/

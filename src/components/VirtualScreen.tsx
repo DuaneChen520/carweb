@@ -103,18 +103,10 @@ currentPresetRef.current = currentPreset;
         hasStartedRef.current = true;
         console.log('[VirtualScreen] 首次启动 scrcpy');
 
-        // setCanvasSize 回调：将解码帧尺寸设置到 canvas
-        const setCanvasSize = (w: number, h: number) => {
-          if (canvasRef.current) {
-            canvasRef.current.width = w;
-            canvasRef.current.height = h;
-          }
-        };
-
         if (useMirrorMode) {
-          startScrcpy(adb, canvas, undefined, setCanvasSize);
+          startScrcpy(adb, canvas, undefined);
         } else {
-          startScrcpy(adb, canvas, displayConfig, setCanvasSize);
+          startScrcpy(adb, canvas, displayConfig);
         }
         initialStartDoneRef.current = true;
       }, 200);

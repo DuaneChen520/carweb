@@ -47,8 +47,6 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
   // 无线连接状态
   const [showQrInput, setShowQrInput] = useState(false);
   const [qrCodeText, setQrCodeText] = useState('');
-  const [pairingCode, setPairingCode] = useState('');
-  const [showPairingInput, setShowPairingInput] = useState(false);
 
   const usb = useUsbConnection();
   const wifi = useWifiConnection();
@@ -443,7 +441,6 @@ export function ConnectionOverlay({ overlayState, displayMode, rememberedDevices
                   <button
                     onClick={() => {
                       setShowQrInput(!showQrInput);
-                      setShowPairingInput(false);
                     }}
                     className="w-full py-2 text-sm text-accent-400 hover:text-accent-300 transition-colors flex items-center justify-center gap-2"
                   >

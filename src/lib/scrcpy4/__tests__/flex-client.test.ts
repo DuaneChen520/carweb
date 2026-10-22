@@ -5,10 +5,9 @@ describe('FlexDisplayClient', () => {
   let sendResize: ReturnType<typeof vi.fn>;
   let setCanvasSize: ReturnType<typeof vi.fn>;
   let client: FlexDisplayClient;
-  let timers: ReturnType<typeof vi.useFakeTimers>;
 
   beforeEach(() => {
-    timers = vi.useFakeTimers();
+    vi.useFakeTimers();
     sendResize = vi.fn().mockResolvedValue(undefined);
     setCanvasSize = vi.fn();
     client = new FlexDisplayClient({

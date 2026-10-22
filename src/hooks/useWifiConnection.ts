@@ -30,34 +30,29 @@ async function connectOnce(
   store: AdbStore,
   device: AdbDaemonWebSocketDevice,
 ): Promise<void> {
-  let conn: Awaited<ReturnType<typeof device.connect>> | null = null;
-  try {
-    conn = await device.connect();
+  const conn = await device.connect();
 
-    const credentialManager = new AdbWebCryptoCredentialManager(
-      new TangoIndexedDbStorage(),
-      'carweb-adb-key',
-    );
-    const transport = await adbDaemonAuthenticate({
-      serial: device.serial,
-      connection: conn,
-      credentialManager,
-    });
-    const adb = new Adb(transport);
-    await killScrcpyServer(adb, true);
+  const credentialManager = new AdbWebCryptoCredentialManager(
+    new TangoIndexedDbStorage(),
+    'carweb-adb-key',
+  );
+  const transport = await adbDaemonAuthenticate({
+    serial: device.serial,
+    connection: conn,
+    credentialManager,
+  });
+  const adb = new Adb(transport);
+  await killScrcpyServer(adb, true);
 
-    store.setAdb(adb);
-    store.setDeviceInfo(device.name, device.serial);
-    store.setWifiAddress(device.targetHost);
-    store.setConnectionStatus('connected');
+  store.setAdb(adb);
+  store.setDeviceInfo(device.name, device.serial);
+  store.setWifiAddress(device.targetHost);
+  store.setConnectionStatus('connected');
 
-    adb.disconnected.then(
-      () => handleAdbDisconnected(store, adb),
-      (error) => handleAdbDisconnected(store, adb, error),
-    );
-  } catch (error) {
-    throw error;
-  }
+  adb.disconnected.then(
+    () => handleAdbDisconnected(store, adb),
+    (error) => handleAdbDisconnected(store, adb, error),
+  );
 }
 
 export interface UseWifiConnectionResult {
@@ -329,7 +324,7 @@ async function getLocalSubnet(): Promise<string | null> {
  * 输出为固定长度（256 字节 = 512 十六进制字符，因为 RSA-2048）。
  */
 function exportPublicKeyHex(key: { n: bigint }): string {
-  let hex = key.n.toString(16);
+  const hex = key.n.toString(16);
   // 补齐到 512 字符（256 字节）
   return hex.padStart(512, '0');
 }

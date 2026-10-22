@@ -283,7 +283,6 @@ export function DesktopScreen({ onStop }: DesktopScreenProps) {
         }
         onOpenAppPicker={(pane) => openAppPicker({ mode: 'pane', targetPane: pane, onLaunch: (pkg) => { void handleLaunchOnPane(pkg, pane); } })}
         onSwitchPaneApp={(pane) => openAppPicker({ mode: 'pane', targetPane: pane, onLaunch: (pkg) => { void handleLaunchOnPane(pkg, pane); } })}
-        displayConfig={buildFullscreenDisplayConfig()}
       />
 
       {/* 活动进程管理浮窗 */}

@@ -98,7 +98,7 @@ export function useScrcpySession() {
 
   const appManager = useAppManager();
 
-  const startScrcpy = useCallback(async (adb: Adb, canvas: HTMLCanvasElement, displayConfig?: DisplayConfig, _setCanvasSize?: (w: number, h: number) => void) => {
+  const startScrcpy = useCallback(async (adb: Adb, canvas: HTMLCanvasElement, displayConfig?: DisplayConfig) => {
     // 保存 canvas 与显示配置供自动重连使用（修复重连退回镜像模式）
     canvasRef.current = canvas;
     displayConfigRef.current = displayConfig;

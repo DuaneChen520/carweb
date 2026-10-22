@@ -1,15 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { AdbCommand, AdbPacket, AdbPacketHeader } from '@yume-chan/adb';
+import { AdbCommand, AdbPacket } from '@yume-chan/adb';
 import { Consumable } from '@yume-chan/stream-extra';
 import { createAdbDaemonConnectionFromWebSocket } from '../websocket-stream';
-
-// 模拟的 Event 对象（Node.js 没有 DOM Event）
-class MockEvent {
-  type: string;
-  constructor(type: string) {
-    this.type = type;
-  }
-}
 
 // 模拟 WebSocket 实现
 class MockWebSocket {
@@ -17,7 +9,7 @@ class MockWebSocket {
   public readyState: number = 0; // CONNECTING
   public binaryType: string = 'blob';
 
-  private listeners: Record<string, Array<(...args: any[]) => void>> = {
+  private listeners: Record<string, Array<(...args: unknown[]) => void>> = {
     open: [],
     message: [],
     error: [],
@@ -37,12 +29,12 @@ class MockWebSocket {
     this.readyState = MockWebSocket.OPEN;
   }
 
-  addEventListener(event: string, handler: (...args: any[]) => void) {
+  addEventListener(event: string, handler: (...args: unknown[]) => void) {
     if (!this.listeners[event]) this.listeners[event] = [];
     this.listeners[event].push(handler);
   }
 
-  removeEventListener(event: string, handler: (...args: any[]) => void) {
+  removeEventListener(event: string, handler: (...args: unknown[]) => void) {
     if (this.listeners[event]) {
       this.listeners[event] = this.listeners[event].filter(h => h !== handler);
     }
@@ -71,7 +63,7 @@ class MockWebSocket {
     this.emit('message', { data: new MockBlob(data) });
   }
 
-  private emit(event: string, data: any) {
+  private emit(event: string, data: unknown) {
     this.listeners[event]?.forEach(h => h(data));
   }
 }
@@ -89,7 +81,7 @@ class MockBlob {
 
 describe('createAdbDaemonConnectionFromWebSocket', () => {
   beforeEach(() => {
-    vi.stubGlobal('WebSocket', MockWebSocket as any);
+    vi.stubGlobal('WebSocket', MockWebSocket as unknown as typeof WebSocket);
   });
 
   afterEach(() => {
@@ -97,16 +89,16 @@ describe('createAdbDaemonConnectionFromWebSocket', () => {
   });
 
   it('返回 readable 和 writable 流', async () => {
-    const ws = new MockWebSocket('ws://localhost:8080/test') as any;
-    const conn = createAdbDaemonConnectionFromWebSocket(ws);
+    const ws = new MockWebSocket('ws://localhost:8080/test');
+    const conn = createAdbDaemonConnectionFromWebSocket(ws as unknown as WebSocket);
 
     expect(conn.readable).toBeDefined();
     expect(conn.writable).toBeDefined();
   });
 
   it('从 WebSocket 消息中解析 ADB 数据包', async () => {
-    const ws = new MockWebSocket('ws://localhost:8080/test') as any;
-    const conn = createAdbDaemonConnectionFromWebSocket(ws);
+    const ws = new MockWebSocket('ws://localhost:8080/test');
+    const conn = createAdbDaemonConnectionFromWebSocket(ws as unknown as WebSocket);
 
     // 先获取 reader（确保 PushReadableStream 的 controller 已激活）
     const reader = conn.readable.getReader();
@@ -125,7 +117,7 @@ describe('createAdbDaemonConnectionFromWebSocket', () => {
     const packetBytes = AdbPacket.serialize(packetInit);
 
     // 模拟收到消息
-    (ws as any).mockReceiveMessage(packetBytes);
+    ws.mockReceiveMessage(packetBytes);
 
     const result = await reader.read();
 
@@ -136,8 +128,8 @@ describe('createAdbDaemonConnectionFromWebSocket', () => {
   });
 
   it('跨消息边界累积并解析 ADB 包', async () => {
-    const ws = new MockWebSocket('ws://localhost:8080/test') as any;
-    const conn = createAdbDaemonConnectionFromWebSocket(ws);
+    const ws = new MockWebSocket('ws://localhost:8080/test');
+    const conn = createAdbDaemonConnectionFromWebSocket(ws as unknown as WebSocket);
 
     // 先获取 reader（确保 PushReadableStream 的 controller 已激活）
     const reader = conn.readable.getReader();
@@ -160,9 +152,9 @@ describe('createAdbDaemonConnectionFromWebSocket', () => {
     const header = packetBytes.slice(0, 24);
     const body = packetBytes.slice(24);
 
-    (ws as any).mockReceiveMessage(header);
+    ws.mockReceiveMessage(header);
     await new Promise((resolve) => setTimeout(resolve, 5));
-    (ws as any).mockReceiveMessage(body);
+    ws.mockReceiveMessage(body);
 
     const result = await reader.read();
 
@@ -173,8 +165,8 @@ describe('createAdbDaemonConnectionFromWebSocket', () => {
   });
 
   it('多个 ADB 包在同一个消息中', async () => {
-    const ws = new MockWebSocket('ws://localhost:8080/test') as any;
-    const conn = createAdbDaemonConnectionFromWebSocket(ws);
+    const ws = new MockWebSocket('ws://localhost:8080/test');
+    const conn = createAdbDaemonConnectionFromWebSocket(ws as unknown as WebSocket);
 
     // 先获取 reader（确保 PushReadableStream 的 controller 已激活）
     const reader = conn.readable.getReader();
@@ -208,7 +200,7 @@ describe('createAdbDaemonConnectionFromWebSocket', () => {
     combined.set(bytes1);
     combined.set(bytes2, bytes1.length);
 
-    (ws as any).mockReceiveMessage(combined);
+    ws.mockReceiveMessage(combined);
 
     const result1 = await reader.read();
     const result2 = await reader.read();
@@ -218,8 +210,8 @@ describe('createAdbDaemonConnectionFromWebSocket', () => {
   });
 
   it('writable 流发送 AdbPacketInit 数据', async () => {
-    const ws = new MockWebSocket('ws://localhost:8080/test') as any;
-    const conn = createAdbDaemonConnectionFromWebSocket(ws);
+    const ws = new MockWebSocket('ws://localhost:8080/test');
+    const conn = createAdbDaemonConnectionFromWebSocket(ws as unknown as WebSocket);
 
     await new Promise((resolve) => setTimeout(resolve, 10));
 
